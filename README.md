@@ -30,13 +30,27 @@ source .venv/bin/activate
 
 ### 3. 서버 실행
 
+#### 3.1. Gunicorn 설치
+
+아래 명령어로 Gunicorn을 설치하세요.
+
 ```bash
-python app.py
+pip install gunicorn
 ```
 
-- 기본 접속: [http://127.0.0.1:5000](http://127.0.0.1:5000)
-
 ---
+
+#### 3.2. Gunicorn으로 서버 실행
+
+WhisperServer의 진입점(app.py)에서 Flask 인스턴스가 `app`으로 선언되어 있으므로 아래와 같이 실행합니다:
+
+```bash
+gunicorn -w 2 -b 0.0.0.0:8000 app:app
+```
+
+- `-w 2` : 워커 프로세스 수(서버 사양에 따라 조절)
+- `-b 0.0.0.0:8000` : 모든 IP에서 8000 포트로 서비스
+- `app:app` : app.py의 Flask 인스턴스(app)
 
 ## 프로젝트 구조
 
