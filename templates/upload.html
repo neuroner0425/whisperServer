@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container">
+    <div class="nav">
+        <a href="/">홈</a>
+        <a href="{{ url_for('job_list') }}">작업 목록</a>
+    </div>
+    <h2>음성/영상 파일 업로드(STT)</h2>
+    <form method="post" enctype="multipart/form-data">
+        <input type="file" name="file" accept="audio/*,video/*" required>
+        <input type="text" name="input_name" placeholder="저장할 파일명 (선택)" style="width:100%;padding:10px;border-radius:8px;border:1px solid #ddd;">
+        <input type="submit" value="업로드">
+    </form>
+    <div style="color:#888; font-size:0.98em; margin-top:10px; text-align:center;">파일명을 입력하지 않으면 원본 파일명으로 저장됩니다.</div>
+</div>
+{% endblock %}

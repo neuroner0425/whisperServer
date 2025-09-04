@@ -1,0 +1,120 @@
+body {
+    background: #f6f8fa;
+    font-family: 'Noto Sans KR', sans-serif;
+    margin: 0;
+    padding: 0;
+}
+.container {
+    max-width: 700px;
+    margin: 60px auto;
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 4px 24px #0001;
+    padding: 32px 28px;
+}
+h1, h2 {
+    text-align: center;
+    color: #2563eb;
+    margin-bottom: 32px;
+}
+.nav {
+    margin-bottom: 24px;
+    text-align: center;
+}
+.nav a {
+    margin: 0 10px;
+    color: #2563eb;
+    text-decoration: none;
+    font-weight: 500;
+    font-size: 1.1em;
+    transition: color 0.2s;
+}
+.nav a:hover {
+    text-decoration: underline;
+    color: #1e40af;
+}
+form {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    align-items: center;
+}
+input[type="file"] {
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    width: 100%;
+    background: #f9fafb;
+}
+input[type="submit"] {
+    background: #2563eb;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 12px 0;
+    font-size: 1.1em;
+    cursor: pointer;
+    width: 100%;
+    transition: background 0.2s;
+}
+input[type="submit"]:hover {
+    background: #1e40af;
+}
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 18px;
+}
+th, td {
+    padding: 10px 8px;
+    border-bottom: 1px solid #eee;
+    text-align: left;
+}
+th {
+    background: #f3f4f6;
+    color: #2563eb;
+}
+tr:hover {
+    background: #f9fafb;
+}
+.status {
+    font-weight: bold;
+}
+.result-text {
+    background: #f3f4f6;
+    border-radius: 8px;
+    padding: 18px;
+    font-size: 1.08em;
+    color: #222;
+    word-break: break-all;
+    white-space: pre-wrap;
+    max-height: 600px;
+    overflow-y: auto;
+}
+.download-btn {
+    display: inline-block;
+    margin-top: 18px;
+    background: #10b981;
+    color: #fff;
+    padding: 12px 24px;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: 500;
+    transition: background 0.2s;
+}
+.download-btn:hover {
+    background: #059669;
+}
+.loader {
+    border: 6px solid #f3f3f3;
+    border-top: 6px solid #2563eb;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+    margin: 24px auto;
+}
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container">
+    <div class="nav">
+        <a href="/">홈</a>
+        <a href="{{ url_for('upload_file') }}">파일 업로드</a>
+        <a href="{{ url_for('job_list') }}">작업 목록</a>
+    </div>
+    <h2>작업 결과</h2>
+    <div class="info">파일명: {{ job['filename'] }}</div>
+    <div class="info">상태: {{ job['status'] }}</div>
+    <div class="result-text">{{ text|safe }}</div>
+    <a class="download-btn" href="{{ url_for('download_txt', job_id=job_id) }}">txt 다운로드</a>
+</div>
+{% endblock %}
