@@ -38,8 +38,6 @@ source .venv/bin/activate
 pip install gunicorn
 ```
 
----
-
 #### 3.2. Gunicorn으로 서버 실행
 
 WhisperServer의 진입점(app.py)에서 Flask 인스턴스가 `app`으로 선언되어 있으므로 아래와 같이 실행합니다:

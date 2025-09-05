@@ -6,11 +6,51 @@
         <a href="{{ url_for('job_list') }}">작업 목록</a>
     </div>
     <h2>음성/영상 파일 업로드(STT)</h2>
-    <form method="post" enctype="multipart/form-data">
+    <form id="uploadForm" method="post" enctype="multipart/form-data">
         <input type="file" name="file" accept="audio/*,video/*" required>
         <input type="text" name="input_name" placeholder="저장할 파일명 (선택)" style="width:100%;padding:10px;border-radius:8px;border:1px solid #ddd;">
         <input type="submit" value="업로드">
     </form>
     <div style="color:#888; font-size:0.98em; margin-top:10px; text-align:center;">파일명을 입력하지 않으면 원본 파일명으로 저장됩니다.</div>
+    <div id="uploadStatus" style="display:none; margin-top:24px; text-align:center;">
+        <span style="font-size:1.1em; color:#2563eb; font-weight:bold;">업로드중입니다.</span>
+        <div style="width:100%;background:#eee;border-radius:8px;margin-top:12px;">
+            <div id="progressBar" style="height:18px;width:0%;background:#2563eb;border-radius:8px;"></div>
+        </div>
+        <span id="progressText" style="font-size:0.98em;color:#444;"></span>
+    </div>
 </div>
+<script>
+const form = document.getElementById('uploadForm');
+const statusDiv = document.getElementById('uploadStatus');
+const progressBar = document.getElementById('progressBar');
+const progressText = document.getElementById('progressText');
+form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    statusDiv.style.display = 'block';
+    const formData = new FormData(form);
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', form.action || window.location.pathname, true);
+    xhr.upload.onprogress = function(e) {
+        if (e.lengthComputable) {
+            const percent = Math.round((e.loaded / e.total) * 100);
+            progressBar.style.width = percent + '%';
+            progressText.textContent = percent + '%';
+        }
+    };
+    xhr.onload = function() {
+        if (xhr.status === 200 || xhr.status === 302) {
+            window.location.href = xhr.responseURL;
+        } else {
+            progressText.textContent = '업로드 실패';
+            progressBar.style.background = '#ef4444';
+        }
+    };
+    xhr.onerror = function() {
+        progressText.textContent = '업로드 오류';
+        progressBar.style.background = '#ef4444';
+    };
+    xhr.send(formData);
+});
+</script>
 {% endblock %}
