@@ -110,48 +110,21 @@ def worker():
             result = {"segments": []}
             model = None
             whisper = None
-            device_str = 'cpu'
 
             try:
                 # 지연 임포트로 MPS 초기화를 요청 시점으로 늦춤
                 import torch
                 import whisper
 
-                # 디바이스 선택
-                if os.getenv('FORCE_CPU', '0') == '1':
-                    device_str = 'cpu'
-                elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-                    device_str = 'mps'
-                elif torch.cuda.is_available():
-                    device_str = 'cuda'
-
-                print(f"[작업] 선택된 디바이스: {device_str}")
+                # Force CPU only (ignore MPS/CUDA)
+                print(f"[작업] 새로운 작업 시작: {job_id}, 파일: {filepath}")
 
                 # 모델 로드
-                model = whisper.load_model("medium", device=device_str)
-                if device_str != 'cpu':
-                    try:
-                        model = model.to(torch.float32)
-                    except Exception:
-                        pass
+                model = whisper.load_model("large")
 
                 # 변환 시도
-                try:
-                    result = model.transcribe(filepath, language="Korean", fp16=False)
-                except Exception as e:
-                    print(f"[변환 오류-1차] (device={device_str}) {filepath}: {e}")
-                    # MPS 실패 시 CPU 폴백
-                    if device_str == 'mps':
-                        try:
-                            del model
-                            gc.collect()
-                            model = whisper.load_model("medium", device='cpu')
-                            model = model.to(torch.float32)
-                            print("[작업] 변환 CPU 폴백 재시도")
-                            result = model.transcribe(filepath, language="Korean", fp16=False)
-                        except Exception as e2:
-                            print(f"[변환 오류-폴백] {filepath}: {e2}")
-                            result = {"segments": []}
+                result = model.transcribe(filepath, language="Korean")
+                
             except Exception as e:
                 print(f"[모델/변환 전체 오류] {e}")
                 result = {"segments": []}
@@ -247,11 +220,6 @@ def worker():
                     if 'whisper' in locals():
                         del whisper
                     gc.collect()
-                    if device_str == 'mps':
-                        try:
-                            torch.mps.empty_cache()
-                        except Exception:
-                            pass
                 except Exception as e:
                     print(f"[모델 해제 오류] {e}")
             finally:
