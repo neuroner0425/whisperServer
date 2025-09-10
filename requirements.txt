@@ -1,0 +1,11 @@
+fastapi==0.95.2
+uvicorn[standard]==0.22.0
+whisper==20230314
+torch==2.2.0
+jinja2==3.1.2
+python-multipart==0.0.6
+werkzeug==3.0.1
+prometheus-client==0.16.0
+portalocker==2.8.0
+# 테스트/개발 의존성
+pytest==7.4.0
