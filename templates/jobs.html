@@ -7,10 +7,11 @@
     </div>
     <h2>작업 목록</h2>
     <table>
-        <tr><th>파일명</th><th>상태</th><th>결과</th></tr>
+        <tr><th>파일명</th><th>미디어 길이</th><th>상태</th><th>결과</th></tr>
         {% for job_id, job in job_items %}
         <tr>
             <td>{{ job['filename'] }}</td>
+            <td>{{ job.get('media_duration', '-') or '-' }}</td>
             <td class="status">{{ job['status'] }}</td>
             <td><a href="{{ url_for('job_status', job_id=job_id) }}">보기</a></td>
         </tr>
