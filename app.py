@@ -3,7 +3,9 @@ import uuid
 import threading
 import queue
 import gc
+from datetime import datetime
 from fastapi import FastAPI, Request, UploadFile, Form, HTTPException
+import subprocess
 from fastapi.responses import RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from werkzeug.utils import secure_filename
@@ -49,6 +51,42 @@ def allowed_file(filename: str) -> bool:
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+def format_seconds(sec: int) -> str:
+    try:
+        sec = int(sec)
+    except Exception:
+        return '-'
+    h, r = divmod(sec, 3600)
+    m, s = divmod(r, 60)
+    if h:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
+
+def get_media_duration_ffprobe(path: str):
+    """Use ffprobe to get media duration in seconds. Returns int seconds or None."""
+    try:
+        # ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 <file>
+        proc = subprocess.run([
+            'ffprobe',
+            '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            path
+        ], capture_output=True, text=True, check=False)
+        out = proc.stdout.strip()
+        if not out:
+            return None
+        try:
+            f = float(out.splitlines()[0].strip())
+            return int(round(f))
+        except Exception:
+            return None
+    except FileNotFoundError:
+        # ffprobe not installed
+        return None
+    except Exception:
+        return None
+
 def worker():
     """작업 큐를 소비하는 백그라운드 워커.
     - 하나씩 처리. 작업마다 모델을 로드하고 작업 끝나면 명확히 해제.
@@ -59,9 +97,13 @@ def worker():
             if job is None:
                 break
             job_id, filepath = job
+            # 작업 시작 시간 기록
+            started = datetime.now()
             with lock:
                 if job_id in jobs:
                     jobs[job_id]['status'] = '작업 중'
+                    jobs[job_id]['started_at'] = started.strftime('%Y-%m-%d %H:%M:%S')
+                    jobs[job_id]['started_ts'] = started.timestamp()
                     save_jobs(jobs)
 
             timeline_text = ""
@@ -124,14 +166,53 @@ def worker():
                 timeline = f"[{m1:02}:{s1:02}~{m2:02}:{s2:02}] "
                 timeline_text += timeline + seg.get('text', '').strip() + "\n"
 
+            # 미디어 전체 길이: ffprobe 우선 사용, 실패 시 세그먼트로 추정
+            media_duration_seconds = None
+            try:
+                media_duration_seconds = get_media_duration_ffprobe(filepath)
+            except Exception:
+                media_duration_seconds = None
+            if media_duration_seconds is None:
+                try:
+                    if segments:
+                        max_end = 0
+                        for seg in segments:
+                            try:
+                                e = float(seg.get('end', 0) or 0)
+                            except Exception:
+                                e = 0
+                            if e > max_end:
+                                max_end = e
+                        media_duration_seconds = int(round(max_end))
+                except Exception:
+                    media_duration_seconds = None
+
             txt_path = os.path.join(RESULT_FOLDER, f'{job_id}.txt')
             try:
                 with open(txt_path, 'w', encoding='utf-8') as f:
                     f.write(timeline_text)
+                # 완료 시간 및 소요 시간 기록
+                completed = datetime.now()
+                completed_ts = completed.timestamp()
+                duration_seconds = 0
                 with lock:
                     if job_id in jobs:
                         jobs[job_id]['status'] = '완료'
                         jobs[job_id]['result'] = txt_path
+                        jobs[job_id]['completed_at'] = completed.strftime('%Y-%m-%d %H:%M:%S')
+                        jobs[job_id]['completed_ts'] = completed_ts
+                        # 미디어 길이 정보 저장
+                        if media_duration_seconds is not None:
+                            jobs[job_id]['media_duration_seconds'] = media_duration_seconds
+                            jobs[job_id]['media_duration'] = format_seconds(media_duration_seconds)
+                        else:
+                            jobs[job_id]['media_duration_seconds'] = None
+                            jobs[job_id]['media_duration'] = None
+                        started_ts = jobs[job_id].get('started_ts')
+                        if started_ts:
+                            duration_seconds = int(completed_ts - started_ts)
+                        # 소요 시간을 mm:ss 형식으로 저장
+                        jobs[job_id]['duration'] = format_seconds(duration_seconds)
                         save_jobs(jobs)
                 # 전사 완료 시점에 업로드 원본 삭제
                 try:
@@ -146,6 +227,15 @@ def worker():
                     if job_id in jobs:
                         jobs[job_id]['status'] = '실패'
                         jobs[job_id]['result'] = None
+                        # 실패 시에도 완료 시간과 소요 시간을 기록
+                        failed_time = datetime.now()
+                        jobs[job_id]['completed_at'] = failed_time.strftime('%Y-%m-%d %H:%M:%S')
+                        jobs[job_id]['completed_ts'] = failed_time.timestamp()
+                        started_ts = jobs[job_id].get('started_ts')
+                        if started_ts:
+                            jobs[job_id]['duration'] = str(int(jobs[job_id]['completed_ts'] - started_ts))
+                        else:
+                            jobs[job_id]['duration'] = '0'
                         save_jobs(jobs)
 
             # 모델 명확하게 해제
@@ -215,7 +305,14 @@ async def upload_file(request: Request, file: UploadFile = None, input_name: str
         f.write(content)
 
     with lock:
-        jobs[job_id] = {'status': '작업 대기 중', 'filename': input_name, 'result': None}
+        uploaded = datetime.now()
+        jobs[job_id] = {
+            'status': '작업 대기 중',
+            'filename': input_name,
+            'result': None,
+            'uploaded_at': uploaded.strftime('%Y-%m-%d %H:%M:%S'),
+            'uploaded_ts': uploaded.timestamp()
+        }
         save_jobs(jobs)
 
     stt_job(job_id, save_path)

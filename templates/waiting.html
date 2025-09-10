@@ -8,6 +8,9 @@
     </div>
     <h2>작업 대기/진행 중</h2>
     <div class="info">파일명: {{ job['filename'] }}</div>
+    <div class="info">미디어 길이: {{ job.get('media_duration', '-') }}</div>
+    <div class="info">업로드: {{ job.get('uploaded_at', '-') }}</div>
+    <div class="info">작업 시작: {{ job.get('started_at', '-') }}</div>
     <div class="status">상태: {{ job['status'] }}</div>
     <div class="loader"></div>
     <div style="color:#888; font-size:0.98em;">페이지는 자동으로 새로고침됩니다.</div>

@@ -9,6 +9,11 @@
     <h2>작업 결과</h2>
     <div class="info">파일명: {{ job['filename'] }}</div>
     <div class="info">상태: {{ job['status'] }}</div>
+    <div class="info">업로드: {{ job.get('uploaded_at', '-') }}</div>
+    <div class="info">작업 시작: {{ job.get('started_at', '-') }}</div>
+    <div class="info">작업 완료: {{ job.get('completed_at', '-') }}</div>
+    <div class="info">작업 소요(초): {{ job.get('duration', '-') }}</div>
+    <div class="info">미디어 길이: {{ job.get('media_duration', '-') }}</div>
     <div class="result-text">{{ text|safe }}</div>
     <a class="download-btn" href="{{ url_for('download_txt', job_id=job_id) }}">txt 다운로드</a>
 </div>
