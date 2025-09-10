@@ -6,3 +6,4 @@ results/
 uploads/
 .DS_Store
 jobs.json
+.venv/
