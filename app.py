@@ -133,6 +133,13 @@ def worker():
                         jobs[job_id]['status'] = '완료'
                         jobs[job_id]['result'] = txt_path
                         save_jobs(jobs)
+                # 전사 완료 시점에 업로드 원본 삭제
+                try:
+                    if filepath and os.path.exists(filepath):
+                        os.remove(filepath)
+                        print(f"[파일 삭제] 원본 파일 삭제 완료: {filepath}")
+                except Exception as e:
+                    print(f"[파일 삭제 오류] {filepath}: {e}")
             except Exception as e:
                 print(f"[결과 저장 오류] {txt_path}: {e}")
                 with lock:
@@ -158,12 +165,7 @@ def worker():
                 except Exception as e:
                     print(f"[모델 해제 오류] {e}")
             finally:
-                # 업로드 원본 삭제 시도
-                try:
-                    if filepath and os.path.exists(filepath):
-                        os.remove(filepath)
-                except Exception as e:
-                    print(f"[파일 삭제 오류] {filepath}: {e}")
+                pass
         finally:
             task_queue.task_done()
 
