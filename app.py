@@ -112,7 +112,6 @@ def worker():
             whisper = None
 
             try:
-                # 지연 임포트로 MPS 초기화를 요청 시점으로 늦춤
                 import torch
                 import whisper
 
@@ -120,10 +119,16 @@ def worker():
                 print(f"[작업] 새로운 작업 시작: {job_id}, 파일: {filepath}")
 
                 # 모델 로드
-                model = whisper.load_model("large")
+                model = whisper.load_model("large", device="cpu").to(torch.float32)
+
+                model_load_time = datetime.now() - started
+                print(f"[모델 로드 완료] 소요 시간: {model_load_time.total_seconds():.2f}초")
+                time_model_loaded = datetime.now()
 
                 # 변환 시도
-                result = model.transcribe(filepath, language="Korean")
+                result = model.transcribe(filepath, language="Korean", fp16=False)
+                transcribe_time = datetime.now() - time_model_loaded
+                print(f"[변환 완료] 소요 시간: {transcribe_time.total_seconds():.2f}초")
                 
             except Exception as e:
                 print(f"[모델/변환 전체 오류] {e}")
