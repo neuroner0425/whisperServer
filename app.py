@@ -88,16 +88,12 @@ def get_media_duration_ffprobe(path: str):
         return None
 
 def worker():
-    """작업 큐를 소비하는 백그라운드 워커.
-    - 하나씩 처리. 작업마다 모델을 로드하고 작업 끝나면 명확히 해제.
-    """
     while True:
         job = task_queue.get()
         try:
             if job is None:
                 break
             job_id, filepath = job
-            # 작업 시작 시간 기록
             started = datetime.now()
             with lock:
                 if job_id in jobs:
@@ -106,129 +102,135 @@ def worker():
                     jobs[job_id]['started_ts'] = started.timestamp()
                     save_jobs(jobs)
 
-            timeline_text = ""
-            result = {"segments": []}
-            model = None
-            whisper = None
+            print(f"[작업] whisper.cpp 실행 시작: {job_id}, 파일: {filepath}")
 
+            # whisper.cpp 실행
+            output_prefix = filepath  # whisper.cpp는 prefix를 받아 .txt를 붙여 저장
+            output_path = f"{filepath}.txt"
+            cmd = [
+                "./whisper.cpp/build/bin/whisper-cli",
+                "-m", "whisper.cpp/models/ggml-large-v3.bin",
+                "-l", "ko",
+                "--max-context", "0",
+                "--no-speech-thold", "0.01",
+                "--suppress-nst",
+                "--no-prints",
+                "--vad",
+                "--vad-model", "whisper.cpp/models/ggml-silero-v5.1.2.bin",
+                "--vad-threshold", "0.01",
+                "--output-txt", output_prefix
+            ]
+
+            import time, re
+            # 진행률 초기화: 전처리 중
+            with lock:
+                if job_id in jobs:
+                    jobs[job_id]['phase'] = '전처리 중'
+                    jobs[job_id]['progress_percent'] = 0
+                    jobs[job_id]['progress_label'] = '전처리 중...'
+                    save_jobs(jobs)
             try:
-                import torch
-                import whisper
-
-                # Force CPU only (ignore MPS/CUDA)
-                print(f"[작업] 새로운 작업 시작: {job_id}, 파일: {filepath}")
-
-                # 모델 로드
-                model = whisper.load_model("large", device="cpu").to(torch.float32)
-
-                model_load_time = datetime.now() - started
-                print(f"[모델 로드 완료] 소요 시간: {model_load_time.total_seconds():.2f}초")
-                time_model_loaded = datetime.now()
-
-                # 변환 시도
-                result = model.transcribe(filepath, language="Korean", fp16=False)
-                transcribe_time = datetime.now() - time_model_loaded
-                print(f"[변환 완료] 소요 시간: {transcribe_time.total_seconds():.2f}초")
-                
-            except Exception as e:
-                print(f"[모델/변환 전체 오류] {e}")
-                result = {"segments": []}
-
-            # 결과 정리
-            segments = result.get('segments', [])
-            for seg in segments:
-                start = int(seg.get('start', 0))
-                end = int(seg.get('end', 0))
-                m1, s1 = divmod(start, 60)
-                m2, s2 = divmod(end, 60)
-                timeline = f"[{m1:02}:{s1:02}~{m2:02}:{s2:02}] "
-                timeline_text += timeline + seg.get('text', '').strip() + "\n"
-
-            # 미디어 전체 길이: ffprobe 우선 사용, 실패 시 세그먼트로 추정
-            media_duration_seconds = None
-            try:
-                media_duration_seconds = get_media_duration_ffprobe(filepath)
-            except Exception:
-                media_duration_seconds = None
-            if media_duration_seconds is None:
-                try:
-                    if segments:
-                        max_end = 0
-                        for seg in segments:
-                            try:
-                                e = float(seg.get('end', 0) or 0)
-                            except Exception:
-                                e = 0
-                            if e > max_end:
-                                max_end = e
-                        media_duration_seconds = int(round(max_end))
-                except Exception:
-                    media_duration_seconds = None
-
-            txt_path = os.path.join(RESULT_FOLDER, f'{job_id}.txt')
-            try:
-                with open(txt_path, 'w', encoding='utf-8') as f:
-                    f.write(timeline_text)
-                # 완료 시간 및 소요 시간 기록
-                completed = datetime.now()
-                completed_ts = completed.timestamp()
-                duration_seconds = 0
+                # 표준 출력 파이프를 통해 줄 단위로 읽기
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    universal_newlines=True,
+                )
+                output_path = f"{filepath}.txt"
+                total_sec = jobs[job_id].get('media_duration_seconds') or 0
+                last_percent = -1
+                max_percent = -1
+                saw_timeline = False
+                # 실시간으로 한 줄씩 읽기 (CR/NL 정규화). 외부 출력은 터미널에 재출력하지 않음.
+                for out_line in proc.stdout:
+                    if out_line is None:
+                        break
+                    print(f"[whisper.cpp][{job_id[:8]}] {out_line.strip()}", flush=True)
+                    # 일부 툴은 진행률을 CR(\r)로 덮어씀 -> 줄 단위로 강제 변환해서 파싱만 수행
+                    for piece in re.split(r'[\r\n]+', out_line):
+                        if piece == '':
+                            continue
+                        # 타임라인 라인을 파싱하여 진행률 계산
+                        line = piece.strip()
+                        if '-->' in line:
+                            # 색 코드나 앞공백이 있어도 찾도록 search 사용
+                            m = re.search(r"\[(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)\s*-->", line)
+                            if m:
+                                h, mm, ss = m.groups()
+                                try:
+                                    start_sec = float(h) * 3600 + float(mm) * 60 + float(ss)
+                                except Exception:
+                                    start_sec = 0.0
+                                percent = int((start_sec / total_sec) * 100) if total_sec else 0
+                                # 진행률이 되돌아가지 않도록 보정
+                                if percent < max_percent:
+                                    percent = max_percent
+                                if percent != last_percent:
+                                    print(f"[진행률][{job_id[:8]}] {percent}% ({start_sec:.1f}s/{total_sec}s)", flush=True)
+                                    with lock:
+                                        if job_id in jobs:
+                                            jobs[job_id]['phase'] = '전사 중'
+                                            jobs[job_id]['progress_percent'] = percent
+                                            jobs[job_id]['progress_label'] = f"전사 중... {percent}%"
+                                            save_jobs(jobs)
+                                    last_percent = percent
+                                    max_percent = max(max_percent, percent)
+                                saw_timeline = True
+                return_code = proc.wait()
+                if return_code != 0:
+                    print(f"[whisper.cpp 오류] 비정상 종료 (code={return_code})")
+                    raise RuntimeError("whisper.cpp 실행 실패")
+                # 정상 종료 시 100%로 마무리 (타임라인이 하나도 없으면 0% 유지)
                 with lock:
                     if job_id in jobs:
-                        jobs[job_id]['status'] = '완료'
-                        jobs[job_id]['result'] = txt_path
-                        jobs[job_id]['completed_at'] = completed.strftime('%Y-%m-%d %H:%M:%S')
-                        jobs[job_id]['completed_ts'] = completed_ts
-                        # 미디어 길이 정보 저장
-                        if media_duration_seconds is not None:
-                            jobs[job_id]['media_duration_seconds'] = media_duration_seconds
-                            jobs[job_id]['media_duration'] = format_seconds(media_duration_seconds)
-                        else:
-                            jobs[job_id]['media_duration_seconds'] = None
-                            jobs[job_id]['media_duration'] = None
-                        started_ts = jobs[job_id].get('started_ts')
-                        if started_ts:
-                            duration_seconds = int(completed_ts - started_ts)
-                        # 소요 시간을 mm:ss 형식으로 저장
-                        jobs[job_id]['duration'] = format_seconds(duration_seconds)
+                        jobs[job_id]['phase'] = '전사 완료'
+                        jobs[job_id]['progress_percent'] = 100 if saw_timeline else jobs[job_id].get('progress_percent', 0)
+                        jobs[job_id]['progress_label'] = '전사 완료'
                         save_jobs(jobs)
-                # 전사 완료 시점에 업로드 원본 삭제
-                try:
-                    if filepath and os.path.exists(filepath):
-                        os.remove(filepath)
-                        print(f"[파일 삭제] 원본 파일 삭제 완료: {filepath}")
-                except Exception as e:
-                    print(f"[파일 삭제 오류] {filepath}: {e}")
             except Exception as e:
-                print(f"[결과 저장 오류] {txt_path}: {e}")
+                print(f"[실행 오류] {e}")
                 with lock:
                     if job_id in jobs:
                         jobs[job_id]['status'] = '실패'
-                        jobs[job_id]['result'] = None
-                        # 실패 시에도 완료 시간과 소요 시간을 기록
-                        failed_time = datetime.now()
-                        jobs[job_id]['completed_at'] = failed_time.strftime('%Y-%m-%d %H:%M:%S')
-                        jobs[job_id]['completed_ts'] = failed_time.timestamp()
-                        started_ts = jobs[job_id].get('started_ts')
-                        if started_ts:
-                            jobs[job_id]['duration'] = str(int(jobs[job_id]['completed_ts'] - started_ts))
-                        else:
-                            jobs[job_id]['duration'] = '0'
                         save_jobs(jobs)
+                continue
 
-            # 모델 명확하게 해제
+            # whisper.cpp가 저장한 txt 파일을 결과로 등록
+            timeline_text = ""
             try:
-                try:
-                    import torch
-                    if 'model' in locals():
-                        del model
-                    if 'whisper' in locals():
-                        del whisper
-                    gc.collect()
-                except Exception as e:
-                    print(f"[모델 해제 오류] {e}")
-            finally:
-                pass
+                with open(output_path, 'r', encoding='utf-8') as f:
+                    timeline_text = f.read()
+            except Exception as e:
+                print(f"[결과 읽기 오류] {e}")
+
+            txt_path = os.path.join(RESULT_FOLDER, f'{job_id}.txt')
+            with open(txt_path, 'w', encoding='utf-8') as f:
+                f.write(timeline_text)
+
+            completed = datetime.now()
+            completed_ts = completed.timestamp()
+            with lock:
+                if job_id in jobs:
+                    jobs[job_id]['status'] = '완료'
+                    jobs[job_id]['result'] = txt_path
+                    jobs[job_id]['completed_at'] = completed.strftime('%Y-%m-%d %H:%M:%S')
+                    jobs[job_id]['completed_ts'] = completed_ts
+                    started_ts = jobs[job_id].get('started_ts')
+                    if started_ts:
+                        jobs[job_id]['duration'] = format_seconds(int(completed_ts - started_ts))
+                    save_jobs(jobs)
+
+            # 원본 삭제
+            try:
+                if filepath and os.path.exists(filepath):
+                    os.remove(filepath)
+                    print(f"[파일 삭제] 원본 파일 삭제 완료: {filepath}")
+            except Exception as e:
+                print(f"[파일 삭제 오류] {filepath}: {e}")
+
         finally:
             task_queue.task_done()
 
@@ -270,12 +272,31 @@ async def upload_file(request: Request, file: UploadFile = None, input_name: str
 
     safe_filename = secure_filename(original_filename)
     job_id = str(uuid.uuid4())
-    save_path = os.path.join(UPLOAD_FOLDER, f'{job_id}_{safe_filename}')
+    temp_path = os.path.join(UPLOAD_FOLDER, f'{job_id}_temp{ext}')
+    wav_path = os.path.join(UPLOAD_FOLDER, f'{job_id}_{safe_filename}.wav')
 
-    # 파일 저장
-    with open(save_path, 'wb') as f:
+    # 파일 저장 (임시 경로)
+    with open(temp_path, 'wb') as f:
         content = await file.read()
         f.write(content)
+
+    # ffmpeg로 wav 변환
+    try:
+        cmd = ['ffmpeg', '-y', '-i', temp_path, wav_path]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if proc.returncode != 0:
+            print(f"[ffmpeg 오류] {proc.stderr}")
+            raise RuntimeError("ffmpeg 변환 실패")
+    except Exception as e:
+        print(f"[ffmpeg 변환 오류] {e}")
+        raise HTTPException(status_code=500, detail='ffmpeg 변환 실패')
+    finally:
+        # 임시 파일 삭제
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+    # wav 길이 구하기
+    duration = get_media_duration_ffprobe(wav_path)
 
     with lock:
         uploaded = datetime.now()
@@ -284,11 +305,14 @@ async def upload_file(request: Request, file: UploadFile = None, input_name: str
             'filename': input_name,
             'result': None,
             'uploaded_at': uploaded.strftime('%Y-%m-%d %H:%M:%S'),
-            'uploaded_ts': uploaded.timestamp()
+            'uploaded_ts': uploaded.timestamp(),
+            'duration': duration,
+            'media_duration': format_seconds(duration) if duration else '-',
+            'media_duration_seconds': duration if duration else None
         }
         save_jobs(jobs)
 
-    stt_job(job_id, save_path)
+    stt_job(job_id, wav_path)
     return RedirectResponse(url=f"/job/{job_id}", status_code=303)
 
 
@@ -308,12 +332,27 @@ async def job_status(request: Request, job_id: str):
         with open(job['result'], encoding='utf-8') as f:
             lines = f.readlines()
         html_lines = []
+        total_sec = job.get('media_duration_seconds') or 0
+        def parse_start_sec(timeline):
+            import re
+            m = re.match(r'\[(\d{2}):(\d{2}):(\d{2}\.\d+)', timeline)
+            if m:
+                h, m_, s = m.groups()
+                return float(h)*3600 + float(m_)*60 + float(s)
+            m = re.match(r'\[(\d{2}):(\d{2}):(\d{2})', timeline)
+            if m:
+                h, m_, s = m.groups()
+                return int(h)*3600 + int(m_)*60 + int(s)
+            return 0
         for line in lines:
             if ']' in line:
                 left, right = line.split(']', 1)
                 timeline = left + ']'
                 content = right.strip()
-                html_lines.append(f'<div><span style="color:#2563eb;font-weight:bold;">{timeline}</span> {content}</div>')
+                start_sec = parse_start_sec(left[1:]) if total_sec else 0
+                percent = int((start_sec/total_sec)*100) if total_sec else 0
+                bar_html = f'<span style="display:inline-block;width:80px;height:8px;background:#eee;border-radius:4px;vertical-align:middle;margin-right:6px;overflow:hidden;"><span style="display:inline-block;height:8px;background:#2563eb;width:{percent}%;border-radius:4px;"></span></span>' if total_sec else ''
+                html_lines.append(f'<div style="margin-bottom:4px;">{bar_html}<span style="color:#2563eb;font-weight:bold;">{timeline}</span> {content} <span style="color:#888;font-size:0.95em;">({percent}%)</span></div>')
             else:
                 html_lines.append(line.strip())
         text = '\n'.join(html_lines)

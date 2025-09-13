@@ -13,6 +13,12 @@
     <div class="info">작업 시작: {{ job.get('started_at', '-') }}</div>
     <div class="status">상태: {{ job['status'] }}</div>
     <div class="loader"></div>
+    <div style="margin-top:12px;">
+        <div style="font-size:0.95em;color:#444;">{{ job.get('phase', '대기 중') }} {{ job.get('progress_percent', 0) }}%</div>
+        <div style="width:100%;background:#eee;border-radius:8px;overflow:hidden;height:12px;">
+            <div style="height:12px;background:#2563eb;width:{{ job.get('progress_percent', 0) }}%;"></div>
+        </div>
+    </div>
     <div style="color:#888; font-size:0.98em;">페이지는 자동으로 새로고침됩니다.</div>
     <meta http-equiv="refresh" content="3">
 </div>
