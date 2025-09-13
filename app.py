@@ -3,8 +3,10 @@ import uuid
 import threading
 import queue
 import gc
+import logging
+import html
 from datetime import datetime
-from fastapi import FastAPI, Request, UploadFile, Form, HTTPException
+from fastapi import FastAPI, Request, UploadFile, Form, HTTPException, Response
 import subprocess
 from fastapi.responses import RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
@@ -13,17 +15,29 @@ from werkzeug.utils import secure_filename
 # PyTorch가 처음 임포트되기 전에 MPS fallback을 활성화
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
-UPLOAD_FOLDER = 'uploads'
-RESULT_FOLDER = 'results'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
+RESULT_FOLDER = os.path.join(BASE_DIR, 'results')
 ALLOWED_EXTENSIONS = {'mp3', 'mp4', 'wav', 'm4a'}
+MAX_UPLOAD_SIZE_MB = int(os.environ.get('MAX_UPLOAD_SIZE_MB', '512'))  # 기본 512MB
+CHUNK_SIZE = 4 * 1024 * 1024  # 4MB
+JOB_TIMEOUT_SEC = int(os.environ.get('JOB_TIMEOUT_SEC', '3600'))  # 기본 1시간 타임아웃
 
 app = FastAPI()
 from fastapi.staticfiles import StaticFiles
-templates = Jinja2Templates(directory="templates")
+TEMPLATE_DIR = os.path.join(BASE_DIR, 'templates')
+templates = Jinja2Templates(directory=TEMPLATE_DIR)
+
+"""로깅 설정"""
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s %(message)s'
+)
 
 # static 디렉터리 생성 및 마운트 (템플릿의 url_for('static', ...) 사용 지원)
-os.makedirs('static', exist_ok=True)
-app.mount('/static', StaticFiles(directory='static'), name='static')
+STATIC_DIR = os.path.join(BASE_DIR, 'static')
+os.makedirs(STATIC_DIR, exist_ok=True)
+app.mount('/static', StaticFiles(directory=STATIC_DIR), name='static')
 
 # 템플릿에서 Flask 스타일 url_for('static', filename=...) 호출을 지원하기 위한 라우트
 from fastapi import HTTPException
@@ -31,7 +45,7 @@ from fastapi.responses import FileResponse as _FileResponse
 
 @app.get('/static/{filename}', name='static')
 async def _static_filename(filename: str):
-    filepath = os.path.join('static', filename)
+    filepath = os.path.join(STATIC_DIR, filename)
     if not os.path.exists(filepath):
         raise HTTPException(status_code=404)
     return _FileResponse(filepath)
@@ -46,6 +60,42 @@ jobs = load_jobs()
 
 # 작업 큐 및 워커
 task_queue = queue.Queue()
+
+# Prometheus metrics (optional, lazy init)
+PROM_AVAILABLE = False
+JOBS_TOTAL = None
+JOBS_IN_PROGRESS = None
+JOB_DURATION_SECONDS = None
+UPLOAD_BYTES = None
+QUEUE_LENGTH = None
+_prom_init_done = False
+_prom_init_lock = threading.Lock()
+
+def prom_init_once() -> bool:
+    """Initialize Prometheus metrics once if library is available."""
+    global PROM_AVAILABLE, _prom_init_done
+    global JOBS_TOTAL, JOBS_IN_PROGRESS, JOB_DURATION_SECONDS, UPLOAD_BYTES, QUEUE_LENGTH
+    if _prom_init_done:
+        return PROM_AVAILABLE
+    with _prom_init_lock:
+        if _prom_init_done:
+            return PROM_AVAILABLE
+        try:
+            from prometheus_client import Counter as _Counter, Gauge as _Gauge, Histogram as _Histogram  # type: ignore
+            JOBS_TOTAL = _Counter('whisper_jobs_total', 'Total jobs finished by status', ['status'])
+            JOBS_IN_PROGRESS = _Gauge('whisper_jobs_in_progress', 'Jobs currently being processed')
+            JOB_DURATION_SECONDS = _Histogram('whisper_job_duration_seconds', 'Duration of jobs in seconds')
+            UPLOAD_BYTES = _Counter('whisper_upload_bytes_total', 'Total bytes uploaded')
+            QUEUE_LENGTH = _Gauge('whisper_task_queue_size', 'Task queue size')
+            PROM_AVAILABLE = True
+            try:
+                QUEUE_LENGTH.set(0)
+            except Exception:
+                pass
+        except Exception:
+            PROM_AVAILABLE = False
+        _prom_init_done = True
+        return PROM_AVAILABLE
 
 def allowed_file(filename: str) -> bool:
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -95,6 +145,14 @@ def worker():
                 break
             job_id, filepath = job
             started = datetime.now()
+            # 메트릭: 작업 시작(in-progress 증가)
+            try:
+                if prom_init_once() and 'JOBS_IN_PROGRESS' in globals() and JOBS_IN_PROGRESS is not None:
+                    JOBS_IN_PROGRESS.inc()
+                if prom_init_once() and 'QUEUE_LENGTH' in globals() and QUEUE_LENGTH is not None:
+                    QUEUE_LENGTH.set(max(task_queue.qsize(), 0))
+            except Exception:
+                pass
             with lock:
                 if job_id in jobs:
                     jobs[job_id]['status'] = '작업 중'
@@ -102,21 +160,24 @@ def worker():
                     jobs[job_id]['started_ts'] = started.timestamp()
                     save_jobs(jobs)
 
-            print(f"[작업] whisper.cpp 실행 시작: {job_id}, 파일: {filepath}")
+            logging.info(f"[작업] whisper.cpp 실행 시작: {job_id}, 파일: {filepath}")
 
             # whisper.cpp 실행
             output_prefix = filepath  # whisper.cpp는 prefix를 받아 .txt를 붙여 저장
             output_path = f"{filepath}.txt"
+            whisper_cli = os.path.join(BASE_DIR, "whisper.cpp", "build", "bin", "whisper-cli")
+            model_bin = os.path.join(BASE_DIR, "whisper.cpp", "models", "ggml-large-v3.bin")
+            vad_model = os.path.join(BASE_DIR, "whisper.cpp", "models", "ggml-silero-v5.1.2.bin")
             cmd = [
-                "./whisper.cpp/build/bin/whisper-cli",
-                "-m", "whisper.cpp/models/ggml-large-v3.bin",
+                whisper_cli,
+                "-m", model_bin,
                 "-l", "ko",
                 "--max-context", "0",
                 "--no-speech-thold", "0.01",
                 "--suppress-nst",
                 "--no-prints",
                 "--vad",
-                "--vad-model", "whisper.cpp/models/ggml-silero-v5.1.2.bin",
+                "--vad-model", vad_model,
                 "--vad-threshold", "0.01",
                 "--output-txt", output_prefix
             ]
@@ -139,6 +200,16 @@ def worker():
                     bufsize=1,
                     universal_newlines=True,
                 )
+                # 타임아웃 타이머 설정
+                timed_out = {'flag': False}
+                def _kill_timeout():
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                    timed_out['flag'] = True
+                timer = threading.Timer(JOB_TIMEOUT_SEC, _kill_timeout)
+                timer.start()
                 output_path = f"{filepath}.txt"
                 total_sec = jobs[job_id].get('media_duration_seconds') or 0
                 last_percent = -1
@@ -148,7 +219,7 @@ def worker():
                 for out_line in proc.stdout:
                     if out_line is None:
                         break
-                    print(f"[whisper.cpp][{job_id[:8]}] {out_line.strip()}", flush=True)
+                    logging.info(f"[whisper.cpp][{job_id[:8]}] {out_line.strip()}")
                     # 일부 툴은 진행률을 CR(\r)로 덮어씀 -> 줄 단위로 강제 변환해서 파싱만 수행
                     for piece in re.split(r'[\r\n]+', out_line):
                         if piece == '':
@@ -169,7 +240,7 @@ def worker():
                                 if percent < max_percent:
                                     percent = max_percent
                                 if percent != last_percent:
-                                    print(f"[진행률][{job_id[:8]}] {percent}% ({start_sec:.1f}s/{total_sec}s)", flush=True)
+                                    logging.info(f"[진행률][{job_id[:8]}] {percent}% ({start_sec:.1f}s/{total_sec}s)")
                                     with lock:
                                         if job_id in jobs:
                                             jobs[job_id]['phase'] = '전사 중'
@@ -179,9 +250,24 @@ def worker():
                                     last_percent = percent
                                     max_percent = max(max_percent, percent)
                                 saw_timeline = True
-                return_code = proc.wait()
+                        if timed_out['flag']:
+                            break
+                    if timed_out['flag']:
+                        break
+                try:
+                    return_code = proc.wait(timeout=1)
+                except Exception:
+                    return_code = proc.poll()
+                finally:
+                    try:
+                        timer.cancel()
+                    except Exception:
+                        pass
                 if return_code != 0:
-                    print(f"[whisper.cpp 오류] 비정상 종료 (code={return_code})")
+                    if timed_out['flag']:
+                        logging.error(f"[whisper.cpp 타임아웃] 작업 시간 초과로 종료: {job_id}")
+                        raise TimeoutError("작업 타임아웃")
+                    logging.error(f"[whisper.cpp 오류] 비정상 종료 (code={return_code})")
                     raise RuntimeError("whisper.cpp 실행 실패")
                 # 정상 종료 시 100%로 마무리 (타임라인이 하나도 없으면 0% 유지)
                 with lock:
@@ -191,11 +277,20 @@ def worker():
                         jobs[job_id]['progress_label'] = '전사 완료'
                         save_jobs(jobs)
             except Exception as e:
-                print(f"[실행 오류] {e}")
+                logging.exception(f"[실행 오류] {e}")
                 with lock:
                     if job_id in jobs:
                         jobs[job_id]['status'] = '실패'
+                        if isinstance(e, TimeoutError):
+                            jobs[job_id]['status_detail'] = '타임아웃'
                         save_jobs(jobs)
+                # 메트릭(실패/타임아웃)
+                try:
+                    if PROM_AVAILABLE and 'JOBS_TOTAL' in globals():
+                        status_label = 'timeout' if isinstance(e, TimeoutError) else 'failure'
+                        JOBS_TOTAL.labels(status=status_label).inc()
+                except Exception:
+                    pass
                 continue
 
             # whisper.cpp가 저장한 txt 파일을 결과로 등록
@@ -204,7 +299,15 @@ def worker():
                 with open(output_path, 'r', encoding='utf-8') as f:
                     timeline_text = f.read()
             except Exception as e:
-                print(f"[결과 읽기 오류] {e}")
+                logging.exception(f"[결과 읽기 오류] {e}")
+            finally:
+                # 중간 산출물(.wav.txt) 정리
+                try:
+                    if output_path and os.path.exists(output_path):
+                        os.remove(output_path)
+                        logging.info(f"[파일 삭제] 중간 결과 파일 삭제 완료: {output_path}")
+                except Exception as _e:
+                    logging.warning(f"[파일 삭제 오류] {output_path}: {_e}")
 
             txt_path = os.path.join(RESULT_FOLDER, f'{job_id}.txt')
             with open(txt_path, 'w', encoding='utf-8') as f:
@@ -222,16 +325,32 @@ def worker():
                     if started_ts:
                         jobs[job_id]['duration'] = format_seconds(int(completed_ts - started_ts))
                     save_jobs(jobs)
+            # 메트릭: 성공/소요시간
+            try:
+                if prom_init_once() and 'JOBS_TOTAL' in globals() and JOBS_TOTAL is not None:
+                    JOBS_TOTAL.labels(status='success').inc()
+                if prom_init_once() and 'JOB_DURATION_SECONDS' in globals() and JOB_DURATION_SECONDS is not None:
+                    JOB_DURATION_SECONDS.observe((completed - started).total_seconds())
+            except Exception:
+                pass
 
             # 원본 삭제
             try:
                 if filepath and os.path.exists(filepath):
                     os.remove(filepath)
-                    print(f"[파일 삭제] 원본 파일 삭제 완료: {filepath}")
+                    logging.info(f"[파일 삭제] 원본 파일 삭제 완료: {filepath}")
             except Exception as e:
-                print(f"[파일 삭제 오류] {filepath}: {e}")
+                logging.warning(f"[파일 삭제 오류] {filepath}: {e}")
 
         finally:
+            # in-progress 감소 및 큐 길이 갱신
+            try:
+                if prom_init_once() and 'JOBS_IN_PROGRESS' in globals() and JOBS_IN_PROGRESS is not None:
+                    JOBS_IN_PROGRESS.dec()
+                if prom_init_once() and 'QUEUE_LENGTH' in globals() and QUEUE_LENGTH is not None:
+                    QUEUE_LENGTH.set(max(task_queue.qsize(), 0))
+            except Exception:
+                pass
             task_queue.task_done()
 
 
@@ -242,11 +361,59 @@ worker_thread.start()
 
 def stt_job(job_id: str, filepath: str):
     task_queue.put((job_id, filepath))
+    # 큐 길이 메트릭 갱신
+    try:
+        if prom_init_once() and 'QUEUE_LENGTH' in globals() and QUEUE_LENGTH is not None:
+            QUEUE_LENGTH.set(max(task_queue.qsize(), 0))
+    except Exception:
+        pass
 
 
 @app.get('/')
 async def home(request: Request):
     return templates.TemplateResponse('home.html', {'request': request})
+
+
+@app.on_event("startup")
+def _startup_requeue_pending():
+    """서버 기동 시 미완료 작업을 큐에 복구합니다."""
+    try:
+        with lock:
+            # 상태가 '작업 대기 중' 또는 '작업 중'인 항목 복구
+            for job_id, job in list(jobs.items()):
+                if job.get('status') in ('작업 대기 중', '작업 중'):
+                    # 업로드된 wav 경로 추정: 업로드 폴더에서 job_id prefix를 가진 파일 검색
+                    # 기존 코드에서 wav_path 형식: f'{job_id}_{safe_filename}.wav'
+                    try:
+                        for name in os.listdir(UPLOAD_FOLDER):
+                            if name.startswith(job_id) and name.endswith('.wav'):
+                                wav_path = os.path.join(UPLOAD_FOLDER, name)
+                                if os.path.exists(wav_path):
+                                    stt_job(job_id, wav_path)
+                                    logging.info(f"[복구] 작업 재큐잉: {job_id} -> {wav_path}")
+                                    break
+                    except Exception as e:
+                        logging.warning(f"[복구 오류] {job_id}: {e}")
+    except Exception as e:
+        logging.warning(f"[startup 복구 실패] {e}")
+
+
+@app.get('/healthz')
+async def healthz():
+    """단순 헬스 체크 엔드포인트"""
+    return {"status": "ok"}
+
+
+@app.get('/metrics')
+async def metrics():
+    if not prom_init_once():
+        raise HTTPException(status_code=404, detail='metrics not available')
+    try:
+        from prometheus_client import generate_latest as _gen, CONTENT_TYPE_LATEST as _ctype  # type: ignore
+        data = _gen()
+        return Response(content=data, media_type=_ctype)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'metrics error: {e}')
 
 
 @app.get('/upload')
@@ -262,6 +429,9 @@ async def upload_file(request: Request, file: UploadFile = None, input_name: str
         raise HTTPException(status_code=400, detail='파일을 선택하세요.')
     if not allowed_file(file.filename):
         raise HTTPException(status_code=400, detail=f"허용되지 않는 파일 형식입니다. 허용: {', '.join(sorted(ALLOWED_EXTENSIONS))}")
+    # 간단한 MIME 확인(신뢰 불가이지만 1차 필터)
+    if file.content_type and not (file.content_type.startswith('audio/') or file.content_type.startswith('video/')):
+        raise HTTPException(status_code=400, detail='오디오/비디오 파일만 업로드할 수 있습니다.')
 
     original_filename = file.filename
     ext = os.path.splitext(original_filename)[1]
@@ -275,20 +445,40 @@ async def upload_file(request: Request, file: UploadFile = None, input_name: str
     temp_path = os.path.join(UPLOAD_FOLDER, f'{job_id}_temp{ext}')
     wav_path = os.path.join(UPLOAD_FOLDER, f'{job_id}_{safe_filename}.wav')
 
-    # 파일 저장 (임시 경로)
-    with open(temp_path, 'wb') as f:
-        content = await file.read()
-        f.write(content)
+    # 파일 저장 (임시 경로) - 스트리밍 저장 및 크기 제한
+    total_bytes = 0
+    try:
+        with open(temp_path, 'wb') as f:
+            while True:
+                chunk = await file.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                total_bytes += len(chunk)
+                if total_bytes > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
+                    raise HTTPException(status_code=413, detail=f'업로드 용량 초과({MAX_UPLOAD_SIZE_MB}MB)')
+                f.write(chunk)
+        # 업로드 바이트 메트릭
+        try:
+            if prom_init_once() and 'UPLOAD_BYTES' in globals() and UPLOAD_BYTES is not None:
+                UPLOAD_BYTES.inc(total_bytes)
+        except Exception:
+            pass
+    finally:
+        # 메모리 버퍼 비우기 시도(대형 업로드 대비)
+        try:
+            await file.seek(0)
+        except Exception:
+            pass
 
     # ffmpeg로 wav 변환
     try:
         cmd = ['ffmpeg', '-y', '-i', temp_path, wav_path]
         proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
-            print(f"[ffmpeg 오류] {proc.stderr}")
+            logging.error(f"[ffmpeg 오류] {proc.stderr}")
             raise RuntimeError("ffmpeg 변환 실패")
     except Exception as e:
-        print(f"[ffmpeg 변환 오류] {e}")
+        logging.exception(f"[ffmpeg 변환 오류] {e}")
         raise HTTPException(status_code=500, detail='ffmpeg 변환 실패')
     finally:
         # 임시 파일 삭제
@@ -348,13 +538,15 @@ async def job_status(request: Request, job_id: str):
             if ']' in line:
                 left, right = line.split(']', 1)
                 timeline = left + ']'
-                content = right.strip()
+                # 콘텐츠 이스케이프(잠재적 XSS 방지). 타임라인/텍스트 모두 이스케이프 처리
+                content = html.escape(right.strip())
+                safe_timeline = html.escape(timeline)
                 start_sec = parse_start_sec(left[1:]) if total_sec else 0
                 percent = int((start_sec/total_sec)*100) if total_sec else 0
                 bar_html = f'<span style="display:inline-block;width:80px;height:8px;background:#eee;border-radius:4px;vertical-align:middle;margin-right:6px;overflow:hidden;"><span style="display:inline-block;height:8px;background:#2563eb;width:{percent}%;border-radius:4px;"></span></span>' if total_sec else ''
-                html_lines.append(f'<div style="margin-bottom:4px;">{bar_html}<span style="color:#2563eb;font-weight:bold;">{timeline}</span> {content} <span style="color:#888;font-size:0.95em;">({percent}%)</span></div>')
+                html_lines.append(f'<div style="margin-bottom:4px;">{bar_html}<span style="color:#2563eb;font-weight:bold;">{safe_timeline}</span> {content} <span style="color:#888;font-size:0.95em;">({percent}%)</span></div>')
             else:
-                html_lines.append(line.strip())
+                html_lines.append(html.escape(line.strip()))
         text = '\n'.join(html_lines)
         return templates.TemplateResponse('result.html', {'request': request, 'job': job, 'job_id': job_id, 'text': text})
     else:
@@ -373,3 +565,16 @@ async def download_txt(job_id: str):
 if __name__ == '__main__':
     import uvicorn
     uvicorn.run("app:app", host="0.0.0.0", port=8000, log_level="info", workers=1)
+
+
+@app.on_event("shutdown")
+def _graceful_shutdown():
+    """서버 종료 시 워커를 정상 종료합니다."""
+    try:
+        task_queue.put_nowait(None)
+    except Exception:
+        pass
+    try:
+        worker_thread.join(timeout=5)
+    except Exception:
+        pass

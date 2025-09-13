@@ -33,6 +33,11 @@ pip install -r requirements.txt
 ./install_requirements.sh
 ```
 
+사전 요구 사항:
+- `ffmpeg`와 `ffprobe`가 시스템에 설치되어 있어야 합니다(macOS에서는 `brew install ffmpeg`).
+- `whisper.cpp`가 `./whisper.cpp` 경로에 클론 및 빌드되어 있어야 하며 모델이 다운로드되어 있어야 합니다.
+- 업로드 최대 용량은 환경변수 `MAX_UPLOAD_SIZE_MB`로 조정 가능합니다(기본 512MB).
+
 ### 3. 서버 실행(권장)
 
 프로덕션에서는 포크/멀티프로세스 관련 MPS 이슈를 피하기 위해 단일 워커로 실행하세요:
@@ -51,6 +56,12 @@ python app.py
 ```
 
 `--reload` 옵션은 프로덕션에서 사용하지 마세요. MPS 초기화 문제를 유발할 수 있습니다.
+
+헬스 체크:
+
+```bash
+curl -s http://localhost:8000/healthz
+```
 
 ## 프로젝트 구조
 
