@@ -10,6 +10,7 @@ pip install git+https://github.com/openai/whisper.git
 
 echo "======Installing Flask, Werkzeug, tqdm...======"
 pip install flask werkzeug tqdm
+pip install -r requirements.txt
 
 echo "======Cloning whisper.cpp repository...======"
 git clone https://github.com/ggerganov/whisper.cpp.git
