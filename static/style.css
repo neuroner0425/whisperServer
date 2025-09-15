@@ -88,7 +88,6 @@ tr:hover {
     color: #222;
     word-break: break-all;
     white-space: pre-wrap;
-    max-height: 600px;
     overflow-y: auto;
 }
 .download-btn {

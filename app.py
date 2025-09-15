@@ -134,6 +134,70 @@ def get_media_duration_ffprobe(path: str):
     except FileNotFoundError:
         # ffprobe not installed
         return None
+
+
+# Gemini API (optional) — lazy init
+_gemini_init_done = False
+_gemini_client = None
+GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-2.5-pro')
+
+def _gemini_init_once():
+    global _gemini_init_done, _gemini_client
+    if _gemini_init_done:
+        return _gemini_client
+    # 우선순위: 환경변수 -> 환경변수로 지정한 파일 -> 기본 키 파일들
+    api_key = os.environ.get('GEMINI_API_KEY')
+    if not api_key:
+        key_file_env = os.environ.get('GEMINI_API_KEY_FILE')
+        candidates = []
+        if key_file_env:
+            candidates.append(key_file_env)
+        # 기본 위치 후보들
+        candidates.append(os.path.join(BASE_DIR, 'gemini_api_key.txt'))
+        candidates.append(os.path.join(BASE_DIR, '.gemini_api_key'))
+        for p in candidates:
+            try:
+                if os.path.exists(p):
+                    with open(p, 'r', encoding='utf-8') as kf:
+                        api_key = kf.read().strip()
+                        if api_key:
+                            logging.info(f"[Gemini] API 키를 파일에서 로드: {p}")
+                            break
+            except Exception as e:
+                logging.warning(f"[Gemini] 키 파일 읽기 실패({p}): {e}")
+    if not api_key:
+        _gemini_init_done = True
+        _gemini_client = None
+        return None
+    try:
+        import google.generativeai as genai  # type: ignore
+        genai.configure(api_key=api_key)
+        _gemini_client = genai
+    except Exception as e:
+        logging.warning(f"[Gemini 초기화 실패] {e}")
+        _gemini_client = None
+    _gemini_init_done = True
+    return _gemini_client
+
+def _gemini_refine_text(raw_text: str, description: str | None = None) -> str:
+    client = _gemini_init_once()
+    if client is None:
+        raise RuntimeError('Gemini API is not configured')
+    prompt = (
+        "다음은 녹음된 파일을 전사(STT)한 내용이야. 근데 보면 정확하게 인식되지 못했거나, 관련없는 내용도 전사된 부분이 있어. 이 부분들을 다듬어서 전사문을 재작성해주라. 최대한 원본을 유지하려고 노력해줘. 재작성된 내용 제외하고는 아무 코멘트도 붙히지 마.\n\n"
+        '"""\n' + raw_text + '\n"""\n\n'
+    )
+    if description:
+        prompt += (
+            "위 전사문을 설명하면 다음과 같아.\n\n" + '"""\n' + description + '\n"""\n'
+        )
+    try:
+        model = client.GenerativeModel(GEMINI_MODEL)
+        resp = model.generate_content(prompt)
+        return resp.text.strip() if hasattr(resp, 'text') and resp.text else ''
+    except Exception as e:
+        logging.exception(f"[Gemini 오류] {e}")
+        raise RuntimeError('Gemini API call failed')
     except Exception:
         return None
 
@@ -312,6 +376,23 @@ def worker():
             txt_path = os.path.join(RESULT_FOLDER, f'{job_id}.txt')
             with open(txt_path, 'w', encoding='utf-8') as f:
                 f.write(timeline_text)
+
+            # 전사 완료 직후 자동 정제 시도 (API 키 없으면 건너뜀) — 별도 파일에 저장
+            try:
+                if _gemini_init_once() is not None:
+                    refined = _gemini_refine_text(timeline_text)
+                    if refined:
+                        refined_path = os.path.join(RESULT_FOLDER, f'{job_id}_refined.txt')
+                        with open(refined_path, 'w', encoding='utf-8') as rf:
+                            rf.write(refined)
+                        # 메타데이터에 정제본 경로 저장
+                        with lock:
+                            if job_id in jobs:
+                                jobs[job_id]['result_refined'] = refined_path
+                                save_jobs(jobs)
+                        logging.info(f"[Gemini] 정제 결과 저장 완료: {refined_path}")
+            except Exception as e:
+                logging.warning(f"[Gemini 정제 건너뜀] {e}")
 
             completed = datetime.now()
             completed_ts = completed.timestamp()
@@ -519,10 +600,14 @@ async def job_status(request: Request, job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail='작업을 찾을 수 없습니다.')
     if job['status'] == '완료':
-        with open(job['result'], encoding='utf-8') as f:
+        variant = request.query_params.get('variant', 'original')
+        refined_path = job.get('result_refined')
+        use_refined = (variant == 'refined' and refined_path and os.path.exists(refined_path))
+        target_path = refined_path if use_refined else job['result']
+        with open(target_path, encoding='utf-8') as f:
             lines = f.readlines()
         html_lines = []
-        total_sec = job.get('media_duration_seconds') or 0
+        total_sec = 0 if use_refined else (job.get('media_duration_seconds') or 0)
         def parse_start_sec(timeline):
             import re
             m = re.match(r'\[(\d{2}):(\d{2}):(\d{2}\.\d+)', timeline)
@@ -535,20 +620,35 @@ async def job_status(request: Request, job_id: str):
                 return int(h)*3600 + int(m_)*60 + int(s)
             return 0
         for line in lines:
-            if ']' in line:
+            if not use_refined and ']' in line:
                 left, right = line.split(']', 1)
                 timeline = left + ']'
-                # 콘텐츠 이스케이프(잠재적 XSS 방지). 타임라인/텍스트 모두 이스케이프 처리
                 content = html.escape(right.strip())
                 safe_timeline = html.escape(timeline)
                 start_sec = parse_start_sec(left[1:]) if total_sec else 0
                 percent = int((start_sec/total_sec)*100) if total_sec else 0
                 bar_html = f'<span style="display:inline-block;width:80px;height:8px;background:#eee;border-radius:4px;vertical-align:middle;margin-right:6px;overflow:hidden;"><span style="display:inline-block;height:8px;background:#2563eb;width:{percent}%;border-radius:4px;"></span></span>' if total_sec else ''
-                html_lines.append(f'<div style="margin-bottom:4px;">{bar_html}<span style="color:#2563eb;font-weight:bold;">{safe_timeline}</span> {content} <span style="color:#888;font-size:0.95em;">({percent}%)</span></div>')
+                # 내부 f-string을 분리하여 백슬래시 이스케이프가 필요한 상황을 피함
+                percent_html = ''
+                if total_sec:
+                    percent_html = f'<span style="color:#888;font-size:0.95em;">({percent}%)</span>'
+                html_lines.append(
+                    f'<div style="margin-bottom:4px;">{bar_html}'
+                    f'<span style="color:#2563eb;font-weight:bold;">{safe_timeline}</span> '
+                    f'{content} {percent_html}</div>'
+                )
             else:
+                # 정제본은 일반 텍스트 라인으로 출력
                 html_lines.append(html.escape(line.strip()))
         text = '\n'.join(html_lines)
-        return templates.TemplateResponse('result.html', {'request': request, 'job': job, 'job_id': job_id, 'text': text})
+        return templates.TemplateResponse('result.html', {
+            'request': request,
+            'job': job,
+            'job_id': job_id,
+            'text': text,
+            'variant': 'refined' if use_refined else 'original',
+            'has_refined': bool(refined_path and os.path.exists(refined_path)),
+        })
     else:
         return templates.TemplateResponse('waiting.html', {'request': request, 'job': job})
 
@@ -560,6 +660,18 @@ async def download_txt(job_id: str):
         raise HTTPException(status_code=404, detail='다운로드할 결과가 없습니다.')
     base = os.path.splitext(job['filename'])[0]
     return FileResponse(job['result'], media_type='text/plain', filename=f'{base}.txt')
+
+
+@app.get('/download/{job_id}/refined')
+async def download_txt_refined(job_id: str):
+    job = jobs.get(job_id)
+    if not job or job['status'] != '완료':
+        raise HTTPException(status_code=404, detail='다운로드할 결과가 없습니다.')
+    refined_path = job.get('result_refined')
+    if not refined_path or not os.path.exists(refined_path):
+        raise HTTPException(status_code=404, detail='정제본이 없습니다.')
+    base = os.path.splitext(job['filename'])[0]
+    return FileResponse(refined_path, media_type='text/plain', filename=f'{base}_refined.txt')
 
 
 if __name__ == '__main__':
