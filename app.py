@@ -34,6 +34,26 @@ logging.basicConfig(
     format='%(asctime)s %(levelname)s %(message)s'
 )
 
+# Access log filter: suppress logs for GET /job/{job_id} to reduce noise when viewing results
+class UvicornAccessFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:  # return True to keep, False to drop
+        try:
+            msg = record.getMessage()
+            # uvicorn access log lines typically contain the HTTP method and path like: '"GET /job/<id> '
+            if 'GET /job/' in msg or 'POST /job/' in msg:
+                return False
+        except Exception:
+            # on any unexpected issue, don't block the log
+            return True
+        return True
+
+# Attach filter to uvicorn access logger if present
+try:
+    _access_logger = logging.getLogger('uvicorn.access')
+    _access_logger.addFilter(UvicornAccessFilter())
+except Exception:
+    pass
+
 # static 디렉터리 생성 및 마운트 (템플릿의 url_for('static', ...) 사용 지원)
 STATIC_DIR = os.path.join(BASE_DIR, 'static')
 os.makedirs(STATIC_DIR, exist_ok=True)
@@ -283,7 +303,6 @@ def worker():
                 for out_line in proc.stdout:
                     if out_line is None:
                         break
-                    logging.info(f"[whisper.cpp][{job_id[:8]}] {out_line.strip()}")
                     # 일부 툴은 진행률을 CR(\r)로 덮어씀 -> 줄 단위로 강제 변환해서 파싱만 수행
                     for piece in re.split(r'[\r\n]+', out_line):
                         if piece == '':
@@ -304,7 +323,6 @@ def worker():
                                 if percent < max_percent:
                                     percent = max_percent
                                 if percent != last_percent:
-                                    logging.info(f"[진행률][{job_id[:8]}] {percent}% ({start_sec:.1f}s/{total_sec}s)")
                                     with lock:
                                         if job_id in jobs:
                                             jobs[job_id]['phase'] = '전사 중'
@@ -380,7 +398,12 @@ def worker():
             # 전사 완료 직후 자동 정제 시도 (API 키 없으면 건너뜀) — 별도 파일에 저장
             try:
                 if _gemini_init_once() is not None:
-                    refined = _gemini_refine_text(timeline_text)
+                    # 업로드 시 사용자가 제공한 설명(선택)을 함께 전달
+                    user_desc = None
+                    with lock:
+                        if job_id in jobs:
+                            user_desc = jobs[job_id].get('description')
+                    refined = _gemini_refine_text(timeline_text, user_desc)
                     if refined:
                         refined_path = os.path.join(RESULT_FOLDER, f'{job_id}_refined.txt')
                         with open(refined_path, 'w', encoding='utf-8') as rf:
@@ -503,7 +526,7 @@ async def upload_get(request: Request):
 
 
 @app.post('/upload')
-async def upload_file(request: Request, file: UploadFile = None, input_name: str = Form(None)):
+async def upload_file(request: Request, file: UploadFile = None, input_name: str = Form(None), description: str | None = Form(None)):
     if not file:
         raise HTTPException(status_code=400, detail='파일이 없습니다.')
     if file.filename == '':
@@ -579,7 +602,8 @@ async def upload_file(request: Request, file: UploadFile = None, input_name: str
             'uploaded_ts': uploaded.timestamp(),
             'duration': duration,
             'media_duration': format_seconds(duration) if duration else '-',
-            'media_duration_seconds': duration if duration else None
+            'media_duration_seconds': duration if duration else None,
+            'description': description or None,
         }
         save_jobs(jobs)
 
@@ -600,9 +624,11 @@ async def job_status(request: Request, job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail='작업을 찾을 수 없습니다.')
     if job['status'] == '완료':
-        variant = request.query_params.get('variant', 'original')
+        # 기본은 정제본 우선(있을 경우). 쿼리로 original=true 전달 시 원본 표시.
+        show_original = request.query_params.get('original', 'false').lower() in ('1', 'true', 'yes', 'on')
         refined_path = job.get('result_refined')
-        use_refined = (variant == 'refined' and refined_path and os.path.exists(refined_path))
+        # 정제본이 있고, 사용자가 원본 강제 표시를 요청하지 않은 경우 정제본 사용
+        use_refined = (bool(refined_path and os.path.exists(refined_path)) and not show_original)
         target_path = refined_path if use_refined else job['result']
         with open(target_path, encoding='utf-8') as f:
             lines = f.readlines()
@@ -648,6 +674,7 @@ async def job_status(request: Request, job_id: str):
             'text': text,
             'variant': 'refined' if use_refined else 'original',
             'has_refined': bool(refined_path and os.path.exists(refined_path)),
+            'original_query': 'true' if not use_refined else 'false',
         })
     else:
         return templates.TemplateResponse('waiting.html', {'request': request, 'job': job})

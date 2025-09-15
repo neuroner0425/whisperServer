@@ -14,12 +14,25 @@
     <div class="info">작업 완료: {{ job.get('completed_at', '-') }}</div>
     <div class="info">작업 소요(초): {{ job.get('duration', '-') }}</div>
     <div class="info">미디어 길이: {{ job.get('media_duration', '-') }}</div>
-    <div style="margin:10px 0;">
-        <a href="{{ url_for('job_status', job_id=job_id) }}?variant=original" style="margin-right:8px;{{ 'font-weight:bold;color:#2563eb;' if variant!='refined' else '' }}">원본 보기</a>
+    <div style="margin:10px 0;display:flex;align-items:center;gap:10px;">
         {% if has_refined %}
-        <a href="{{ url_for('job_status', job_id=job_id) }}?variant=refined" style="{{ 'font-weight:bold;color:#2563eb;' if variant=='refined' else '' }}">정제본 보기</a>
+        <label style="display:flex;align-items:center;gap:6px;">
+            <input type="checkbox" id="toggleOriginal" {% if variant=='original' %}checked{% endif %}>
+            <span>원본 보기</span>
+        </label>
+        <script>
+        (function(){
+            const cb = document.getElementById('toggleOriginal');
+            if (!cb) return;
+            cb.addEventListener('change', function(){
+                const baseUrl = '{{ url_for('job_status', job_id=job_id) }}';
+                const next = cb.checked ? (baseUrl + '?original=true') : baseUrl;
+                window.location.href = next;
+            });
+        })();
+        </script>
         {% else %}
-        <span style="color:#aaa;">정제본 없음</span>
+        <span style="color:#aaa;">정제본 없음(원본 표시)</span>
         {% endif %}
     </div>
     <div class="result-text">{{ text|safe }}</div>
