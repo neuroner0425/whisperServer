@@ -14,7 +14,20 @@
     <div class="info">작업 완료: {{ job.get('completed_at', '-') }}</div>
     <div class="info">작업 소요(초): {{ job.get('duration', '-') }}</div>
     <div class="info">미디어 길이: {{ job.get('media_duration', '-') }}</div>
+    <div style="margin:10px 0;">
+        <a href="{{ url_for('job_status', job_id=job_id) }}?variant=original" style="margin-right:8px;{{ 'font-weight:bold;color:#2563eb;' if variant!='refined' else '' }}">원본 보기</a>
+        {% if has_refined %}
+        <a href="{{ url_for('job_status', job_id=job_id) }}?variant=refined" style="{{ 'font-weight:bold;color:#2563eb;' if variant=='refined' else '' }}">정제본 보기</a>
+        {% else %}
+        <span style="color:#aaa;">정제본 없음</span>
+        {% endif %}
+    </div>
     <div class="result-text">{{ text|safe }}</div>
-    <a class="download-btn" href="{{ url_for('download_txt', job_id=job_id) }}">txt 다운로드</a>
+    <div style="margin-top:10px;">
+        <a class="download-btn" href="{{ url_for('download_txt', job_id=job_id) }}">원본 txt 다운로드</a>
+        {% if has_refined %}
+        <a class="download-btn" href="{{ url_for('download_txt_refined', job_id=job_id) }}" style="margin-left:8px;">정제본 txt 다운로드</a>
+        {% endif %}
+    </div>
 </div>
 {% endblock %}
