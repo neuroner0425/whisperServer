@@ -204,7 +204,7 @@ def _gemini_refine_text(raw_text: str, description: str | None = None) -> str:
     if client is None:
         raise RuntimeError('Gemini API is not configured')
     prompt = (
-        "다음은 녹음된 파일을 전사(STT)한 내용이야. 근데 보면 정확하게 인식되지 못했거나, 관련없는 내용도 전사된 부분이 있어. 이 부분들을 다듬어서 전사문을 재작성해주라. 최대한 원본을 유지하려고 노력해줘. 재작성된 내용 제외하고는 아무 코멘트도 붙히지 마.\n\n"
+        "다음은 녹음된 파일을 전사(STT)한 내용이야. 보면 정확하게 인식되지 못했거나, 관련없는 내용으로 전사된 부분이 있어. 이 부분들을 다듬어서 전사문을 재작성해주라. 최대한 원본을 유지하려고 노력해줘. 재작성된 내용 제외하고는 아무 코멘트도 붙히지 마.\n\n"
         '"""\n' + raw_text + '\n"""\n\n'
     )
     if description:
