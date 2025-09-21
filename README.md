@@ -44,15 +44,13 @@ pip install -r requirements.txt
 
 ```bash
 export PYTORCH_ENABLE_MPS_FALLBACK=1
-# 필요시 강제 CPU 모드
-export FORCE_CPU=1
-uvicorn app:app --host 0.0.0.0 --port 8000 --workers 1
+uvicorn src.app:app --host 0.0.0.0 --port 8000 --workers 1
 ```
 
-개발 중에는 아래처럼 직접 실행할 수 있습니다(간단한 테스트용):
+또는 하위 호환을 위해 루트 `app.py`를 그대로 사용할 수도 있습니다:
 
 ```bash
-python app.py
+python app.py  # 내부에서 src.app:app을 재노출
 ```
 
 `--reload` 옵션은 프로덕션에서 사용하지 마세요. MPS 초기화 문제를 유발할 수 있습니다.
@@ -67,8 +65,20 @@ curl -s http://localhost:8000/healthz
 
 ```
 whisperServer/
-├── app.py
-├── job_persist.py
+├── app.py                  # 레거시 엔트리 (src.app re-export)
+├── src/
+│   ├── app.py             # FastAPI 엔트리포인트
+│   ├── config.py          # 경로/환경 상수
+│   ├── utils/
+│   │   ├── media.py       # ffmpeg/ffprobe 헬퍼
+│   │   └── text.py        # 포맷 유틸
+│   ├── services/
+│   │   └── gemini_service.py  # Gemini API 래퍼
+│   ├── persistence/
+│   │   └── jobs.py        # 작업 메모리 & 저장 위임
+│   ├── workers/
+│   │   └── whisper_worker.py  # STT 워커 스레드 & 실행 로직
+│   └── job_persist.py         # 기존 JSON 원자적 저장 구현 (재사용)
 ├── install_requirements.sh
 ├── requirements.txt
 ├── pyproject.toml
@@ -96,4 +106,10 @@ whisperServer/
 
 ---
 
-필요하면 `Dockerfile`과 `on_shutdown` 훅, 또는 `requirements.txt` 고정/검증을 바로 적용해 드리겠습니다.
+### 모듈화 변경 요약
+
+- 대형 `app.py` 를 역할별 파일로 분리하여 가독성과 유지보수성 향상
+- 워커 로직(`whisper_worker.py`), Gemini 정제(`gemini_service.py`), 미디어 처리(`media.py`), 포맷/텍스트(`text.py`), 영속성 어댑터(`jobs.py`)로 책임 분리
+- 루트 `app.py`는 하위 호환을 위한 re-export만 수행
+
+필요하면 `Dockerfile`, 추가 로깅/메트릭 개선, 테스트 코드(예: 업로드/전사 e2e)도 확장 가능합니다. 요청 주세요.
