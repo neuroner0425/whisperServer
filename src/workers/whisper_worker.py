@@ -219,7 +219,6 @@ def worker_loop(task_queue: 'queue.Queue[tuple[str,str]]'):
                     with jobs_lock:
                         if job_id in jobs:
                             user_desc = jobs[job_id].get('description')
-                    raise ValueError('Gemini 서비스 초기화 실패')
                     refined = gemini_service.refine_transcript(timeline_text, user_desc)
                     if refined:
                         refined_path = os.path.join(RESULT_FOLDER, f'{job_id}_refined.txt')
