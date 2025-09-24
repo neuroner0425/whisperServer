@@ -11,13 +11,20 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from werkzeug.utils import secure_filename
 
-from .config import (
+from .logging_config import setup_logging
+
+# 로깅을 가능한 한 빨리 초기화 (다른 내부 모듈 import 전에)
+# uvicorn 기본 스타트업 로그(Started server process, Application startup complete 등) 표시를 원하면
+# propagate_uvicorn=True 로 설정한다.
+setup_logging(propagate_uvicorn=True)
+
+from .config import (  # noqa: E402
     BASE_DIR, UPLOAD_FOLDER, RESULT_FOLDER, TEMPLATE_DIR, STATIC_DIR,
     ALLOWED_EXTENSIONS, CHUNK_SIZE, MAX_UPLOAD_SIZE_MB
 )
-from .utils.media import get_media_duration_ffprobe, convert_to_wav
-from .utils.text import format_seconds
-from .workers.whisper_worker import jobs, jobs_lock, requeue_pending, shutdown_workers, prom_init_once, UPLOAD_BYTES, JOBS_TOTAL, enqueue_stt, _save_jobs
+from .utils.media import get_media_duration_ffprobe, convert_to_wav  # noqa: E402
+from .utils.text import format_seconds  # noqa: E402
+from .workers.whisper_worker import jobs, jobs_lock, requeue_pending, shutdown_workers, prom_init_once, UPLOAD_BYTES, JOBS_TOTAL, enqueue_stt, _save_jobs  # noqa: E402
 
 # 환경 설정
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
@@ -33,7 +40,8 @@ templates = Jinja2Templates(directory=TEMPLATE_DIR)
 templates.env.globals['datetime'] = datetime
 app.mount('/static', StaticFiles(directory=STATIC_DIR), name='static')
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+# root logger 사용
+logger = logging.getLogger(__name__)
 
 class UvicornAccessFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:  # return True to keep, False to drop
@@ -49,8 +57,9 @@ class UvicornAccessFilter(logging.Filter):
 
 # Attach filter to uvicorn access logger if present
 try:
+    logger.debug("Attaching UvicornAccessFilter to uvicorn.access logger (already handled in setup if env enabled)")
     _access_logger = logging.getLogger('uvicorn.access')
-    _access_logger.addFilter(UvicornAccessFilter())
+    # setup_logging에서 LOG_FILTER_ACCESS 로 제어하므로 여기서는 조건 없이 붙이지 않음
 except Exception:
     pass
 

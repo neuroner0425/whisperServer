@@ -276,11 +276,13 @@ def enqueue_stt(job_id: str, filepath: str):
         pass
 
 def start_worker():
+    logging.info("[worker] 작업자 시작 시도")
     if worker_threads:
         return
     t = threading.Thread(target=worker_loop, args=(task_queue,), daemon=True)
     t.start()
     worker_threads.append(t)
+    logging.info("[worker] 작업자 시작 완료")
 
 def requeue_pending():
     try:
@@ -298,6 +300,7 @@ def requeue_pending():
         logging.warning(f"[startup 복구 실패] {e}")
         
 def shutdown_workers():
+    logging.info("[shutdown] 작업자 종료 시도")
     for _ in worker_threads:
         task_queue.put(None)
     for t in worker_threads:
