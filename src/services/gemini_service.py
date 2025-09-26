@@ -2,7 +2,7 @@ from __future__ import annotations
 import os
 import logging
 from typing import Optional
-from src.config import BASE_DIR, GEMINI_MODEL
+from src.config import PROJECT_ROOT, GEMINI_MODEL
 
 _gemini_client = None
 _gemini_init_done = False
@@ -16,8 +16,8 @@ def _read_api_key() -> Optional[str]:
     candidates = []
     if key_file_env:
         candidates.append(key_file_env)
-    candidates.append(BASE_DIR / 'gemini_api_key.txt')
-    candidates.append(BASE_DIR / '.gemini_api_key')
+    candidates.append(os.path.join(PROJECT_ROOT, 'gemini_api_key.txt'))
+    candidates.append(os.path.join(PROJECT_ROOT, '.gemini_api_key'))
     for p in candidates:
         try:
             if os.path.exists(p):

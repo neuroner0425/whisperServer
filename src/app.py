@@ -3,6 +3,7 @@ import uuid
 import queue
 import logging
 import html
+import asyncio
 from datetime import datetime
 from fastapi import FastAPI, Request, UploadFile, Form, HTTPException, Response
 from contextlib import asynccontextmanager
@@ -24,13 +25,14 @@ from .config import (  # noqa: E402
 )
 from .utils.media import get_media_duration_ffprobe, convert_to_wav  # noqa: E402
 from .utils.text import format_seconds  # noqa: E402
-from .workers.whisper_worker import jobs, jobs_lock, requeue_pending, shutdown_workers, prom_init_once, UPLOAD_BYTES, JOBS_TOTAL, enqueue_stt, _save_jobs  # noqa: E402
+from .workers.whisper_worker import jobs, jobs_lock, start_worker, requeue_pending, shutdown_workers, prom_init_once, UPLOAD_BYTES, JOBS_TOTAL, enqueue_stt, _save_jobs  # noqa: E402
 
 # 환경 설정
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    start_worker()
     requeue_pending()
     yield
     shutdown_workers()

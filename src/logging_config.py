@@ -108,6 +108,47 @@ def setup_logging(
 
 	root = logging.getLogger()
 
+	# unify_uvicorn 결정: 명시 인자 > env > propagate_uvicorn 값
+	if unify_uvicorn is None:
+		unify_env = os.getenv("LOG_UNIFY_UVICORN")
+		if unify_env is not None:
+			unify_uvicorn = unify_env.lower() in ("1", "true", "yes", "on")
+		else:
+			unify_uvicorn = propagate_uvicorn
+
+	if force:
+		for h in list(root.handlers):
+			root.removeHandler(h)
+
+	# 기존 핸들러가 없을 때만 스트림 핸들러와 파일 핸들러 추가
+	has_stream_handler = any(isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler) for h in root.handlers)
+	
+	if not has_stream_handler:
+		# Stream handler (터미널 출력)
+		if json:
+			stream_formatter: logging.Formatter = JsonFormatter()
+		else:
+			fmt = os.getenv("LOG_FORMAT", "%(asctime)s %(levelname)s [%(name)s] %(message)s")
+			stream_formatter = logging.Formatter(fmt)
+		sh = logging.StreamHandler(sys.stdout)
+		sh.setFormatter(stream_formatter)
+		root.addHandler(sh)
+
+	# 기존 LOG_FILE 핸들러 (단일 파일)
+	if log_file:
+		has_log_file_handler = any(
+			isinstance(h, logging.FileHandler) and getattr(h, 'baseFilename', '').endswith(log_file)
+			for h in root.handlers
+		)
+		if not has_log_file_handler:
+			try:
+				from logging.handlers import RotatingFileHandler
+				fh = RotatingFileHandler(log_file, maxBytes=10 * 1024 * 1024, backupCount=3, encoding='utf-8')
+				fh.setFormatter(stream_formatter if json else logging.Formatter(fmt))  # type: ignore[name-defined]
+				root.addHandler(fh)
+			except Exception as e:  # pragma: no cover (파일 오류시 stdout 경고)
+				root.warning(f"파일 핸들러 생성 실패: {e}")
+
 	# 로그 디렉토리 및 per-level 파일 핸들러 추가
 	log_dir = os.getenv("LOG_DIR", "log")
 	log_dir_path = pathlib.Path(log_dir)
@@ -131,49 +172,24 @@ def setup_logging(
 		("warning.log", logging.WARNING, logging.ERROR-1),
 		("error.log", logging.ERROR, None),
 	]
+	
 	for fname, min_level, max_level in file_levels:
 		fpath = log_dir_path / fname
-		fh = logging.FileHandler(fpath, encoding="utf-8")
-		fh.setLevel(min_level)
-		fh.addFilter(LevelFilter(min_level, max_level))
-		if json:
-			fh.setFormatter(JsonFormatter())
-		else:
-			fmt = os.getenv("LOG_FORMAT", "%(asctime)s %(levelname)s [%(name)s] %(message)s")
-			fh.setFormatter(logging.Formatter(fmt))
-		root.addHandler(fh)
-
-	# unify_uvicorn 결정: 명시 인자 > env > propagate_uvicorn 값
-	if unify_uvicorn is None:
-		unify_env = os.getenv("LOG_UNIFY_UVICORN")
-		if unify_env is not None:
-			unify_uvicorn = unify_env.lower() in ("1", "true", "yes", "on")
-		else:
-			unify_uvicorn = propagate_uvicorn
-
-	if force:
-		for h in list(root.handlers):
-			root.removeHandler(h)
-
-	if not root.handlers:
-		# Stream handler
-		if json:
-			stream_formatter: logging.Formatter = JsonFormatter()
-		else:
-			fmt = os.getenv("LOG_FORMAT", "%(asctime)s %(levelname)s [%(name)s] %(message)s")
-			stream_formatter = logging.Formatter(fmt)
-		sh = logging.StreamHandler(sys.stdout)
-		sh.setFormatter(stream_formatter)
-		root.addHandler(sh)
-
-		if log_file:
-			try:
-				from logging.handlers import RotatingFileHandler
-				fh = RotatingFileHandler(log_file, maxBytes=10 * 1024 * 1024, backupCount=3, encoding='utf-8')
-				fh.setFormatter(stream_formatter if json else logging.Formatter(fmt))  # type: ignore[name-defined]
-				root.addHandler(fh)
-			except Exception as e:  # pragma: no cover (파일 오류시 stdout 경고)
-				root.warning(f"파일 핸들러 생성 실패: {e}")
+		# 이미 같은 파일 핸들러가 있는지 확인
+		has_level_file_handler = any(
+			isinstance(h, logging.FileHandler) and getattr(h, 'baseFilename', '').endswith(fname)
+			for h in root.handlers
+		)
+		if not has_level_file_handler:
+			fh = logging.FileHandler(fpath, encoding="utf-8")
+			fh.setLevel(min_level)
+			fh.addFilter(LevelFilter(min_level, max_level))
+			if json:
+				fh.setFormatter(JsonFormatter())
+			else:
+				fmt = os.getenv("LOG_FORMAT", "%(asctime)s %(levelname)s [%(name)s] %(message)s")
+				fh.setFormatter(logging.Formatter(fmt))
+			root.addHandler(fh)
 
 	root.setLevel(level)
 
@@ -185,8 +201,8 @@ def setup_logging(
 		if propagate_uvicorn and unify_uvicorn:
 			for h in list(lg.handlers):
 				lg.removeHandler(h)
-		# access 필터 옵션
-		if os.getenv("LOG_FILTER_ACCESS", "0") in ("1", "true", "yes", "on") and name == "uvicorn.access":
+		# access 필터 옵션 (기본값을 1로 변경)
+		if os.getenv("LOG_FILTER_ACCESS", "1") in ("1", "true", "yes", "on") and name == "uvicorn.access":
 			found = any(isinstance(f, UvicornAccessFilter) for f in lg.filters)
 			if not found:
 				lg.addFilter(UvicornAccessFilter())
