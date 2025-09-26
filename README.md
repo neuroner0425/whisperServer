@@ -61,6 +61,46 @@ python app.py  # 내부에서 src.app:app을 재노출
 curl -s http://localhost:8000/healthz
 ```
 
+### 4. 로깅 설정 / 문제 해결
+
+`logging.info(...)` / `logging.warning(...)` 이 출력되지 않는 주요 원인은 다음과 같습니다:
+
+1. uvicorn이 자체 기본 로깅 구성을 먼저 적용 → 이후 `logging.basicConfig` 무효 (이미 Handler 존재)
+2. import 시점이 늦어 root logger level 이 원하는 값으로 설정되지 않음
+3. 여러 번 basicConfig 호출 (두 번째 이후 호출은 무시)
+4. 모듈 내부에서 `logger = logging.getLogger(__name__)` 대신 `print` 사용 또는 level mismatch
+
+본 프로젝트는 `src/logging_config.py` 내 `setup_logging()` 을 사용하여 아래 특징을 가집니다:
+
+- 환경 변수
+	- `LOG_LEVEL` (기본: INFO)
+	- `LOG_FILE` (지정 시 회전 로그 파일 생성: 10MB * 3)
+	- `LOG_JSON` (true/1/on → JSON 포맷 출력)
+	- `LOG_FORMAT` (커스텀 텍스트 포맷 지정)
+	- `LOG_FILTER_ACCESS` (true → 잦은 `uvicorn.access` 중 /job/<id> 접근 로그 억제)
+- idempotent: 여러 번 호출해도 중복 핸들러 생성 X
+- uvicorn.* logger propagate 제어 가능 (현재 기본 False)
+
+실행 예시:
+
+```bash
+LOG_LEVEL=DEBUG LOG_FILE=server.log LOG_FILTER_ACCESS=1 \
+uvicorn src.app:app --host 0.0.0.0 --port 8000 --workers 1
+```
+
+JSON 포맷:
+```bash
+LOG_JSON=1 LOG_LEVEL=INFO uvicorn src.app:app --port 8000
+```
+
+출력 확인 (예):
+```
+2025-09-24 12:00:00 INFO [src.app] Logging initialized (level=INFO, json=False, file=None)
+2025-09-24 12:00:05 INFO [uvicorn.error] Application startup complete.
+```
+
+기존 `logging.basicConfig` 는 제거되었으며, 초기화는 `src/app.py` 상단에서 이루어집니다.
+
 ## 프로젝트 구조
 
 ```

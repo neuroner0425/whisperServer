@@ -210,6 +210,7 @@ def worker_loop(task_queue: 'queue.Queue[tuple[str,str]]'):
                     pass
                 continue
             txt_path = os.path.join(RESULT_FOLDER, f'{job_id}.txt')
+            logging.info(f"[작업] 전사 결과 저장: {txt_path}")
             with open(txt_path, 'w', encoding='utf-8') as f:
                 f.write(timeline_text)
             # Gemini refine
@@ -220,6 +221,7 @@ def worker_loop(task_queue: 'queue.Queue[tuple[str,str]]'):
                         if job_id in jobs:
                             user_desc = jobs[job_id].get('description')
                     refined = gemini_service.refine_transcript(timeline_text, user_desc)
+                    logging.info(f"[Gemini] 정제 결과 없음")
                     if refined:
                         refined_path = os.path.join(RESULT_FOLDER, f'{job_id}_refined.txt')
                         with open(refined_path, 'w', encoding='utf-8') as rf:
@@ -229,6 +231,8 @@ def worker_loop(task_queue: 'queue.Queue[tuple[str,str]]'):
                                 jobs[job_id]['result_refined'] = refined_path
                                 _save_jobs(jobs)
                         logging.info(f"[Gemini] 정제 결과 저장: {refined_path}")
+                else:
+                    logging.info(f"[Gemini] API 미설정, 정제 건너뜀")
             except Exception as e:
                 logging.warning(f"[Gemini 정제 실패/건너뜀] {e}")
             completed = datetime.now()
@@ -286,6 +290,7 @@ def start_worker():
 
 def requeue_pending():
     try:
+        to_enqueue = []
         with jobs_lock:
             for job_id, job in list(jobs.items()):
                 if job.get('status') in ('작업 대기 중', '작업 중'):
@@ -293,9 +298,11 @@ def requeue_pending():
                         if name.startswith(job_id) and name.endswith('.wav'):
                             wav_path = os.path.join(UPLOAD_FOLDER, name)
                             if os.path.exists(wav_path):
-                                enqueue_stt(job_id, wav_path)
-                                logging.info(f"[복구] 작업 재큐잉: {job_id} -> {wav_path}")
+                                to_enqueue.append((job_id, wav_path))
                                 break
+        for job_id, wav_path in to_enqueue:
+            enqueue_stt(job_id, wav_path)
+            logging.info(f"[복구] 작업 재큐잉: {job_id} -> {wav_path}")
     except Exception as e:
         logging.warning(f"[startup 복구 실패] {e}")
         
@@ -309,4 +316,3 @@ def shutdown_workers():
         except Exception:
             pass
     
-start_worker()
