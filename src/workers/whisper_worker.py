@@ -15,7 +15,9 @@ from ..job_persist import load_jobs as _load_jobs, save_jobs as _save_jobs  # re
 class JobStatus:
     PENDING = "작업 대기 중"
     RUNNING = "작업 중"
-    DONE = "완료"
+    REFINING_PENDING = "정제 대기 중"
+    REFINING = "정제 중"
+    COMPLETED = "완료"
     FAILED = "실패"
 
 # Prometheus metrics (optional, lazy import pattern)
@@ -74,12 +76,22 @@ def _remove_file(path: Optional[str]):
     try:
         if os.path.exists(path):
             os.remove(path)
-            logging.info(f"[파일 삭제] {path}")
     except Exception as e:
         logging.warning(f"[파일 삭제 오류] {path}: {e}")
-
+        
+def _set_job(job_id: str, **kwargs):
+    with jobs_lock:
+        if job_id in jobs:
+            for k, v in kwargs.items():
+                jobs[job_id][k] = v
+            _save_jobs(jobs)
+            
+def _get_job(job_id: str) -> Optional[Dict[str, Any]]:
+    with jobs_lock:
+        return jobs.get(job_id)
 
 def _run_whisper(job_id: str, wav_path: str, total_sec: int | None):
+    logging.info(f"[whisper] 전사 시작: {job_id}")
     output_path = f"{wav_path}.txt"
     model_bin = os.path.join(MODEL_DIR, 'ggml-large-v3.bin')
     vad_model = os.path.join(MODEL_DIR, 'ggml-silero-v5.1.2.bin')
@@ -165,100 +177,148 @@ def _run_whisper(job_id: str, wav_path: str, total_sec: int | None):
     finally:
         pass
     text = _read_file_safe(output_path)
+    logging.info(f"[whisper] 전사 완료: {job_id}")
     _remove_file(output_path)
     return text
 
+def _task_transcribe(job_id: str, filepath: str, txt_path: str):
+    started = datetime.now()
+    started_ts=started.timestamp()
+    try:
+        if prom_init_once() and JOBS_IN_PROGRESS is not None:
+            JOBS_IN_PROGRESS.inc()
+        if prom_init_once() and QUEUE_LENGTH is not None:
+            QUEUE_LENGTH.set(max(task_queue.qsize(), 0))
+    except Exception:
+        pass
+    _set_job(job_id,
+        status=JobStatus.RUNNING,
+        started_at=started.strftime('%Y-%m-%d %H:%M:%S'),
+        started_ts=started_ts
+    )
+    total_sec = _get_job(job_id).get('media_duration_seconds')
+    try:
+        timeline_text = _run_whisper(job_id, filepath, total_sec)
+    except Exception as e:
+        logging.exception(f"[실행 오류] {e}")
+        with jobs_lock:
+            if job_id in jobs:
+                jobs[job_id]['status'] = JobStatus.FAILED
+                if isinstance(e, TimeoutError):
+                    jobs[job_id]['status_detail'] = '타임아웃'
+                _save_jobs(jobs)
+        try:
+            if PROM_AVAILABLE and JOBS_TOTAL is not None:
+                status_label = 'timeout' if isinstance(e, TimeoutError) else 'failure'
+                JOBS_TOTAL.labels(status=status_label).inc()
+        except Exception:
+            pass
+        raise e
+    logging.info(f"[작업] 전사 결과 저장: {job_id}")
+    with open(txt_path, 'w', encoding='utf-8') as f:
+        f.write(timeline_text)
+    completed = datetime.now()
+    completed_ts = completed.timestamp()
+    
+    duration = format_seconds(int(completed_ts - started_ts))
+    
+    try:
+        if prom_init_once() and JOBS_TOTAL is not None:
+            JOBS_TOTAL.labels(status='success').inc()
+        if prom_init_once() and JOB_DURATION_SECONDS is not None:
+            JOB_DURATION_SECONDS.observe((completed - started).total_seconds())
+    except Exception:
+        pass
+    
+    _set_job(job_id,
+            status=JobStatus.REFINING_PENDING,
+            completed_at=completed.strftime('%Y-%m-%d %H:%M:%S'),
+            completed_ts=completed_ts,
+            duration=duration)
+    
+def _task_refining(job_id, timeline_text: str):
+    _set_job(job_id, status=JobStatus.REFINING)
+    try:
+        if gemini_service.init_once() is not None:
+            user_desc = None
+            with jobs_lock:
+                if job_id in jobs:
+                    user_desc = jobs[job_id].get('description')
+            refined = gemini_service.refine_transcript(timeline_text, user_desc)
+            if refined:
+                refined_path = os.path.join(RESULT_FOLDER, f'{job_id}_refined.txt')
+                with open(refined_path, 'w', encoding='utf-8') as rf:
+                    rf.write(refined)
+                with jobs_lock:
+                    if job_id in jobs:
+                        jobs[job_id]['result_refined'] = refined_path
+                        _save_jobs(jobs)
+                logging.info(f"[Gemini] 정제 결과 저장: {job_id}")
+            else:
+                logging.warning(f"[Gemini] 정제 결과 없음")
+        else:
+            logging.info(f"[Gemini] API 미설정, 정제 건너뜀")
+    except Exception as e:
+        logging.warning(f"[Gemini 정제 실패/건너뜀] {e}")
 
 def worker_loop(task_queue: 'queue.Queue[tuple[str,str]]'):
     while True:
         job = task_queue.get()
+        task_done_called = False
         try:
             if job is None:
+                task_done_called = True
+                task_queue.task_done()
                 break
             job_id, filepath = job
-            started = datetime.now()
-            try:
-                if prom_init_once() and JOBS_IN_PROGRESS is not None:
-                    JOBS_IN_PROGRESS.inc()
-                if prom_init_once() and QUEUE_LENGTH is not None:
-                    QUEUE_LENGTH.set(max(task_queue.qsize(), 0))
-            except Exception:
-                pass
-            with jobs_lock:
-                if job_id in jobs:
-                    jobs[job_id]['status'] = '작업 중'
-                    jobs[job_id]['started_at'] = started.strftime('%Y-%m-%d %H:%M:%S')
-                    jobs[job_id]['started_ts'] = started.timestamp()
-                    _save_jobs(jobs)
-            logging.info(f"[작업] whisper.cpp 실행 시작: {job_id}, 파일: {filepath}")
-            total_sec = jobs.get(job_id, {}).get('media_duration_seconds')
-            try:
-                timeline_text = _run_whisper(job_id, filepath, total_sec)
-            except Exception as e:
-                logging.exception(f"[실행 오류] {e}")
-                with jobs_lock:
-                    if job_id in jobs:
-                        jobs[job_id]['status'] = '실패'
-                        if isinstance(e, TimeoutError):
-                            jobs[job_id]['status_detail'] = '타임아웃'
-                        _save_jobs(jobs)
-                try:
-                    if PROM_AVAILABLE and JOBS_TOTAL is not None:
-                        status_label = 'timeout' if isinstance(e, TimeoutError) else 'failure'
-                        JOBS_TOTAL.labels(status=status_label).inc()
-                except Exception:
-                    pass
-                continue
             txt_path = os.path.join(RESULT_FOLDER, f'{job_id}.txt')
-            logging.info(f"[작업] 전사 결과 저장: {txt_path}")
-            with open(txt_path, 'w', encoding='utf-8') as f:
-                f.write(timeline_text)
-            # Gemini refine
-            try:
-                if gemini_service.init_once() is not None:
-                    user_desc = None
-                    with jobs_lock:
-                        if job_id in jobs:
-                            user_desc = jobs[job_id].get('description')
-                    refined = gemini_service.refine_transcript(timeline_text, user_desc)
-                    logging.info(f"[Gemini] 정제 결과 없음")
-                    if refined:
-                        refined_path = os.path.join(RESULT_FOLDER, f'{job_id}_refined.txt')
-                        with open(refined_path, 'w', encoding='utf-8') as rf:
-                            rf.write(refined)
-                        with jobs_lock:
-                            if job_id in jobs:
-                                jobs[job_id]['result_refined'] = refined_path
-                                _save_jobs(jobs)
-                        logging.info(f"[Gemini] 정제 결과 저장: {refined_path}")
+            current_job_status = _get_job(job_id).get('status')
+            
+            if current_job_status not in (JobStatus.PENDING, JobStatus.RUNNING, JobStatus.REFINING_PENDING, JobStatus.REFINING):
+                logging.info(f"[작업 건너뜀] 상태: {current_job_status}, 작업ID: {job_id}")
+                continue
+
+            # 빈 filepath는 정제만 수행하라는 의미
+            if not filepath:
+                if current_job_status in (JobStatus.REFINING_PENDING, JobStatus.REFINING):
+                    logging.info(f"[정제만 시작] {job_id}")
+                    try:
+                        current_job_status = JobStatus.REFINING
+                        timeline_text = _read_file_safe(txt_path)
+                        _task_refining(job_id, timeline_text)
+                    except Exception as e:
+                        logging.warning(f"[정제 실패] {job_id}: {e}")
+                    
+                    _set_job(job_id, status=JobStatus.COMPLETED)
                 else:
-                    logging.info(f"[Gemini] API 미설정, 정제 건너뜀")
-            except Exception as e:
-                logging.warning(f"[Gemini 정제 실패/건너뜀] {e}")
-            completed = datetime.now()
-            completed_ts = completed.timestamp()
-            with jobs_lock:
-                if job_id in jobs:
-                    jobs[job_id]['status'] = '완료'
-                    jobs[job_id]['result'] = txt_path
-                    jobs[job_id]['completed_at'] = completed.strftime('%Y-%m-%d %H:%M:%S')
-                    jobs[job_id]['completed_ts'] = completed_ts
-                    started_ts = jobs[job_id].get('started_ts')
-                    if started_ts:
-                        jobs[job_id]['duration'] = format_seconds(int(completed_ts - started_ts))
-                    _save_jobs(jobs)
-            try:
-                if prom_init_once() and JOBS_TOTAL is not None:
-                    JOBS_TOTAL.labels(status='success').inc()
-                if prom_init_once() and JOB_DURATION_SECONDS is not None:
-                    JOB_DURATION_SECONDS.observe((completed - started).total_seconds())
-            except Exception:
-                pass
+                    logging.warning(f"[정제 요청 무시] 잘못된 상태: {current_job_status}, 작업ID: {job_id}")
+                continue
+
+            # 일반적인 전사 작업 처리
+            if current_job_status in (JobStatus.PENDING, JobStatus.RUNNING):
+                logging.info(f"[작업 시작] {job_id}")
+                try:
+                    current_job_status = JobStatus.RUNNING
+                    _task_transcribe(job_id, filepath, txt_path)
+                except Exception as e:
+                    logging.warning(f"[작업 실패] {job_id}: {e}")
+                    continue
+                current_job_status = JobStatus.REFINING_PENDING
+
+            if current_job_status in (JobStatus.REFINING_PENDING, JobStatus.REFINING):
+                logging.info(f"[정제 시작] {job_id}")
+                try:
+                    current_job_status = JobStatus.REFINING
+                    timeline_text = _read_file_safe(txt_path)
+                    _task_refining(job_id, timeline_text)
+                except Exception as e:
+                    logging.warning(f"[정제 실패] {job_id}: {e}")
+                
+            _set_job(job_id, status=JobStatus.COMPLETED, result=txt_path)
             # Remove original wav
             try:
-                if filepath and os.path.exists(filepath):
-                    os.remove(filepath)
-                    logging.info(f"[파일 삭제] 원본 삭제: {filepath}")
+                logging.info(f"[파일 삭제] 원본 삭제: {job_id}")
+                _remove_file(filepath)
             except Exception as e:
                 logging.warning(f"[파일 삭제 오류] {filepath}: {e}")
         finally:
@@ -269,7 +329,8 @@ def worker_loop(task_queue: 'queue.Queue[tuple[str,str]]'):
                     QUEUE_LENGTH.set(max(task_queue.qsize(), 0))
             except Exception:
                 pass
-            task_queue.task_done()
+            if not task_done_called:
+                task_queue.task_done()
             
 def enqueue_stt(job_id: str, filepath: str):
     task_queue.put((job_id, filepath))

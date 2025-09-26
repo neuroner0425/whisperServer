@@ -25,7 +25,8 @@ from .config import (  # noqa: E402
 )
 from .utils.media import get_media_duration_ffprobe, convert_to_wav  # noqa: E402
 from .utils.text import format_seconds  # noqa: E402
-from .workers.whisper_worker import jobs, jobs_lock, start_worker, requeue_pending, shutdown_workers, prom_init_once, UPLOAD_BYTES, JOBS_TOTAL, enqueue_stt, _save_jobs  # noqa: E402
+from .workers.whisper_worker import jobs, jobs_lock, JobStatus, start_worker, requeue_pending, shutdown_workers, prom_init_once, UPLOAD_BYTES, JOBS_TOTAL, enqueue_stt, _save_jobs  # noqa: E402
+from .services import gemini_service  # noqa: E402
 
 # 환경 설정
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
@@ -138,7 +139,7 @@ async def upload_file(request: Request, file: UploadFile = None, input_name: str
     with jobs_lock:
         uploaded = datetime.now()
         jobs[job_id] = {
-            'status': '작업 대기 중',
+            'status': JobStatus.PENDING,
             'filename': input_name,
             'result': None,
             'uploaded_at': uploaded.strftime('%Y-%m-%d %H:%M:%S'),
@@ -151,6 +152,7 @@ async def upload_file(request: Request, file: UploadFile = None, input_name: str
         _save_jobs(jobs)
 
     enqueue_stt(job_id, wav_path)
+    logging.info(f"[업로드] {job_id}")
     return RedirectResponse(url=f"/job/{job_id}", status_code=303)
 
 
@@ -160,13 +162,43 @@ async def job_list(request: Request):
         job_items = list(jobs.items())[::-1]
     return templates.TemplateResponse('jobs.html', {'request': request, 'job_items': job_items})
 
+@app.get('/status/{job_id}')
+async def job_status(request: Request, job_id: str):
+    with jobs_lock:
+        job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail='작업을 찾을 수 없습니다.')
+    
+    return {
+        'status': job.get('status', '알 수 없음'),
+        'progress_percent': job.get('progress_percent', 0),
+        'phase': job.get('phase', '대기 중'),
+        'progress_label': job.get('progress_label', '')
+    }
 
 @app.get('/job/{job_id}')
-async def job_status(request: Request, job_id: str):
+async def job_result(request: Request, job_id: str):
     job = jobs.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail='작업을 찾을 수 없습니다.')
-    if job['status'] == '완료':
+    
+    # 정제 중이거나 정제 대기 중일 때 미리보기 화면 표시
+    if job['status'] in (JobStatus.REFINING_PENDING, JobStatus.REFINING):
+        original_txt_path = os.path.join(RESULT_FOLDER, f'{job_id}.txt')
+        if os.path.exists(original_txt_path):
+            with open(original_txt_path, 'r', encoding='utf-8') as f:
+                original_text = f.read()
+            return templates.TemplateResponse('preview.html', {
+                'request': request,
+                'job': job,
+                'job_id': job_id,
+                'original_text': original_text
+            })
+        else:
+            # 원본 파일이 없으면 대기 화면으로 대체
+            return templates.TemplateResponse('waiting.html', {'request': request, 'job': job})
+    
+    if job['status'] == JobStatus.COMPLETED:
         show_original = request.query_params.get('original', 'false').lower() in ('1', 'true', 'yes', 'on')
         refined_path = job.get('result_refined')
         use_refined = (bool(refined_path and os.path.exists(refined_path)) and not show_original)
@@ -215,6 +247,7 @@ async def job_status(request: Request, job_id: str):
             'variant': 'refined' if use_refined else 'original',
             'has_refined': bool(refined_path and os.path.exists(refined_path)),
             'original_query': 'true' if not use_refined else 'false',
+            'can_refine': (gemini_service.init_once() is not None),
         })
     else:
         return templates.TemplateResponse('waiting.html', {'request': request, 'job': job})
@@ -256,6 +289,31 @@ async def metrics():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'metrics error: {e}')
 
+
+@app.post('/job/{job_id}/refine')
+async def refine_retry(job_id: str):
+    # 전제: 기존 전사 결과(txt)가 있어야 하며, Gemini가 설정되어 있어야 함
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail='작업을 찾을 수 없습니다.')
+    if job.get('status') != JobStatus.COMPLETED:
+        raise HTTPException(status_code=400, detail='작업이 완료된 후에만 정제를 시도할 수 있습니다.')
+    if gemini_service.init_once() is None:
+        raise HTTPException(status_code=400, detail='정제 기능이 설정되어 있지 않습니다. (GEMINI_API_KEY 필요)')
+    txt_path = job.get('result')
+    if not txt_path or not os.path.exists(txt_path):
+        raise HTTPException(status_code=404, detail='원본 전사 결과를 찾지 못했습니다.')
+
+    # 작업 상태를 정제 대기 중으로 변경하고 큐에 추가
+    with jobs_lock:
+        if job_id in jobs:
+            jobs[job_id]['status'] = JobStatus.REFINING_PENDING
+            _save_jobs(jobs)
+
+    # 정제 작업을 큐에 추가 (빈 문자열을 filepath로 전달하여 정제 작업임을 표시)
+    enqueue_stt(job_id, '')
+
+    return RedirectResponse(url=f"/job/{job_id}", status_code=303)
 
 if __name__ == '__main__':
     import uvicorn

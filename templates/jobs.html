@@ -13,7 +13,7 @@
             <td>{{ job['filename'] }}</td>
             <td>{{ job.get('media_duration', '-') }}</td>
             <td class="status">{{ job['status'] }}{% if job.result_refined %}(Y){% else %}(-){% endif %}</td>
-            <td><a href="{{ url_for('job_status', job_id=job_id) }}">보기</a></td>
+            <td><a href="{{ url_for('job_result', job_id=job_id) }}">보기</a></td>
         </tr>
         {% endfor %}
     </table>

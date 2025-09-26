@@ -35,13 +35,13 @@ class UvicornAccessFilter(logging.Filter):
 	"""특정 경로 접근 로그를 제거할 수 있는 필터.
 
 	환경변수 LOG_FILTER_ACCESS=1 일 때만 활성화.
-	/job/<id> GET/POST 접근이 매우 잦아 noisy 할 경우 필터링.
+	/status/<id> GET/POST 접근이 매우 잦아 noisy 할 경우 필터링.
 	"""
 
 	def filter(self, record: logging.LogRecord) -> bool:  # True = keep
 		try:
 			msg = record.getMessage()
-			if 'GET /job/' in msg or 'POST /job/' in msg:
+			if 'GET /status/' in msg or 'POST /status/' in msg:
 				return False
 		except Exception:
 			return True

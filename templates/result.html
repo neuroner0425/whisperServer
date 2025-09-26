@@ -25,7 +25,7 @@
             const cb = document.getElementById('toggleOriginal');
             if (!cb) return;
             cb.addEventListener('change', function(){
-                const baseUrl = '{{ url_for('job_status', job_id=job_id) }}';
+                const baseUrl = '{{ url_for('job_result', job_id=job_id) }}';
                 const next = cb.checked ? (baseUrl + '?original=true') : baseUrl;
                 window.location.href = next;
             });
@@ -40,6 +40,10 @@
         <a class="download-btn" href="{{ url_for('download_txt', job_id=job_id) }}">원본 txt 다운로드</a>
         {% if has_refined %}
         <a class="download-btn" href="{{ url_for('download_txt_refined', job_id=job_id) }}" style="margin-left:8px;">정제본 txt 다운로드</a>
+        {% elif can_refine %}
+        <form method="post" action="{{ url_for('refine_retry', job_id=job_id) }}" style="display:inline-block;margin-left:8px;">
+            <button type="submit" class="download-btn" style="background:#0ea5e9;border:none;cursor:pointer;">정제 재시도</button>
+        </form>
         {% endif %}
     </div>
 </div>

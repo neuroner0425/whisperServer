@@ -6,31 +6,37 @@
         <a href="{{ url_for('upload_file') }}">파일 업로드</a>
         <a href="{{ url_for('job_list') }}">작업 목록</a>
     </div>
-    <h2>작업 대기/진행 중</h2>
+    <h2>정제 전 미리보기</h2>
     <div class="info">파일명: {{ job['filename'] }}</div>
     <div class="info">미디어 길이: {{ job.get('media_duration', '-') }}</div>
     <div class="info">업로드: {{ job.get('uploaded_at', '-') }}</div>
     <div class="info">작업 시작: {{ job.get('started_at', '-') }}</div>
-    <div class="status">상태: {{ job['status'] }}</div>
-    <div class="loader"></div>
-    <div style="margin-top:12px;">
-        <div style="font-size:0.95em;color:#444;">{{ job.get('phase', '대기 중') }} {{ job.get('progress_percent', 0) }}%</div>
+    <div class="info">작업 완료: {{ job.get('completed_at', '-') }}</div>
+    <div class="status">상태: <span id="status">{{ job['status'] }}</span></div>
+    
+    <div class="loader" id="loader"></div>
+    <div style="margin-top:12px;" id="progress-container">
+        <div style="font-size:0.95em;color:#444;" id="progress-label">{{ job.get('phase', '정제 중') }} {{ job.get('progress_percent', 0) }}%</div>
         <div style="width:100%;background:#eee;border-radius:8px;overflow:hidden;height:12px;">
             <div style="height:12px;background:#2563eb;width:{{ job.get('progress_percent', 0) }}%;"></div>
         </div>
     </div>
-    <div style="color:#888; font-size:0.98em;">상태가 자동으로 업데이트됩니다.</div>
+    
+    <div style="margin-top:20px;padding:10px;border:1px solid #ddd;border-radius:8px;background:#f9f9f9;">
+        <h3 style="margin:0 0 10px 0;color:#666;">원본 전사 결과</h3>
+        <div class="result-text" style="max-height:400px;overflow-y:auto;">{{ original_text|replace('\n', '<br>')|safe }}</div>
+    </div>
+    
+    <div style="color:#888; font-size:0.98em;margin-top:12px;">정제가 완료되면 자동으로 최종 결과 페이지로 이동합니다.</div>
 </div>
 
 <script>
 (function(){
-    const statusEl = document.querySelector('.status');
-    const progressLabel = document.querySelector('[style*="font-size:0.95em"]');
-    const progressBar = document.querySelector('[style*="background:#2563eb"]');
-    
-    // URL에서 job_id 추출 (URL 패턴: /job/{job_id})
-    const pathParts = window.location.pathname.split('/');
-    const jobId = pathParts[pathParts.length - 1];
+    const jobId = '{{ job_id }}';
+    const statusEl = document.getElementById('status');
+    const loaderEl = document.getElementById('loader');
+    const progressContainer = document.getElementById('progress-container');
+    const progressLabel = document.getElementById('progress-label');
     
     let isPolling = true;
     
@@ -42,26 +48,19 @@
             .then(data => {
                 if (!isPolling) return;
                 
-                // 상태 업데이트
-                statusEl.textContent = `상태: ${data.status}`;
+                statusEl.textContent = data.status;
                 
-                // 진행률 업데이트
-                if (progressLabel) {
-                    progressLabel.textContent = `${data.phase || '대기 중'} ${data.progress_percent || 0}%`;
-                }
-                if (progressBar) {
-                    progressBar.style.width = `${data.progress_percent || 0}%`;
-                }
-                
-                // 상태에 따른 페이지 이동
-                if (data.status === '정제 대기 중' || data.status === '정제 중') {
+                if (data.status === '완료') {
                     isPolling = false;
-                    window.location.href = `/job/${jobId}`;
-                } else if (data.status === '완료') {
-                    isPolling = false;
+                    loaderEl.style.display = 'none';
+                    progressContainer.style.display = 'none';
+                    // 완료되면 최종 결과 페이지로 이동
                     window.location.href = `/job/${jobId}`;
                 } else {
-                    // 여전히 처리 중이면 3초 후 다시 체크
+                    // 진행 상황 업데이트
+                    progressLabel.textContent = `${data.phase || '정제 중'} ${data.progress_percent || 0}%`;
+                    
+                    // 3초 후 다시 체크
                     setTimeout(checkStatus, 3000);
                 }
             })
