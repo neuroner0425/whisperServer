@@ -6,7 +6,15 @@
         <a href="{{ url_for('upload_get') }}">파일 업로드</a>
     </div>
     <h2>작업 목록</h2>
-    <form action="{{ url_for('batch_download') }}" method="post">
+
+    <div style="margin-bottom: 1rem;">
+        <form action="{{ url_for('job_list') }}" method="get">
+            <input type="text" name="q" placeholder="파일명으로 검색..." value="{{ search_query or '' }}" class="search-input-field" style="flex-grow: 1;">
+            <input type="submit" value="검색" class="search-button">
+        </form>
+    </div>
+
+    <form id="batch_form" method="post" class="form-column">
         <table>
             <tr>
                 <th><input type="checkbox" id="select-all"></th>
@@ -20,13 +28,18 @@
                 <td><input type="checkbox" name="job_ids" value="{{ job_id }}"></td>
                 <td>{{ job['filename'] }}</td>
                 <td>{{ job.get('media_duration', '-') }}</td>
-                <td class="status">{{ job['status'] }}{% if job.get('result_refined') and job.get('status') == '완료' %} (Y){% endif %}</td>
+                <td class="status">{{ job['status'] }}{% if job.get('result_refined') and job.get('status') == '완료' %} (정제됨){% endif %}</td>
                 <td><a href="{{ url_for('job_result', job_id=job_id) }}">보기</a></td>
             </tr>
             {% endfor %}
         </table>
-        <div style="margin-top: 1rem;">
-            <button type="submit">선택 항목 일괄 다운로드</button>
+        <div style="margin-top: 1rem; display: flex; justify-content: center; gap: 1rem; width: 100%;">
+            <div style="width: 66.67%;">
+                <input type="submit" value="선택 항목 일괄 다운로드" class="full-width" formaction="{{ url_for('batch_download') }}">
+            </div>
+            <div style="width: 33.33%;">
+                <input type="submit" value="선택 항목 일괄 삭제" class="full-width btn-danger" onclick="confirmDelete()">
+            </div>
         </div>
     </form>
     {% if not job_items %}<div style="text-align:center; color:#aaa; margin-top:24px;">작업 내역이 없습니다.</div>{% endif %}
@@ -38,5 +51,26 @@ document.getElementById('select-all').addEventListener('change', function(e) {
         checkbox.checked = e.target.checked;
     });
 });
+
+function confirmDelete() {
+    const confirmationText = "Delete Select Files";
+    const userInput = prompt(`정말로 삭제하시겠습니까?\n삭제를 원하시면 "${confirmationText}"를 입력하세요.`);
+
+    if (userInput === null) {
+        return; // User canceled
+    }
+
+    // Normalize both strings: lowercase and remove spaces
+    const normalizedUserInput = userInput.toLowerCase().replace(/\s/g, '');
+    const normalizedConfirmationText = confirmationText.toLowerCase().replace(/\s/g, '');
+
+    if (normalizedUserInput === normalizedConfirmationText) {
+        const form = document.getElementById('batch_form');
+        form.action = "{{ url_for('batch_delete') }}";
+        form.submit();
+    } else {
+        alert("입력 내용이 일치하지 않아 삭제가 취소되었습니다.");
+    }
+}
 </script>
 {% endblock %}
