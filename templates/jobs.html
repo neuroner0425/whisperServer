@@ -2,21 +2,41 @@
 {% block content %}
 <div class="container">
     <div class="nav">
-        <a href="/">홈</a>
-        <a href="{{ url_for('upload_file') }}">파일 업로드</a>
+        <a href="{{ url_for('home') }}">홈</a>
+        <a href="{{ url_for('upload_get') }}">파일 업로드</a>
     </div>
     <h2>작업 목록</h2>
-    <table>
-        <tr><th>파일명</th><th>미디어 길이</th><th>상태</th><th>결과</th></tr>
-        {% for job_id, job in job_items %}
-        <tr>
-            <td>{{ job['filename'] }}</td>
-            <td>{{ job.get('media_duration', '-') }}</td>
-            <td class="status">{{ job['status'] }}{% if job.result_refined %}(Y){% else %}(-){% endif %}</td>
-            <td><a href="{{ url_for('job_result', job_id=job_id) }}">보기</a></td>
-        </tr>
-        {% endfor %}
-    </table>
+    <form action="{{ url_for('batch_download') }}" method="post">
+        <table>
+            <tr>
+                <th><input type="checkbox" id="select-all"></th>
+                <th>파일명</th>
+                <th>미디어 길이</th>
+                <th>상태</th>
+                <th>결과</th>
+            </tr>
+            {% for job_id, job in job_items %}
+            <tr>
+                <td><input type="checkbox" name="job_ids" value="{{ job_id }}"></td>
+                <td>{{ job['filename'] }}</td>
+                <td>{{ job.get('media_duration', '-') }}</td>
+                <td class="status">{{ job['status'] }}{% if job.get('result_refined') and job.get('status') == '완료' %} (Y){% endif %}</td>
+                <td><a href="{{ url_for('job_result', job_id=job_id) }}">보기</a></td>
+            </tr>
+            {% endfor %}
+        </table>
+        <div style="margin-top: 1rem;">
+            <button type="submit">선택 항목 일괄 다운로드</button>
+        </div>
+    </form>
     {% if not job_items %}<div style="text-align:center; color:#aaa; margin-top:24px;">작업 내역이 없습니다.</div>{% endif %}
 </div>
+<script>
+document.getElementById('select-all').addEventListener('change', function(e) {
+    const checkboxes = document.querySelectorAll('input[name="job_ids"]');
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = e.target.checked;
+    });
+});
+</script>
 {% endblock %}

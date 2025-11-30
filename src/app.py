@@ -4,6 +4,9 @@ import queue
 import logging
 import html
 import asyncio
+import zipfile
+import io
+from typing import List
 from datetime import datetime
 from fastapi import FastAPI, Request, UploadFile, Form, HTTPException, Response
 from contextlib import asynccontextmanager
@@ -71,7 +74,7 @@ async def home(request: Request):
     return templates.TemplateResponse('home.html', {'request': request})
 
 
-@app.get('/upload')
+@app.get('/upload', name='upload_get')
 async def upload_get(request: Request):
     return templates.TemplateResponse('upload.html', {'request': request})
 
@@ -272,6 +275,46 @@ async def download_txt_refined(job_id: str):
         raise HTTPException(status_code=404, detail='정제본이 없습니다.')
     base = os.path.splitext(job['filename'])[0]
     return FileResponse(refined_path, media_type='text/plain', filename=f'{base}_refined.txt')
+
+
+@app.post('/batch-download')
+async def batch_download(job_ids: List[str] = Form(...)):
+    if not job_ids:
+        raise HTTPException(status_code=400, detail="다운로드할 작업을 선택하세요.")
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        for job_id in job_ids:
+            job = jobs.get(job_id)
+            if not job or job.get('status') != JobStatus.COMPLETED:
+                continue
+
+            refined_path = job.get('result_refined')
+            use_refined = bool(refined_path and os.path.exists(refined_path))
+            file_path = refined_path if use_refined else job.get('result')
+
+            if file_path and os.path.exists(file_path):
+                base_filename = os.path.splitext(job['filename'])[0]
+                ext = '_refined.txt' if use_refined else '.txt'
+                arcname = f"{base_filename}{ext}"
+                zip_file.write(file_path, arcname=arcname)
+
+    zip_buffer.seek(0)
+    
+    # Make sure we have something to download
+    if not zip_buffer.getbuffer().nbytes:
+        # This could be a simple HTML response or a redirect back with a message
+        # For now, raising an exception is clear for the API user.
+        raise HTTPException(status_code=404, detail="선택된 항목 중 다운로드할 수 있는 결과 파일이 없습니다.")
+
+    now = datetime.now().strftime('%Y%m%d_%H%M%S')
+    zip_filename = f"whisper_results_{now}.zip"
+    
+    return Response(
+        content=zip_buffer.getvalue(),
+        media_type='application/zip',
+        headers={'Content-Disposition': f'attachment; filename="{zip_filename}"'}
+    )
 
 @app.get('/healthz')
 async def healthz():
