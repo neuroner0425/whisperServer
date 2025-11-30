@@ -35,31 +35,65 @@ h1, h2 {
 }
 form {
     display: flex;
-    flex-direction: column;
     gap: 18px;
     align-items: center;
 }
-input[type="file"] {
+
+.form-column {
+    flex-direction: column;
+}
+input[type="file"], input[type="text"], textarea {
     padding: 10px;
     border: 1px solid #ddd;
     border-radius: 8px;
     width: 100%;
+    box-sizing: border-box; /* Ensures padding doesn't affect width */
     background: #f9fafb;
+    font-family: 'Noto Sans KR', sans-serif; /* Ensure font consistency */
 }
+
 input[type="submit"] {
     background: #2563eb;
     color: #fff;
     border: none;
     border-radius: 8px;
-    padding: 12px 0;
+    padding: 12px 24px; /* Adjusted for non-full-width buttons */
     font-size: 1.1em;
     cursor: pointer;
-    width: 100%;
     transition: background 0.2s;
 }
+
+input[type="submit"].full-width {
+    width: 100%;
+    padding: 12px 24px; /* Added horizontal padding */
+}
+
+/* New styles for search bar elements */
+input.search-input-field { /* Targeting input with class to be more specific */
+    padding: 8px 12px; /* Smaller padding */
+    font-size: 0.9em;  /* Smaller font */
+    height: 38px; /* Fixed height for alignment */
+}
+
+input.search-button { /* Targeting input with class to be more specific */
+    padding: 8px 16px; /* Smaller padding */
+    font-size: 0.9em;  /* Smaller font */
+    width: auto; /* Ensure it doesn't stretch */
+    height: 38px; /* Fixed height for alignment */
+}
+
 input[type="submit"]:hover {
     background: #1e40af;
 }
+
+input[type="submit"].btn-danger {
+    background-color: #ef4444;
+}
+
+input[type="submit"].btn-danger:hover {
+    background-color: #dc2626;
+}
+
 table {
     width: 100%;
     border-collapse: collapse;

@@ -4,6 +4,7 @@ import threading
 import queue
 import logging
 import subprocess
+import glob
 from datetime import datetime
 from typing import Dict, Optional, Any, List
 
@@ -89,6 +90,31 @@ def _set_job(job_id: str, **kwargs):
 def _get_job(job_id: str) -> Optional[Dict[str, Any]]:
     with jobs_lock:
         return jobs.get(job_id)
+
+def delete_jobs(job_ids: List[str]):
+    with jobs_lock:
+        for job_id in job_ids:
+            # Delete associated files
+            try:
+                # Delete original .wav file if it exists
+                wav_files = glob.glob(os.path.join(UPLOAD_FOLDER, f'{job_id}_*.wav'))
+                for f in wav_files:
+                    _remove_file(f)
+
+                # Delete result files
+                job = jobs.get(job_id)
+                if job:
+                    _remove_file(job.get('result'))
+                    _remove_file(job.get('result_refined'))
+
+                # Remove job from dictionary
+                jobs.pop(job_id, None)
+                logging.info(f"[삭제] 작업 삭제 완료: {job_id}")
+
+            except Exception as e:
+                logging.error(f"[삭제] 작업 삭제 중 오류 발생 {job_id}: {e}")
+        
+        _save_jobs(jobs)
 
 def _run_whisper(job_id: str, wav_path: str, total_sec: int | None):
     logging.info(f"[whisper] 전사 시작: {job_id}")

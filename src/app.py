@@ -1,4 +1,5 @@
 import os
+import unicodedata
 import uuid
 import queue
 import logging
@@ -8,7 +9,7 @@ import zipfile
 import io
 from typing import List
 from datetime import datetime
-from fastapi import FastAPI, Request, UploadFile, Form, HTTPException, Response
+from fastapi import FastAPI, Request, UploadFile, Form, HTTPException, Response, Query
 from contextlib import asynccontextmanager
 from fastapi.responses import RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
@@ -28,7 +29,7 @@ from .config import (  # noqa: E402
 )
 from .utils.media import get_media_duration_ffprobe, convert_to_wav  # noqa: E402
 from .utils.text import format_seconds  # noqa: E402
-from .workers.whisper_worker import jobs, jobs_lock, JobStatus, start_worker, requeue_pending, shutdown_workers, prom_init_once, UPLOAD_BYTES, JOBS_TOTAL, enqueue_stt, _save_jobs  # noqa: E402
+from .workers.whisper_worker import jobs, jobs_lock, JobStatus, start_worker, requeue_pending, shutdown_workers, prom_init_once, UPLOAD_BYTES, JOBS_TOTAL, enqueue_stt, _save_jobs, delete_jobs  # noqa: E402
 from .services import gemini_service  # noqa: E402
 
 # 환경 설정
@@ -159,11 +160,27 @@ async def upload_file(request: Request, file: UploadFile = None, input_name: str
     return RedirectResponse(url=f"/job/{job_id}", status_code=303)
 
 
-@app.get('/jobs')
-async def job_list(request: Request):
+@app.get('/jobs', name='job_list')
+async def job_list(request: Request, q: str = Query(None, description="Search term for filenames")):
     with jobs_lock:
-        job_items = list(jobs.items())[::-1]
-    return templates.TemplateResponse('jobs.html', {'request': request, 'job_items': job_items})
+        job_items = list(jobs.items())
+
+    if q:
+        # 한글 자모 분리 등 정규화 이슈 해결을 위해 NFC 사용
+        q_norm = unicodedata.normalize('NFC', q.lower())
+        job_items = [
+            (job_id, job) for job_id, job in job_items
+            if q_norm in unicodedata.normalize('NFC', job.get('filename', '').lower())
+        ]
+
+    # Recency-based sorting should be applied after filtering
+    job_items.sort(key=lambda item: item[1].get('uploaded_ts', 0), reverse=True)
+
+    return templates.TemplateResponse('jobs.html', {
+        'request': request,
+        'job_items': job_items,
+        'search_query': q
+    })
 
 @app.get('/status/{job_id}')
 async def job_status(request: Request, job_id: str):
@@ -277,7 +294,7 @@ async def download_txt_refined(job_id: str):
     return FileResponse(refined_path, media_type='text/plain', filename=f'{base}_refined.txt')
 
 
-@app.post('/batch-download')
+@app.post('/batch-download', name='batch_download')
 async def batch_download(job_ids: List[str] = Form(...)):
     if not job_ids:
         raise HTTPException(status_code=400, detail="다운로드할 작업을 선택하세요.")
@@ -315,6 +332,15 @@ async def batch_download(job_ids: List[str] = Form(...)):
         media_type='application/zip',
         headers={'Content-Disposition': f'attachment; filename="{zip_filename}"'}
     )
+
+@app.post('/batch-delete', name='batch_delete')
+async def batch_delete(job_ids: List[str] = Form(...)):
+    if not job_ids:
+        raise HTTPException(status_code=400, detail="삭제할 작업을 선택하세요.")
+    
+    delete_jobs(job_ids)
+    
+    return RedirectResponse(url=app.url_path_for('job_list'), status_code=303)
 
 @app.get('/healthz')
 async def healthz():
