@@ -3,9 +3,11 @@ import os
 import logging
 import time
 from typing import Optional
+from google import genai
+from google.genai import types
 from src.config import PROJECT_ROOT, GEMINI_MODEL
 
-_gemini_client = None
+_gemini_client: Optional[genai.Client] = None
 _gemini_init_done = False
 
 
@@ -32,22 +34,24 @@ def _read_api_key() -> Optional[str]:
     return None
 
 
-def init_once():
+def init_once() -> Optional[genai.Client]:
     global _gemini_client, _gemini_init_done
     if _gemini_init_done:
         return _gemini_client
+    
     api_key = _read_api_key()
     if not api_key:
         _gemini_init_done = True
         _gemini_client = None
         return None
+    
     try:
-        import google.generativeai as genai  # type: ignore
-        genai.configure(api_key=api_key)
-        _gemini_client = genai
+        # Initialize the client with the API key
+        _gemini_client = genai.Client(api_key=api_key)
     except Exception as e:
         logging.warning(f"[Gemini 초기화 실패] {e}")
         _gemini_client = None
+        
     _gemini_init_done = True
     return _gemini_client
 
@@ -56,6 +60,7 @@ def refine_transcript(raw_text: str, description: str | None = None) -> str:
     client = init_once()
     if client is None:
         raise RuntimeError('Gemini API is not configured')
+        
     prompt = (
         "아래 제공된 텍스트는 오디오를 자동 전사(STT)한 결과물입니다. "
         "문맥상 어색한 오타, 잘못 인식된 단어, 중복된 표현을 수정하여 자연스러운 문장으로 다듬어 주세요.\n\n"
@@ -74,9 +79,18 @@ def refine_transcript(raw_text: str, description: str | None = None) -> str:
 
     for attempt in range(max_retries):
         try:
-            model = client.GenerativeModel(GEMINI_MODEL)
-            resp = model.generate_content(prompt)
+            # Using the new SDK structure: client.models.generate_content
+            # Model name should be passed as an argument.
+            # config object can be used for parameters.
+            resp = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=[prompt],
+                config=types.GenerateContentConfig(
+                    temperature=0.3, # Lower temperature for more deterministic/faithful output
+                ),
+            )
             return resp.text.strip() if hasattr(resp, 'text') and resp.text else ''
+            
         except Exception as e:
             last_exception = e
             err_msg = str(e)
@@ -88,7 +102,7 @@ def refine_transcript(raw_text: str, description: str | None = None) -> str:
                     time.sleep(wait_time)
                     continue
             
-            # If not a rate limit error, or retries exhausted, break loop to handle error
+            # If not a rate limit error, or retries exhausted, break loop
             break
             
     # If we are here, it means we failed
