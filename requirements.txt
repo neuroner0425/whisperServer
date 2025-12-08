@@ -7,4 +7,4 @@ python-multipart
 werkzeug
 prometheus-client
 portalocker
-google-generativeai
+google-genai
