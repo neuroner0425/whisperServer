@@ -14,7 +14,7 @@ ALLOWED_EXTENSIONS = {'mp3', 'mp4', 'wav', 'm4a'}
 CHUNK_SIZE = 4 * 1024 * 1024  # 4MB
 MAX_UPLOAD_SIZE_MB = int(os.environ.get('MAX_UPLOAD_SIZE_MB', '512'))
 JOB_TIMEOUT_SEC = int(os.environ.get('JOB_TIMEOUT_SEC', '3600'))
-GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-2.5-pro')
+GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-2.5-flash')
 
 # Ensure directories exist
 for p in (UPLOAD_FOLDER, RESULT_FOLDER, STATIC_DIR):
