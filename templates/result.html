@@ -40,9 +40,13 @@
         <a class="download-btn" href="{{ url_for('download_txt', job_id=job_id) }}">원본 txt 다운로드</a>
         {% if has_refined %}
         <a class="download-btn" href="{{ url_for('download_txt_refined', job_id=job_id) }}" style="margin-left:8px;">정제본 txt 다운로드</a>
-        {% elif can_refine %}
+        {% endif %}
+        
+        {% if can_refine %}
         <form method="post" action="{{ url_for('refine_retry', job_id=job_id) }}" style="display:inline-block;margin-left:8px;">
-            <button type="submit" class="download-btn" style="background:#0ea5e9;border:none;cursor:pointer;">정제 재시도</button>
+            <button type="submit" class="download-btn" style="background:#0ea5e9;border:none;cursor:pointer;" onclick="return confirm('다시 정제하시겠습니까? 기존 정제 결과는 덮어씌워집니다.');">
+                {% if has_refined %}정제 다시 하기{% else %}정제 시작{% endif %}
+            </button>
         </form>
         {% endif %}
     </div>

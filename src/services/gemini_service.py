@@ -7,7 +7,7 @@ from google import genai
 from google.genai import types
 from google.genai.types import GenerateContentConfig
 
-from src.config import PROJECT_ROOT, GEMINI_MODEL
+from src.config import PROJECT_ROOT, GEMINI_MODEL, BASE_INSTRUCTIONS
 
 _gemini_client: Optional[genai.Client] = None
 
@@ -69,35 +69,24 @@ def refine_transcript(raw_text: str, description: str | None = None) -> str:
         
     # 프롬프트 구성 (기존 개선된 프롬프트 유지)
     prompt_text = (
-        "아래 제공된 텍스트는 오디오를 자동 전사(STT)한 결과물입니다. "
-        "문맥상 어색한 오타, 잘못 인식된 단어, 중복된 표현을 수정하여 자연스러운 문장으로 다듬어 주세요.\n\n"
-        "[지침]\n"
-        "1. 원본의 의미와 사실 관계를 절대 왜곡하지 마십시오.\n"
-        "2. 누락된 내용을 임의로 추측하여 추가하지 마십시오.\n"
-        "3. 오직 정제된 텍스트만 출력하고, 인사말이나 설명 등 사족은 일절 붙이지 마십시오.\n\n"
-        '""\n' + raw_text + '\n""\n\n'
+        "[원본 전사문]\n"
+        f"\"\"\"\n{raw_text}\n\"\"\"\n\n"
     )
     if description:
-        prompt_text += "위 전사문을 설명하면 다음과 같아.\n\n" + '""\n' + description + '\n""\n'
-
+        prompt_text += "[설명]\n" + f"\"\"\"\n{description}\n\"\"\"\n\n"
     contents = [prompt_text]
-    
-    # Vimatrax의 에러 처리 및 호출 구조 반영
-    # 다만 여기서는 단일 요청이므로 루프(배치)는 없음. 
-    # 대신 기존의 Retry 로직을 이 구조 안에 녹여냄.
     
     max_retries = 3
     base_delay = 5
     
     for attempt in range(max_retries):
         try:
-            # Vimatrax 스타일 호출: client.models.generate_content(...)
-            # config=GenerateContentConfig(...) 사용
             resp = client.models.generate_content(
-                model=GEMINI_MODEL,  # config.py에서 설정된 모델 사용 (예: gemini-2.5-flash)
+                model=GEMINI_MODEL,
                 contents=contents,
                 config=GenerateContentConfig(
-                    temperature=0.3, # Vimatrax는 0.9였으나 정제 작업엔 낮은 값이 유리하므로 0.3 유지
+                    system_instruction=BASE_INSTRUCTIONS,
+                    temperature=0.8,
                 ),
             )
             txt = resp.text.strip() if (hasattr(resp, 'text') and resp.text) else ""
