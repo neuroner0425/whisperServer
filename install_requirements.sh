@@ -3,7 +3,7 @@
 pip install --upgrade pip
 
 echo "======Installing PyTorch, torchvision, torchaudio...======"
-pip install --upgrade --pre torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/nightly/cpu
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
 echo "======Installing OpenAI Whisper...======"
 pip install git+https://github.com/openai/whisper.git
