@@ -120,7 +120,7 @@ def _run_whisper(job_id: str, wav_path: str, total_sec: int | None):
     logging.info(f"[whisper] 전사 시작: {job_id}")
     output_path = f"{wav_path}.txt"
     model_bin = os.path.join(MODEL_DIR, 'ggml-large-v3.bin')
-    vad_model = os.path.join(MODEL_DIR, 'ggml-silero-v5.1.2.bin')
+    vad_model = os.path.join(MODEL_DIR, 'ggml-silero-v6.2.0.bin')
     cmd = [
         str(WHISPER_CLI), '-m', str(model_bin), '-l', 'ko', '--max-context', '0', '--no-speech-thold', '0.01',
         '--suppress-nst', '--no-prints', '--vad', '--vad-model', str(vad_model), '--vad-threshold', '0.01', '--output-txt', wav_path
@@ -190,7 +190,7 @@ def _run_whisper(job_id: str, wav_path: str, total_sec: int | None):
         if return_code != 0:
             if timed_out['flag']:
                 raise TimeoutError('작업 타임아웃')
-            raise RuntimeError('whisper.cpp 실행 실패')
+            raise RuntimeError('whisper 실행 실패')
         with jobs_lock:
             if job_id in jobs:
                 jobs[job_id]['phase'] = '전사 완료'

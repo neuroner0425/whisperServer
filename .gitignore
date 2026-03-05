@@ -7,4 +7,4 @@ uploads/
 .DS_Store
 jobs.json
 .venv/
-whisper.cpp
+whisper/

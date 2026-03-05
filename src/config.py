@@ -7,8 +7,8 @@ UPLOAD_FOLDER = os.path.join(PROJECT_ROOT, 'uploads')
 RESULT_FOLDER = os.path.join(PROJECT_ROOT, 'results')
 TEMPLATE_DIR = os.path.join(PROJECT_ROOT, 'templates')
 STATIC_DIR = os.path.join(PROJECT_ROOT, 'static')
-MODEL_DIR = os.path.join(PROJECT_ROOT, 'whisper.cpp', 'models')
-WHISPER_CLI = os.path.join(PROJECT_ROOT, 'whisper.cpp', 'build', 'bin', 'whisper-cli')
+MODEL_DIR = os.path.join(PROJECT_ROOT, 'whisper', 'models')
+WHISPER_CLI = os.path.join(PROJECT_ROOT, 'whisper', 'bin', 'whisper-cli')
 
 ALLOWED_EXTENSIONS = {'mp3', 'mp4', 'wav', 'm4a'}
 CHUNK_SIZE = 4 * 1024 * 1024  # 4MB
