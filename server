@@ -1,0 +1,164 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUN_DIR="$ROOT_DIR/.run"
+PID_FILE="$RUN_DIR/server.pid"
+LOG_FILE="$RUN_DIR/server.log"
+BIN_FILE="$RUN_DIR/server-bin"
+CMD="${SERVER_CMD:-}"
+APP_PORT="${PORT:-8000}"
+
+mkdir -p "$RUN_DIR"
+
+is_running() {
+  if [[ ! -f "$PID_FILE" ]]; then
+    return 1
+  fi
+
+  local pid
+  pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+  if [[ -z "$pid" ]]; then
+    return 1
+  fi
+
+  if kill -0 "$pid" 2>/dev/null; then
+    return 0
+  fi
+
+  return 1
+}
+
+kill_tree() {
+  local pid="$1"
+  local sig="${2:-TERM}"
+  local children
+  children="$(pgrep -P "$pid" 2>/dev/null || true)"
+  for child in $children; do
+    kill_tree "$child" "$sig"
+  done
+  kill "-$sig" "$pid" 2>/dev/null || true
+}
+
+start() {
+  if is_running; then
+    echo "server is already running (pid: $(cat "$PID_FILE"))"
+    return 0
+  fi
+
+  rm -f "$PID_FILE"
+
+  local start_cmd
+  local use_shell
+  if [[ -n "$CMD" ]]; then
+    start_cmd="$CMD"
+    use_shell=1
+  else
+    (
+      cd "$ROOT_DIR"
+      go build -o "$BIN_FILE" ./src/cmd/server
+    )
+    start_cmd="$BIN_FILE"
+    use_shell=0
+  fi
+
+  (
+    cd "$ROOT_DIR"
+    if [[ "$use_shell" -eq 1 ]]; then
+      nohup bash -lc "exec $start_cmd" >>"$LOG_FILE" 2>&1 &
+    else
+      nohup "$start_cmd" >>"$LOG_FILE" 2>&1 &
+    fi
+    echo $! >"$PID_FILE"
+  )
+
+  sleep 1
+  if is_running; then
+    echo "server started (pid: $(cat "$PID_FILE"))"
+    echo "log: $LOG_FILE"
+  else
+    echo "failed to start server"
+    echo "check log: $LOG_FILE"
+    rm -f "$PID_FILE"
+    return 1
+  fi
+}
+
+stop() {
+  if ! is_running; then
+    rm -f "$PID_FILE" 2>/dev/null || true
+    local port_pid
+    port_pid="$(lsof -tiTCP:"$APP_PORT" -sTCP:LISTEN 2>/dev/null || true)"
+    if [[ -n "$port_pid" ]]; then
+      for pid in $port_pid; do
+        kill_tree "$pid" TERM
+      done
+      sleep 1
+      port_pid="$(lsof -tiTCP:"$APP_PORT" -sTCP:LISTEN 2>/dev/null || true)"
+      if [[ -n "$port_pid" ]]; then
+        for pid in $port_pid; do
+          kill_tree "$pid" KILL
+        done
+        echo "server force-stopped (by port $APP_PORT)"
+      else
+        echo "server stopped (by port $APP_PORT)"
+      fi
+      return 0
+    fi
+    echo "server is not running"
+    return 0
+  fi
+
+  local pid
+  pid="$(cat "$PID_FILE")"
+  kill_tree "$pid" TERM
+
+  for _ in {1..30}; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      rm -f "$PID_FILE"
+      echo "server stopped"
+      return 0
+    fi
+    sleep 0.5
+  done
+
+  kill_tree "$pid" KILL
+  rm -f "$PID_FILE"
+  echo "server force-stopped"
+}
+
+status() {
+  if is_running; then
+    echo "server is running (pid: $(cat "$PID_FILE"))"
+    echo "log: $LOG_FILE"
+  else
+    echo "server is not running"
+    echo "log: $LOG_FILE"
+    return 1
+  fi
+}
+
+usage() {
+  cat <<USAGE
+Usage: ./server {start|stop|status}
+
+Optional env:
+  SERVER_CMD  Override start command (default: built binary from ./src/cmd/server)
+USAGE
+}
+
+case "${1:-}" in
+  start)
+    start
+    ;;
+  stop)
+    stop
+    ;;
+  status)
+    status
+    ;;
+  *)
+    usage
+    exit 1
+    ;;
+esac
