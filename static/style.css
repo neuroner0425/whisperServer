@@ -4,18 +4,25 @@ body {
     margin: 0;
     padding: 0;
 }
-.container {
-    max-width: 1000px;
-    margin: 60px auto;
+.page-shell {
+    min-height: 100vh;
     background: #fff;
-    border-radius: 16px;
-    box-shadow: 0 4px 24px #0001;
-    padding: 32px 28px;
+}
+.container {
+    width: 100%;
+    max-width: 1280px;
+    min-height: 100vh;
+    margin: 0 auto;
+    background: #fff;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 24px;
+    box-sizing: border-box;
 }
 h1, h2 {
-    text-align: center;
+    text-align: left;
     color: #2563eb;
-    margin-bottom: 32px;
+    margin: 0 0 20px 0;
 }
 .nav {
     margin-bottom: 24px;
@@ -33,6 +40,96 @@ h1, h2 {
     text-decoration: underline;
     color: #1e40af;
 }
+.topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+}
+.profile-menu {
+    position: relative;
+    display: inline-block;
+}
+.profile-button {
+    border: 1px solid #dbe2ea;
+    background: #fff;
+    color: #111827;
+    border-radius: 999px;
+    padding: 8px 12px;
+    font-size: 0.95em;
+}
+.profile-dropdown {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: 38px;
+    min-width: 140px;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+    padding: 8px;
+    z-index: 20;
+}
+.profile-menu:hover .profile-dropdown {
+    display: block;
+}
+.profile-menu:focus-within .profile-dropdown {
+    display: block;
+}
+.profile-dropdown form {
+    display: block;
+}
+.profile-dropdown button {
+    width: 100%;
+    padding: 8px 10px;
+    font-size: 0.95em;
+    background: #ef4444;
+}
+.page-actions {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+.action-link {
+    display: inline-block;
+    background: #2563eb;
+    color: #fff;
+    text-decoration: none;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 0.95em;
+}
+.pagination {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    margin-top: 28px;
+}
+.page-btn {
+    border: 1px solid #d1d5db;
+    background: #fff;
+    color: #111827;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 0.9em;
+    cursor: pointer;
+}
+.page-btn.active {
+    background: #2563eb;
+    color: #fff;
+    border-color: #2563eb;
+}
+.page-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+body.auth-page .container {
+    max-width: 560px;
+    min-height: auto;
+    margin: 64px auto;
+}
 form {
     display: flex;
     gap: 18px;
@@ -42,7 +139,7 @@ form {
 .form-column {
     flex-direction: column;
 }
-input[type="file"], input[type="text"], textarea {
+input[type="file"], input[type="text"], input[type="email"], input[type="password"], textarea {
     padding: 10px;
     border: 1px solid #ddd;
     border-radius: 8px;
@@ -58,6 +155,17 @@ input[type="submit"] {
     border: none;
     border-radius: 8px;
     padding: 12px 24px; /* Adjusted for non-full-width buttons */
+    font-size: 1.1em;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+button {
+    background: #2563eb;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 12px 24px;
     font-size: 1.1em;
     cursor: pointer;
     transition: background 0.2s;
@@ -91,6 +199,14 @@ input[type="submit"].btn-danger {
 }
 
 input[type="submit"].btn-danger:hover {
+    background-color: #dc2626;
+}
+
+button.btn-danger {
+    background-color: #ef4444;
+}
+
+button.btn-danger:hover {
     background-color: #dc2626;
 }
 

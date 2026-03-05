@@ -2,8 +2,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-results/
-uploads/
+.run/
 .DS_Store
 jobs.json
 .venv/

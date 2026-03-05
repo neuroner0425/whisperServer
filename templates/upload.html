@@ -1,18 +1,41 @@
-{% extends "base.html" %}
-{% block content %}
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STT 서비스</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="page-shell">
 <div class="container">
-    <div class="nav">
-        <a href="/">홈</a>
-        <a href="{{ url_for('job_list') }}">작업 목록</a>
+    <div class="topbar">
+        <h2>음성/영상 파일 업로드(STT)</h2>
+        <div class="profile-menu">
+            <button type="button" class="profile-button">{{.CurrentUserName}}</button>
+            <div class="profile-dropdown">
+                <form method="post" action="/logout">
+                    <button type="submit">로그아웃</button>
+                </form>
+            </div>
+        </div>
     </div>
-    <h2>음성/영상 파일 업로드(STT)</h2>
-    <form id="uploadForm" name="uploadForm" method="post" enctype="multipart/form-data" class="form-column">
+
+    <div class="page-actions">
+        <a href="/" class="action-link">작업 목록으로</a>
+    </div>
+
+    <form id="uploadForm" name="uploadForm" method="post" action="/upload" enctype="multipart/form-data" class="form-column">
         <input type="file" name="file" accept="audio/*,video/*,audio/mp4,audio/x-m4a" required>
         <input type="text" name="input_name" placeholder="저장할 파일명 (선택)">
         <textarea name="description" rows="5" placeholder="영상/오디오에 대한 설명을 입력하면 정제에 반영됩니다 (선택)"></textarea>
+        <label style="display:flex;align-items:center;gap:8px;width:100%;justify-content:flex-start;">
+            <input type="checkbox" name="refine_enabled" value="on">
+            <span>업로드 후 자동 정제 사용</span>
+        </label>
         <input type="submit" value="업로드" class="full-width">
     </form>
-    <div style="color:#888; font-size:0.98em; margin-top:10px; text-align:center;">파일명을 입력하지 않으면 원본 파일명으로 저장됩니다.</div>
+    <div style="color:#888; font-size:0.98em; margin-top:10px;">파일명을 입력하지 않으면 원본 파일명으로 저장됩니다.</div>
     <div id="uploadStatus" style="display:none; margin-top:24px; text-align:center;">
         <span style="font-size:1.1em; color:#2563eb; font-weight:bold;">업로드중입니다.</span>
         <div style="width:100%;background:#eee;border-radius:8px;margin-top:12px;">
@@ -20,6 +43,7 @@
         </div>
         <span id="progressText" style="font-size:0.98em;color:#444;"></span>
     </div>
+</div>
 </div>
 <script>
 const form = document.getElementById('uploadForm');
@@ -40,7 +64,7 @@ form.addEventListener('submit', function(e) {
         }
     };
     xhr.onload = function() {
-        if (xhr.status === 200 || xhr.status === 302) {
+        if (xhr.status === 200 || xhr.status === 302 || xhr.status === 303) {
             window.location.href = xhr.responseURL;
         } else {
             progressText.textContent = '업로드 실패';
@@ -54,4 +78,5 @@ form.addEventListener('submit', function(e) {
     xhr.send(formData);
 });
 </script>
-{% endblock %}
+</body>
+</html>
