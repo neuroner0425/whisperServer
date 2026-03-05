@@ -30,10 +30,10 @@ echo "======Downloading GGML model (large)...======"
 bash ./models/download-ggml-model.sh large-v3
 
 echo "======Generating CoreML model (large)...======"
-./models/generate-coreml-model.sh large-v3
+bash ./models/generate-coreml-model.sh large-v3
 
 echo "======Downloading VAD model (silero)...======"
-bash ./models/download-vad-model.sh silero-v5.1.2
+bash ./models/download-vad-model.sh silero-v6.2.0
 
 echo "======All steps completed.======"
 
@@ -44,7 +44,7 @@ echo "======Testing whisper.cpp with a sample audio file...======"
 ./whisper.cpp/build/bin/whisper-cli \
   -m whisper.cpp/models/ggml-large-v3.bin -l ko \
   --vad \
-  --vad-model whisper.cpp/models/ggml-silero-v5.1.2.bin \
+  --vad-model whisper.cpp/models/ggml-silero-v6.2.0.bin \
   --suppress-nst \
   --vad-threshold 0.1 \
   --vad-min-speech-duration-ms 500 \
