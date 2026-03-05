@@ -35,7 +35,7 @@ pip install -r requirements.txt
 
 사전 요구 사항:
 - `ffmpeg`와 `ffprobe`가 시스템에 설치되어 있어야 합니다(macOS에서는 `brew install ffmpeg`).
-- `whisper.cpp`가 `./whisper.cpp` 경로에 클론 및 빌드되어 있어야 하며 모델이 다운로드되어 있어야 합니다.
+- 런타임 파일(`whisper/bin`, `whisper/lib`, `whisper/models`)이 준비되어 있어야 합니다. (`./install_requirements.sh` 실행 시 자동 준비)
 - 업로드 최대 용량은 환경변수 `MAX_UPLOAD_SIZE_MB`로 조정 가능합니다(기본 512MB).
 
 ### 3. 서버 실행(권장)
