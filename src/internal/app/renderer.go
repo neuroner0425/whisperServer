@@ -20,7 +20,7 @@ func (r *renderer) Render(w io.Writer, name string, data any, _ echo.Context) er
 }
 
 func mustRenderer() *renderer {
-	files := []string{"home.html", "upload.html", "jobs.html", "waiting.html", "result.html", "preview.html", "login.html", "signup.html"}
+	files := []string{"upload.html", "jobs.html", "waiting.html", "result.html", "preview.html", "login.html", "signup.html"}
 	m := make(map[string]*htmpl.Template, len(files))
 	for _, name := range files {
 		path := filepath.Join(templateDir, name)

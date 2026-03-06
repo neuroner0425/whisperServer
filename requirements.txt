@@ -1,12 +1,4 @@
-fastapi
-uvicorn[standard]
-whisper
 torch
-jinja2
-python-multipart
-werkzeug
-prometheus-client
-portalocker
-google-genai
+openai-whisper
 ane_transformers
 coremltools
