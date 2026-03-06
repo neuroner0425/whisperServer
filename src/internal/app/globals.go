@@ -29,9 +29,9 @@ var (
 
 	allowedExtensions = map[string]struct{}{"mp3": {}, "mp4": {}, "wav": {}, "m4a": {}}
 	chunkSize         = 4 * 1024 * 1024
-	maxUploadSizeMB   = envInt("MAX_UPLOAD_SIZE_MB", 512)
-	jobTimeoutSec     = envInt("JOB_TIMEOUT_SEC", 3600)
-	geminiModel       = envString("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
+	maxUploadSizeMB   int
+	jobTimeoutSec     int
+	geminiModel       string
 
 	jobsMu sync.RWMutex
 	jobs   = map[string]map[string]any{}

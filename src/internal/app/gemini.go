@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -37,18 +35,8 @@ func (g *geminiClient) loadKeys() {
 			seen[k] = struct{}{}
 			g.keys = append(g.keys, k)
 		}
-
-		add(os.Getenv("GEMINI_API_KEY"))
-		add(os.Getenv("API_KEY"))
-
-		for _, p := range []string{filepath.Join(projectRoot, "gemini_api_key.txt"), filepath.Join(projectRoot, ".gemini_api_key")} {
-			b, err := os.ReadFile(p)
-			if err != nil {
-				continue
-			}
-			for _, line := range strings.Split(string(b), "\n") {
-				add(line)
-			}
+		for _, k := range geminiAPIKeysFromConfig() {
+			add(k)
 		}
 	})
 }

@@ -7,7 +7,37 @@ PID_FILE="$RUN_DIR/server.pid"
 LOG_FILE="$RUN_DIR/server.log"
 BIN_FILE="$RUN_DIR/server-bin"
 CMD="${SERVER_CMD:-}"
-APP_PORT="${PORT:-8000}"
+
+read_conf_value() {
+  local key="$1"
+  local conf_file="$ROOT_DIR/app.conf"
+  if [[ ! -f "$conf_file" ]]; then
+    conf_file="$ROOT_DIR/app.conf.default"
+  fi
+  if [[ ! -f "$conf_file" ]]; then
+    return 0
+  fi
+
+  awk -F'=' -v target="$key" '
+    /^[[:space:]]*#/ { next }
+    /^[[:space:]]*;/ { next }
+    /^[[:space:]]*$/ { next }
+    {
+      k=$1
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", k)
+      if (k==target) {
+        v=substr($0, index($0, "=")+1)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+        gsub(/^"|"$/, "", v)
+        gsub(/^'\''|'\''$/, "", v)
+        print v
+      }
+    }
+  ' "$conf_file" | tail -n1
+}
+
+APP_PORT="$(read_conf_value PORT)"
+APP_PORT="${APP_PORT:-8000}"
 
 mkdir -p "$RUN_DIR"
 

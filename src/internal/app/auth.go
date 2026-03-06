@@ -32,10 +32,10 @@ type authClaims struct {
 }
 
 var (
-	jwtSecret        = []byte(envString("JWT_SECRET", ""))
-	jwtIssuer        = envString("JWT_ISSUER", "whisperserver")
-	jwtExpiryHours   = envInt("JWT_EXP_HOURS", 24)
-	authCookieSecure = truthy(envString("AUTH_COOKIE_SECURE", "false"))
+	jwtSecret        []byte
+	jwtIssuer        string
+	jwtExpiryHours   int
+	authCookieSecure bool
 )
 
 func authMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
