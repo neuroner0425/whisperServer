@@ -5,29 +5,85 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 WHISPER_BUILD_DIR="${PROJECT_ROOT}/whisper.cpp"
 RUNTIME_DIR="${PROJECT_ROOT}/whisper"
+INSTALL_VENV_DIR="${PROJECT_ROOT}/.install_venv"
 
 cd "${PROJECT_ROOT}"
 
-pip install --upgrade pip
+cleanup_install_env() {
+  set +e
+  if [[ -n "${VIRTUAL_ENV:-}" ]]; then
+    deactivate >/dev/null 2>&1 || true
+  fi
+  rm -rf "${INSTALL_VENV_DIR}"
+  rm -rf "${WHISPER_BUILD_DIR}"
+}
 
-echo "======Installing PyTorch, torchvision, torchaudio...======"
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+setup_install_env() {
+  echo "======Creating temporary venv for installation...======"
 
-echo "======Installing OpenAI Whisper...======"
-pip install git+https://github.com/openai/whisper.git
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "[ERROR] python3 not found."
+    exit 1
+  fi
 
-echo "======Installing Flask, Werkzeug, tqdm...======"
-pip install flask werkzeug tqdm
-pip install -r requirements.txt
+  rm -rf "${INSTALL_VENV_DIR}"
+  python3 -m venv "${INSTALL_VENV_DIR}"
+
+  # shellcheck disable=SC1091
+  source "${INSTALL_VENV_DIR}/bin/activate"
+
+  python -m pip install --upgrade pip
+  echo "[OK] Temporary venv activated: ${INSTALL_VENV_DIR}"
+}
+
+check_coreml_environment() {
+  echo "======Checking Xcode/CoreML environment...======"
+
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    echo "[ERROR] CoreML build is supported only on macOS."
+    exit 1
+  fi
+
+  if ! command -v xcode-select >/dev/null 2>&1; then
+    echo "[ERROR] xcode-select not found. Please install Xcode and Command Line Tools."
+    exit 1
+  fi
+
+  if ! xcode-select -p >/dev/null 2>&1; then
+    echo "[ERROR] Xcode path is not configured."
+    echo "        Run: sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer"
+    exit 1
+  fi
+
+  if ! command -v xcrun >/dev/null 2>&1; then
+    echo "[ERROR] xcrun not found. Please install Command Line Tools."
+    exit 1
+  fi
+
+  if ! xcrun --find coremlc >/dev/null 2>&1; then
+    echo "[ERROR] coremlc not found via xcrun."
+    echo "        This usually means full Xcode is missing or selected developer path is incorrect."
+    echo "        Check Xcode install and developer path:"
+    echo "        1) xcode-select -p"
+    echo "        2) sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer"
+    exit 1
+  fi
+
+  echo "[OK] Xcode/CoreML toolchain detected."
+}
+
+check_coreml_environment
+trap cleanup_install_env EXIT
+setup_install_env
+
+echo "======Installing Python requirements for macOS/CoreML build...======"
+python -m pip install -r requirements.txt
 
 echo "======Cloning whisper.cpp repository...======"
 rm -rf "${WHISPER_BUILD_DIR}"
 git clone https://github.com/ggerganov/whisper.cpp.git
 
 cd "${WHISPER_BUILD_DIR}"
-
-echo "======Installing CoreML requirements...======"
-pip install -r models/requirements-coreml.txt
 
 echo "======Configuring CMake for CoreML...======"
 cmake -B build -DWHISPER_COREML=1
