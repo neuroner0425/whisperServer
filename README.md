@@ -27,25 +27,22 @@ go mod tidy
 go run ./src/cmd/server
 ```
 
-기본 포트는 `8000`이며 `PORT` 환경변수로 변경할 수 있습니다.
+기본 설정은 루트의 `app.conf.default`에서 읽습니다.
+`app.conf` 파일이 존재하면 `app.conf`를 우선 사용합니다.
 
-## 환경 변수
+## 설정 파일
 
 - `PORT` (기본: `8000`)
 - `MAX_UPLOAD_SIZE_MB` (기본: `512`)
 - `JOB_TIMEOUT_SEC` (기본: `3600`)
-- `GEMINI_MODEL` (기본: `gemini-2.5-flash`)
-- `GEMINI_API_KEY` 또는 `API_KEY`
+- `GEMINI_MODEL` (기본: `gemini-3.1-flash-lite-preview`)
+- `GEMINI_API_KEYS` (JSON 배열 문자열, 예: `["key1","key2"]`)
 - `JWT_SECRET` (권장: 32바이트 이상 랜덤 문자열)
+- `JWT_ISSUER` (기본: `whisperserver`)
 - `JWT_EXP_HOURS` (기본: `24`)
 - `AUTH_COOKIE_SECURE` (기본: `false`, HTTPS 환경에서는 `true` 권장)
 
-Gemini 키 파일도 지원합니다.
-
-- `gemini_api_key.txt`
-- `.gemini_api_key`
-
-(파일 내 여러 키를 줄바꿈으로 넣으면 라운드로빈 사용)
+`app.conf`는 `.gitignore`에 포함되어 Git에 올라가지 않습니다.
 
 ## 엔드포인트
 

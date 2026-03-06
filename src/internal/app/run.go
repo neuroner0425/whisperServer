@@ -19,10 +19,14 @@ import (
 
 func Run() {
 	mustEnsureDirs(staticDir, tmpFolder)
+	if err := initRuntimeConfig(); err != nil {
+		log.Fatalf("config init failed: %v", err)
+	}
 	if err := initProcessingLogger(); err != nil {
 		log.Fatalf("processing logger init failed: %v", err)
 	}
 	defer closeProcessingLogger()
+	procLogf("[BOOT] config source=%s", configPath)
 	if err := initDB(); err != nil {
 		log.Fatalf("db init failed: %v", err)
 	}
@@ -72,7 +76,10 @@ func Run() {
 	e.GET("/metrics", echo.WrapHandler(promhttp.Handler()))
 	e.POST("/job/:job_id/refine", refineRetryHandler)
 
-	port := envString("PORT", "8000")
+	port, err := appPort()
+	if err != nil {
+		log.Fatalf("port config failed: %v", err)
+	}
 	go func() {
 		if err := e.Start(":" + port); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("server error: %v", err)
