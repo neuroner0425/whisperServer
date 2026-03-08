@@ -63,6 +63,8 @@
     let pendingRedirect = false;
     let playbackRunning = false;
     const snapshots = [];
+    let autoScrollPreview = true;
+    let lastPreviewScrollTop = 0;
 
     function stripTimeline(line) {
         let out = line.replace(/^\s*\[\d{2}:\d{2}:\d{2}(?:\.\d+)?\s*-->\s*\d{2}:\d{2}:\d{2}(?:\.\d+)?\]\s*/, '');
@@ -71,11 +73,31 @@
         return out.trim();
     }
 
+    function decodeEscapedText(raw) {
+        if (raw === null || raw === undefined) return '';
+        let s = String(raw).trim();
+        for (let i = 0; i < 2; i++) {
+            const wrappedWithDouble = s.length >= 2 && s.startsWith('"') && s.endsWith('"');
+            if (!wrappedWithDouble) break;
+            try {
+                const parsed = JSON.parse(s);
+                if (typeof parsed === 'string') {
+                    s = parsed;
+                    continue;
+                }
+            } catch (_) {}
+            break;
+        }
+        s = s.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').replace(/\\r/g, '\n').replace(/\\t/g, '\t');
+        return s;
+    }
+
     function toDisplayPreview(raw) {
-        if (!raw) return '';
-        const trimmedRaw = String(raw).trim();
+        const decoded = decodeEscapedText(raw);
+        if (!decoded) return '';
+        const trimmedRaw = String(decoded).trim();
         if (trimmedRaw === '""' || trimmedRaw === "''") return '';
-        return raw
+        return decoded
             .split('\n')
             .map(stripTimeline)
             .filter(line => line && line !== '""' && line !== "''")
@@ -97,9 +119,28 @@
             progressBar.style.width = `${shownProgress}%`;
         }
         if (livePreviewEl) {
+            const wasNearBottom = (livePreviewEl.scrollHeight - livePreviewEl.scrollTop - livePreviewEl.clientHeight) < 8;
             livePreviewEl.textContent = shownPreview;
-            livePreviewEl.scrollTop = livePreviewEl.scrollHeight;
+            if (autoScrollPreview && wasNearBottom) {
+                livePreviewEl.scrollTop = livePreviewEl.scrollHeight;
+            }
         }
+    }
+
+    if (livePreviewEl) {
+        livePreviewEl.addEventListener('scroll', function() {
+            const currentTop = livePreviewEl.scrollTop;
+            if (currentTop < lastPreviewScrollTop) {
+                // User is scrolling upward: immediately release auto-scroll.
+                autoScrollPreview = false;
+            }
+            const nearBottom = (livePreviewEl.scrollHeight - livePreviewEl.scrollTop - livePreviewEl.clientHeight) < 24;
+            if (nearBottom) {
+                // Re-enable only when user intentionally returns to bottom.
+                autoScrollPreview = true;
+            }
+            lastPreviewScrollTop = currentTop;
+        });
     }
 
     function maybeRedirect() {
