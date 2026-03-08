@@ -4,7 +4,8 @@
 PORT=8000
 MAX_UPLOAD_SIZE_MB=512
 JOB_TIMEOUT_SEC=3600
-GEMINI_MODEL=gemini-3.1-flash-lite-preview
+GEMINI_MODEL=gemini-3-flash
+SPLIT_TRANSCRIBE_REFINE_QUEUE=false
 
 # Keep empty to use ephemeral secret on each process start.
 # For production, set a long random value.

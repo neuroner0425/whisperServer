@@ -17,59 +17,100 @@ import (
 
 func startWorker() {
 	workerOnce.Do(func() {
-		procLogf("[WORKER] start")
-		go workerLoop()
+		if splitTaskQueues {
+			procLogf("[WORKER] start mode=split")
+			go transcribeWorkerLoop()
+			go refineWorkerLoop()
+		} else {
+			procLogf("[WORKER] start mode=single")
+			go workerLoop()
+		}
 	})
 }
 
 func workerLoop() {
 	for t := range taskQueue {
-		procLogf("[WORKER] dequeued job_id=%s wav_path=%s", t.jobID, t.wavPath)
+		procLogf("[WORKER] dequeued mode=single job_id=%s kind=%s", t.jobID, t.kind)
 		jobsInProgress.Inc()
 		setQueueLen()
-
-		job := getJob(t.jobID)
-		if job != nil {
-			current := asString(job["status"])
-			if current == statusPending || current == statusRunning || current == statusRefiningPending || current == statusRefining {
-				if t.wavPath == "" {
-					if current == statusRefiningPending || current == statusRefining {
-						b, err := loadJobBlob(t.jobID, blobKindTranscript)
-						if err != nil {
-							procErrf("worker.refineOnly.loadTranscriptBlob", err, "job_id=%s", t.jobID)
-							continue
-						}
-						_ = taskRefining(t.jobID, string(b))
-						setJobFields(t.jobID, map[string]any{"status": statusCompleted})
-						procLogf("[WORKER] refine-only completed job_id=%s", t.jobID)
-					}
-				} else {
-					if current == statusPending || current == statusRunning {
-						if err := taskTranscribe(t.jobID); err == nil {
-							updated := getJob(t.jobID)
-							current = asString(updated["status"])
-						} else {
-							current = statusFailed
-							procErrf("worker.transcribe", err, "job_id=%s transcribe failed", t.jobID)
-						}
-					}
-					if current == statusRefiningPending || current == statusRefining {
-						b, err := loadJobBlob(t.jobID, blobKindTranscript)
-						if err != nil {
-							procErrf("worker.loadTranscriptBlob", err, "job_id=%s", t.jobID)
-							continue
-						}
-						_ = taskRefining(t.jobID, string(b))
-						setJobFields(t.jobID, map[string]any{"status": statusCompleted, "result": "db://transcript"})
-						procLogf("[WORKER] completed job_id=%s result=db://transcript", t.jobID)
-					}
-				}
-			}
-		}
-
+		processTask(t, false)
 		jobsInProgress.Dec()
 		setQueueLen()
 	}
+}
+
+func transcribeWorkerLoop() {
+	for t := range transcribeQueue {
+		procLogf("[WORKER] dequeued mode=transcribe job_id=%s kind=%s", t.jobID, t.kind)
+		jobsInProgress.Inc()
+		setQueueLen()
+		processTask(t, true)
+		jobsInProgress.Dec()
+		setQueueLen()
+	}
+}
+
+func refineWorkerLoop() {
+	for t := range refineQueue {
+		procLogf("[WORKER] dequeued mode=refine job_id=%s kind=%s", t.jobID, t.kind)
+		jobsInProgress.Inc()
+		setQueueLen()
+		processTask(t, true)
+		jobsInProgress.Dec()
+		setQueueLen()
+	}
+}
+
+func processTask(t task, splitMode bool) {
+	job := getJob(t.jobID)
+	if job == nil {
+		return
+	}
+
+	switch t.kind {
+	case taskTypeTranscribe:
+		current := asString(job["status"])
+		if current != statusPending && current != statusRunning {
+			return
+		}
+		if err := taskTranscribe(t.jobID); err != nil {
+			procErrf("worker.transcribe", err, "job_id=%s", t.jobID)
+			return
+		}
+		updated := getJob(t.jobID)
+		if updated == nil || asString(updated["status"]) != statusRefiningPending {
+			return
+		}
+		if splitMode {
+			enqueueRefine(t.jobID)
+			procLogf("[WORKER] queued refine job_id=%s", t.jobID)
+			return
+		}
+		finalizeRefine(t.jobID)
+
+	case taskTypeRefine:
+		current := asString(job["status"])
+		if current != statusRefiningPending && current != statusRefining {
+			return
+		}
+		finalizeRefine(t.jobID)
+	}
+}
+
+func finalizeRefine(jobID string) {
+	b, err := loadJobBlob(jobID, blobKindTranscript)
+	if err != nil {
+		procErrf("worker.loadTranscriptBlob", err, "job_id=%s", jobID)
+		setJobFields(jobID, map[string]any{"status": statusFailed})
+		return
+	}
+	if err := taskRefining(jobID, string(b)); err != nil {
+		setJobFields(jobID, map[string]any{"status": statusFailed})
+		procErrf("worker.refine", err, "job_id=%s", jobID)
+		return
+	}
+	setJobFields(jobID, map[string]any{"status": statusCompleted, "result": "db://transcript"})
+	procLogf("[WORKER] completed job_id=%s result=db://transcript", jobID)
 }
 
 func taskTranscribe(jobID string) error {

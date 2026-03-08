@@ -36,6 +36,9 @@ go run ./src/cmd/server
 - `MAX_UPLOAD_SIZE_MB` (기본: `512`)
 - `JOB_TIMEOUT_SEC` (기본: `3600`)
 - `GEMINI_MODEL` (기본: `gemini-3.1-flash-lite-preview`)
+- `SPLIT_TRANSCRIBE_REFINE_QUEUE` (기본: `false`)
+  - `false`: 단일 큐(전사/정제 직렬)
+  - `true`: 전사 큐(1개) + 정제 큐(1개) 분리 동작
 - `GEMINI_API_KEYS` (JSON 배열 문자열, 예: `["key1","key2"]`)
 - `JWT_SECRET` (권장: 32바이트 이상 랜덤 문자열)
 - `JWT_ISSUER` (기본: `whisperserver`)
