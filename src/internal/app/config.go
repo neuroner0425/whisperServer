@@ -190,6 +190,7 @@ func initRuntimeConfig() error {
 	if jobTimeoutSec <= 0 {
 		return fmt.Errorf("JOB_TIMEOUT_SEC must be > 0 (source: %s)", configPath)
 	}
+	splitTaskQueues = confBool("SPLIT_TRANSCRIBE_REFINE_QUEUE")
 
 	geminiModel = strings.TrimSpace(confString("GEMINI_MODEL"))
 	if geminiModel == "" {

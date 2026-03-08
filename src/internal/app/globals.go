@@ -32,16 +32,19 @@ var (
 	maxUploadSizeMB   int
 	jobTimeoutSec     int
 	geminiModel       string
+	splitTaskQueues   bool
 
 	jobsMu sync.RWMutex
 	jobs   = map[string]map[string]any{}
 
-	taskQueue  = make(chan task, 256)
-	workerOnce sync.Once
-	secureRe   = regexp.MustCompile(`[^A-Za-z0-9_.-]+`)
-	lineRe1    = regexp.MustCompile(`\[(\d{2}):(\d{2}):(\d{2}\.\d+)`)
-	lineRe2    = regexp.MustCompile(`\[(\d{2}):(\d{2}):(\d{2})`)
-	progressRe = regexp.MustCompile(`\[(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)\s*-->`)
+	taskQueue       = make(chan task, 256)
+	transcribeQueue = make(chan task, 256)
+	refineQueue     = make(chan task, 256)
+	workerOnce      sync.Once
+	secureRe        = regexp.MustCompile(`[^A-Za-z0-9_.-]+`)
+	lineRe1         = regexp.MustCompile(`\[(\d{2}):(\d{2}):(\d{2}\.\d+)`)
+	lineRe2         = regexp.MustCompile(`\[(\d{2}):(\d{2}):(\d{2})`)
+	progressRe      = regexp.MustCompile(`\[(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)\s*-->`)
 
 	jobsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{Name: "whisper_jobs_total", Help: "Total jobs finished by status"},
@@ -84,9 +87,16 @@ var (
 )
 
 type task struct {
-	jobID   string
-	wavPath string
+	jobID string
+	kind  taskType
 }
+
+type taskType string
+
+const (
+	taskTypeTranscribe taskType = "transcribe"
+	taskTypeRefine     taskType = "refine"
+)
 
 type renderer struct {
 	templates map[string]*htmpl.Template

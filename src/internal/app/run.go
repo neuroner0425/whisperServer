@@ -97,5 +97,10 @@ func Run() {
 		procErrf("shutdown", err, "echo shutdown failed")
 	}
 	procLogf("[BOOT] application stop")
-	close(taskQueue)
+	if splitTaskQueues {
+		close(transcribeQueue)
+		close(refineQueue)
+	} else {
+		close(taskQueue)
+	}
 }

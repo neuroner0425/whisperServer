@@ -43,7 +43,33 @@ func enqueue(t task) {
 	setQueueLen()
 }
 
+func enqueueTranscribe(jobID string) {
+	t := task{jobID: jobID, kind: taskTypeTranscribe}
+	if splitTaskQueues {
+		transcribeQueue <- t
+	} else {
+		enqueue(t)
+		return
+	}
+	setQueueLen()
+}
+
+func enqueueRefine(jobID string) {
+	t := task{jobID: jobID, kind: taskTypeRefine}
+	if splitTaskQueues {
+		refineQueue <- t
+	} else {
+		enqueue(t)
+		return
+	}
+	setQueueLen()
+}
+
 func setQueueLen() {
+	if splitTaskQueues {
+		queueLength.Set(float64(len(transcribeQueue) + len(refineQueue)))
+		return
+	}
 	queueLength.Set(float64(len(taskQueue)))
 }
 
@@ -52,11 +78,15 @@ func requeuePending() {
 	defer jobsMu.RUnlock()
 	for id, job := range jobs {
 		status := asString(job["status"])
-		if status != statusPending && status != statusRunning {
-			continue
-		}
-		if hasJobBlob(id, blobKindWav) {
-			enqueue(task{jobID: id, wavPath: "__db__"})
+		switch status {
+		case statusPending, statusRunning:
+			if hasJobBlob(id, blobKindWav) {
+				enqueueTranscribe(id)
+			}
+		case statusRefiningPending, statusRefining:
+			if hasJobBlob(id, blobKindTranscript) {
+				enqueueRefine(id)
+			}
 		}
 	}
 }

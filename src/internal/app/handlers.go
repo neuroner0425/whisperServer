@@ -213,7 +213,7 @@ func uploadPostHandler(c echo.Context) error {
 	}
 	_ = os.Remove(wavPath)
 
-	enqueue(task{jobID: jobID, wavPath: "__db__"})
+	enqueueTranscribe(jobID)
 	procLogf("[UPLOAD] queued job_id=%s filename=%s bytes=%d", jobID, inputName, totalBytes)
 	return c.Redirect(http.StatusSeeOther, "/job/"+jobID)
 }
@@ -497,14 +497,14 @@ func refineRetryHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "작업이 완료된 후에만 정제를 시도할 수 있습니다.")
 	}
 	if !hasGeminiConfigured() {
-		return echo.NewHTTPError(http.StatusBadRequest, "정제 기능이 설정되어 있지 않습니다. (GEMINI_API_KEY 필요)")
+		return echo.NewHTTPError(http.StatusBadRequest, "정제 기능이 설정되어 있지 않습니다. (GEMINI_API_KEYS 필요)")
 	}
 	if !hasJobBlob(jobID, blobKindTranscript) {
 		return echo.NewHTTPError(http.StatusNotFound, "원본 전사 결과를 찾지 못했습니다.")
 	}
 
 	setJobFields(jobID, map[string]any{"status": statusRefiningPending})
-	enqueue(task{jobID: jobID, wavPath: ""})
+	enqueueRefine(jobID)
 	procLogf("[REFINE_RETRY] queued job_id=%s", jobID)
 	return c.Redirect(http.StatusSeeOther, "/job/"+jobID)
 }
