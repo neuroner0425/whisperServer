@@ -50,28 +50,100 @@ const form = document.getElementById('uploadForm');
 const statusDiv = document.getElementById('uploadStatus');
 const progressBar = document.getElementById('progressBar');
 const progressText = document.getElementById('progressText');
+let shownPercent = 0;
+let playbackRunning = false;
+let uploadDone = false;
+let pendingRedirectURL = '';
+const snapshots = [];
+
+function renderUploadPercent(p) {
+    const clamped = Math.max(0, Math.min(100, Math.round(p)));
+    shownPercent = clamped;
+    progressBar.style.width = clamped + '%';
+    progressText.textContent = clamped + '%';
+}
+
+function maybeRedirectAfterPlayback() {
+    if (!uploadDone) return;
+    if (playbackRunning) return;
+    if (snapshots.length >= 2) return;
+    if (pendingRedirectURL) {
+        window.location.href = pendingRedirectURL;
+    }
+}
+
+function runPlaybackIfPossible() {
+    if (playbackRunning || snapshots.length < 2) {
+        maybeRedirectAfterPlayback();
+        return;
+    }
+
+    playbackRunning = true;
+    const from = snapshots[0];
+    const to = snapshots[1];
+    const duration = Math.max(120, to.at - from.at);
+    const startedAt = performance.now();
+
+    const tick = () => {
+        const elapsed = performance.now() - startedAt;
+        const ratio = Math.max(0, Math.min(1, elapsed / duration));
+        const p = from.percent + ((to.percent - from.percent) * ratio);
+        renderUploadPercent(p);
+        if (ratio < 1) {
+            setTimeout(tick, 33);
+            return;
+        }
+        renderUploadPercent(to.percent);
+        snapshots.shift();
+        playbackRunning = false;
+        runPlaybackIfPossible();
+    };
+    tick();
+}
+
+function pushSnapshot(percent) {
+    const clamped = Math.max(0, Math.min(100, Math.round(percent)));
+    const s = { at: Date.now(), percent: clamped };
+    const last = snapshots[snapshots.length - 1];
+    if (last && last.percent === s.percent) return;
+    snapshots.push(s);
+    runPlaybackIfPossible();
+}
+
 form.addEventListener('submit', function(e) {
     e.preventDefault();
     statusDiv.style.display = 'block';
+    uploadDone = false;
+    pendingRedirectURL = '';
+    playbackRunning = false;
+    snapshots.length = 0;
+    renderUploadPercent(0);
+    // First snapshot is buffered and not immediately animated.
+    snapshots.push({ at: Date.now(), percent: 0 });
+
     const formData = new FormData(form);
     const xhr = new XMLHttpRequest();
     xhr.open('POST', form.action || window.location.pathname, true);
     xhr.upload.onprogress = function(e) {
         if (e.lengthComputable) {
-            const percent = Math.round((e.loaded / e.total) * 100);
-            progressBar.style.width = percent + '%';
-            progressText.textContent = percent + '%';
+            const rawPercent = Math.round((e.loaded / e.total) * 100);
+            pushSnapshot(Math.min(98, rawPercent));
         }
     };
     xhr.onload = function() {
         if (xhr.status === 200 || xhr.status === 302 || xhr.status === 303) {
-            window.location.href = xhr.responseURL;
+            uploadDone = true;
+            pendingRedirectURL = xhr.responseURL;
+            pushSnapshot(100);
+            maybeRedirectAfterPlayback();
         } else {
+            uploadDone = true;
             progressText.textContent = '업로드 실패';
             progressBar.style.background = '#ef4444';
         }
     };
     xhr.onerror = function() {
+        uploadDone = true;
         progressText.textContent = '업로드 오류';
         progressBar.style.background = '#ef4444';
     };
