@@ -77,6 +77,9 @@ func requeuePending() {
 	jobsMu.RLock()
 	defer jobsMu.RUnlock()
 	for id, job := range jobs {
+		if isJobTrashed(job) {
+			continue
+		}
 		status := asString(job["status"])
 		switch status {
 		case statusPending, statusRunning:
@@ -143,6 +146,37 @@ func setJobFields(id string, fields map[string]any) {
 		job[k] = v
 	}
 	saveJobsLocked()
+}
+
+func removeTagFromOwnerJobs(ownerID, tagName string) {
+	jobsMu.Lock()
+	defer jobsMu.Unlock()
+	changed := false
+	for _, job := range jobs {
+		if asString(job["owner_id"]) != ownerID {
+			continue
+		}
+		tags := asStringSlice(job["tags"])
+		if len(tags) == 0 {
+			continue
+		}
+		next := make([]string, 0, len(tags))
+		removed := false
+		for _, t := range tags {
+			if t == tagName {
+				removed = true
+				continue
+			}
+			next = append(next, t)
+		}
+		if removed {
+			job["tags"] = next
+			changed = true
+		}
+	}
+	if changed {
+		saveJobsLocked()
+	}
 }
 
 func appendJobPreviewLine(id, line string) {

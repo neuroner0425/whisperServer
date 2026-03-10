@@ -121,4 +121,13 @@ type JobRow struct {
 	MediaDuration string
 	Status        string
 	IsRefined     bool
+	TagText       string
+	FolderID      string
+	IsTrashed     bool
+}
+
+type FolderRow struct {
+	ID       string
+	Name     string
+	ParentID string
 }

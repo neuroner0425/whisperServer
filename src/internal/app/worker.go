@@ -184,7 +184,7 @@ func taskRefining(jobID, timelineText string) error {
 		return nil
 	}
 	job := getJob(jobID)
-	desc := asString(job["description"])
+	desc := buildRefineDescription(job)
 	refined, err := refineTranscript(timelineText, desc)
 	if err != nil || strings.TrimSpace(refined) == "" {
 		if err != nil {
@@ -201,6 +201,37 @@ func taskRefining(jobID, timelineText string) error {
 	setJobFields(jobID, map[string]any{"result_refined": "db://refined"})
 	procLogf("[REFINE] done job_id=%s output=db://refined", jobID)
 	return nil
+}
+
+func buildRefineDescription(job map[string]any) string {
+	base := strings.TrimSpace(asString(job["description"]))
+	ownerID := strings.TrimSpace(asString(job["owner_id"]))
+	tags := uniqueStringsKeepOrder(asStringSlice(job["tags"]))
+	if ownerID == "" || len(tags) == 0 {
+		return base
+	}
+
+	descMap, err := getTagDescriptionsByNames(ownerID, tags)
+	if err != nil {
+		procErrf("refine.getTagDescriptions", err, "owner_id=%s", ownerID)
+		return base
+	}
+
+	tagLines := make([]string, 0, len(tags))
+	for _, t := range tags {
+		d := strings.TrimSpace(descMap[t])
+		if d == "" {
+			continue
+		}
+		tagLines = append(tagLines, fmt.Sprintf("[%s] %s", t, d))
+	}
+	if len(tagLines) == 0 {
+		return base
+	}
+	if base == "" {
+		return strings.Join(tagLines, "\n")
+	}
+	return base + "\n\n" + strings.Join(tagLines, "\n")
 }
 
 func runWhisperFromBlob(jobID string, wavBytes []byte, totalSec *int) (string, error) {

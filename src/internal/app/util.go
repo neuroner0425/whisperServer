@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -80,6 +81,23 @@ func asFloat(v any) float64 {
 	}
 }
 
+func asBool(v any) bool {
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		return truthy(t)
+	case int:
+		return t != 0
+	case int64:
+		return t != 0
+	case float64:
+		return t != 0
+	default:
+		return false
+	}
+}
+
 func fallback(s, d string) string {
 	if strings.TrimSpace(s) == "" {
 		return d
@@ -90,6 +108,60 @@ func fallback(s, d string) string {
 func truthy(v string) bool {
 	s := strings.ToLower(strings.TrimSpace(v))
 	return s == "1" || s == "true" || s == "yes" || s == "on"
+}
+
+func asStringSlice(v any) []string {
+	switch t := v.(type) {
+	case []string:
+		out := make([]string, 0, len(t))
+		for _, s := range t {
+			if strings.TrimSpace(s) != "" {
+				out = append(out, strings.TrimSpace(s))
+			}
+		}
+		return out
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, e := range t {
+			s := strings.TrimSpace(asString(e))
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func uniqueStringsKeepOrder(in []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
+}
+
+var tagNameRe = regexp.MustCompile(`^[\p{L}\p{N}_]+$`)
+
+func isValidTagName(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	if strings.Contains(name, " ") {
+		return false
+	}
+	return tagNameRe.MatchString(name)
 }
 
 func fileExists(path string) bool {

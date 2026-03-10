@@ -71,6 +71,7 @@ kill_tree() {
 }
 
 start() {
+  local reset_build="${1:-0}"
   if is_running; then
     echo "server is already running (pid: $(cat "$PID_FILE"))"
     return 0
@@ -84,10 +85,12 @@ start() {
     start_cmd="$CMD"
     use_shell=1
   else
-    (
-      cd "$ROOT_DIR"
-      go build -o "$BIN_FILE" ./src/cmd/server
-    )
+    if [[ "$reset_build" -eq 1 || ! -x "$BIN_FILE" ]]; then
+      (
+        cd "$ROOT_DIR"
+        go build -o "$BIN_FILE" ./src/cmd/server
+      )
+    fi
     start_cmd="$BIN_FILE"
     use_shell=0
   fi
@@ -112,6 +115,12 @@ start() {
     rm -f "$PID_FILE"
     return 1
   fi
+}
+
+restart() {
+  local reset_build="${1:-0}"
+  stop
+  start "$reset_build"
 }
 
 stop() {
@@ -170,22 +179,46 @@ status() {
 
 usage() {
   cat <<USAGE
-Usage: ./server {start|stop|status}
+Usage: ./server {start|stop|status|restart} [--reset|-r]
 
 Optional env:
-  SERVER_CMD  Override start command (default: built binary from ./src/cmd/server)
+  SERVER_CMD  Override start command (default: .run/server-bin)
+
+Options:
+  -r, --reset  Rebuild binary before start/restart (ignored when SERVER_CMD is set)
 USAGE
 }
 
-case "${1:-}" in
+ACTION="${1:-}"
+RESET_BUILD=0
+
+if [[ "${2:-}" == "-r" || "${2:-}" == "--reset" ]]; then
+  RESET_BUILD=1
+elif [[ -n "${2:-}" ]]; then
+  usage
+  exit 1
+fi
+
+case "$ACTION" in
   start)
-    start
+    start "$RESET_BUILD"
     ;;
   stop)
+    if [[ "$RESET_BUILD" -eq 1 ]]; then
+      usage
+      exit 1
+    fi
     stop
     ;;
   status)
+    if [[ "$RESET_BUILD" -eq 1 ]]; then
+      usage
+      exit 1
+    fi
     status
+    ;;
+  restart)
+    restart "$RESET_BUILD"
     ;;
   *)
     usage
