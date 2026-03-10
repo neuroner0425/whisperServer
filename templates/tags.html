@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>태그 관리</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="page-shell">
+<div class="container">
+    <div class="topbar">
+        <h2>태그 관리</h2>
+        <div class="profile-menu">
+            <button type="button" class="profile-button">{{.CurrentUserName}}</button>
+            <div class="profile-dropdown">
+                <form method="post" action="/logout">
+                    <button type="submit">로그아웃</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="page-actions">
+        <a href="/" class="action-link">작업 목록으로</a>
+        <a href="/upload" class="action-link">새 업로드</a>
+    </div>
+
+    <div style="margin-bottom:16px;padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;">
+        <form method="post" action="/tags" class="form-column">
+            <input type="hidden" name="next" value="/tags">
+            <input type="text" name="tag_name" placeholder="태그명 (공백 불가, 특수문자 _만 허용)" required>
+            <textarea name="tag_description" rows="3" placeholder="태그 설명 (정제 시 자동 설명으로 사용)" required></textarea>
+            <input type="submit" value="태그 저장/수정" class="full-width">
+        </form>
+    </div>
+
+    <table>
+        <thead>
+        <tr>
+            <th>태그명</th>
+            <th>설명</th>
+            <th style="width:140px;">관리</th>
+        </tr>
+        </thead>
+        <tbody>
+        {{range .Tags}}
+        <tr>
+            <td>{{.Name}}</td>
+            <td>{{.Description}}</td>
+            <td>
+                <form method="post" action="/tags/delete" onsubmit="return confirm('태그를 삭제할까요? 해당 태그는 작업에서도 제거됩니다.');">
+                    <input type="hidden" name="tag_name" value="{{.Name}}">
+                    <button type="submit" class="btn-danger" style="width:100%;padding:8px 10px;font-size:0.92em;">삭제</button>
+                </form>
+            </td>
+        </tr>
+        {{end}}
+        </tbody>
+    </table>
+</div>
+</div>
+</body>
+</html>

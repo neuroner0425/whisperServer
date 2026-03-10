@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>휴지통</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="page-shell">
+<div class="container">
+    <div class="drive-shell">
+        <header class="drive-topbar">
+            <div class="drive-brand">파일 탐색기</div>
+            <div class="drive-top-filler"></div>
+            <div class="profile-menu">
+                <button type="button" class="profile-button">{{.CurrentUserName}}</button>
+                <div class="profile-dropdown">
+                    <form method="post" action="/logout"><button type="submit">로그아웃</button></form>
+                </div>
+            </div>
+        </header>
+
+        <div class="drive-body">
+            <aside class="drive-sidebar">
+                <div class="drive-cta">
+                    <a href="/upload" class="action-link">+ 새 업로드</a>
+                    <a href="/tags" class="action-link">태그 관리</a>
+                </div>
+                <div class="sidebar-nav">
+                    <a class="sidebar-link" href="/?view=home">홈</a>
+                    <a class="sidebar-link" href="/?view=explore">내 파일</a>
+                    <a class="sidebar-link active" href="/trash">휴지통</a>
+                </div>
+            </aside>
+
+            <main class="drive-main">
+                <div class="drive-main-inner">
+                    <div class="content-header">
+                        <h2 class="content-title">휴지통</h2>
+                        <div class="content-sub">삭제된 파일</div>
+                    </div>
+
+                    <div id="entries-grid" class="home-list">
+                        {{range .JobItems}}
+                        <article class="entry-row">
+                            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+                                <div style="min-width:0;flex:1;">
+                                    <div class="entry-title">📄 {{.Filename}}</div>
+                                    <div class="entry-sub">{{.Status}}{{if .TagText}} · 태그: {{.TagText}}{{end}}</div>
+                                </div>
+                                <form method="post" action="/job/{{.ID}}/restore" style="margin:0;display:flex;">
+                                    <button type="submit" style="height:30px;padding:0 12px;font-size:.84em;">복구</button>
+                                </form>
+                            </div>
+                        </article>
+                        {{end}}
+                    </div>
+
+                    {{if eq (len .JobItems) 0}}
+                    <div style="text-align:center;color:#9ca3af;margin-top:24px;">휴지통에 파일이 없습니다.</div>
+                    {{end}}
+                </div>
+            </main>
+        </div>
+    </div>
+</div>
+</div>
+</body>
+</html>
