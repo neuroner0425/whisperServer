@@ -95,6 +95,10 @@
     let pendingRedirect = false;
     let playbackRunning = false;
     const snapshots = [];
+    const OVERDUE_SPEEDUP = 2.5;
+    const NORMAL_MIN_DURATION_MS = 600;
+    const FAST_MIN_DURATION_MS = 240;
+    const OVERDUE_THRESHOLD_MS = 400;
     let autoScrollPreview = true;
     let lastPreviewScrollTop = 0;
 
@@ -190,7 +194,12 @@
         playbackRunning = true;
         const from = snapshots[0];
         const to = snapshots[1];
-        const duration = Math.max(600, to.at - from.at); // follow snapshot interval, but avoid instant jump
+        const baseDuration = Math.max(NORMAL_MIN_DURATION_MS, to.at - from.at);
+        const overdueMs = Date.now() - to.at;
+        const shouldCatchUp = snapshots.length > 2 || overdueMs > OVERDUE_THRESHOLD_MS;
+        const duration = shouldCatchUp
+            ? Math.max(FAST_MIN_DURATION_MS, Math.round(baseDuration / OVERDUE_SPEEDUP))
+            : baseDuration;
         const startedAt = performance.now();
 
         const tick = () => {

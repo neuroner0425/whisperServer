@@ -14,8 +14,27 @@ cleanup_install_env() {
   if [[ -n "${VIRTUAL_ENV:-}" ]]; then
     deactivate >/dev/null 2>&1 || true
   fi
-  rm -rf "${INSTALL_VENV_DIR}"
-  rm -rf "${WHISPER_BUILD_DIR}"
+  rm -rf "${INSTALL_VENV_DIR}" 2>/dev/null || true
+  rm -rf "${WHISPER_BUILD_DIR}" 2>/dev/null || true
+
+  # Fallback for rare macOS cases where rm leaves directories behind.
+  if [[ -d "${INSTALL_VENV_DIR}" ]]; then
+    python3 - <<'PY' "${INSTALL_VENV_DIR}"
+import shutil
+import sys
+
+shutil.rmtree(sys.argv[1], ignore_errors=True)
+PY
+  fi
+
+  if [[ -d "${WHISPER_BUILD_DIR}" ]]; then
+    python3 - <<'PY' "${WHISPER_BUILD_DIR}"
+import shutil
+import sys
+
+shutil.rmtree(sys.argv[1], ignore_errors=True)
+PY
+  fi
 }
 
 setup_install_env() {
@@ -32,8 +51,56 @@ setup_install_env() {
   # shellcheck disable=SC1091
   source "${INSTALL_VENV_DIR}/bin/activate"
 
-  python -m pip install --upgrade pip
+  python -m pip install --upgrade pip certifi
   echo "[OK] Temporary venv activated: ${INSTALL_VENV_DIR}"
+}
+
+configure_ssl_environment() {
+  echo "======Configuring SSL trust for model download...======"
+
+  if [[ -n "${WHISPER_CA_BUNDLE:-}" ]]; then
+    if [[ ! -f "${WHISPER_CA_BUNDLE}" ]]; then
+      echo "[ERROR] WHISPER_CA_BUNDLE is set but file does not exist: ${WHISPER_CA_BUNDLE}"
+      exit 1
+    fi
+
+    export SSL_CERT_FILE="${WHISPER_CA_BUNDLE}"
+    export REQUESTS_CA_BUNDLE="${WHISPER_CA_BUNDLE}"
+    export CURL_CA_BUNDLE="${WHISPER_CA_BUNDLE}"
+    export PIP_CERT="${WHISPER_CA_BUNDLE}"
+    echo "[OK] Using custom CA bundle from WHISPER_CA_BUNDLE"
+    return
+  fi
+
+  local certifi_cafile
+  certifi_cafile="$(python -c 'import certifi; print(certifi.where())')"
+  export SSL_CERT_FILE="${certifi_cafile}"
+  export REQUESTS_CA_BUNDLE="${certifi_cafile}"
+  export CURL_CA_BUNDLE="${certifi_cafile}"
+  export PIP_CERT="${certifi_cafile}"
+
+  if ! python - <<'PY'
+import socket
+import ssl
+
+HOST = "openaipublic.azureedge.net"
+PORT = 443
+
+ctx = ssl.create_default_context()
+with socket.create_connection((HOST, PORT), timeout=10) as sock:
+    with ctx.wrap_socket(sock, server_hostname=HOST):
+        pass
+PY
+  then
+    echo "[ERROR] TLS certificate verification failed while connecting to model host."
+    echo "        If your network uses TLS inspection, export WHISPER_CA_BUNDLE=/path/to/your/company-ca.pem"
+    echo "        then rerun this script."
+    echo "        Temporary (unsafe) fallback only if unavoidable:"
+    echo "        export PYTHONHTTPSVERIFY=0"
+    exit 1
+  fi
+
+  echo "[OK] SSL trust check passed."
 }
 
 check_coreml_environment() {
@@ -75,6 +142,7 @@ check_coreml_environment() {
 check_coreml_environment
 trap cleanup_install_env EXIT
 setup_install_env
+configure_ssl_environment
 
 echo "======Installing Python requirements for macOS/CoreML build...======"
 python -m pip install -r requirements.txt

@@ -3,61 +3,71 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>태그 관리</title>
+    <title>태그 관리 - 파일 탐색기</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <div class="page-shell">
 <div class="container">
-    <div class="topbar">
-        <h2>태그 관리</h2>
-        <div class="profile-menu">
-            <button type="button" class="profile-button">{{.CurrentUserName}}</button>
-            <div class="profile-dropdown">
-                <form method="post" action="/logout">
-                    <button type="submit">로그아웃</button>
-                </form>
+    <div class="drive-shell">
+        <header class="drive-topbar">
+            <div class="drive-brand">파일 탐색기</div>
+            <div class="drive-top-filler"></div>
+            <div class="profile-menu">
+                <button type="button" class="profile-button">{{.CurrentUserName}}</button>
+                <div class="profile-dropdown">
+                    <form method="post" action="/logout"><button type="submit">로그아웃</button></form>
+                </div>
             </div>
+        </header>
+
+        <div class="drive-body">
+            <aside class="drive-sidebar">
+                <div class="drive-cta">
+                    <a href="/upload" class="action-link">+ 새 업로드</a>
+                    <a href="/tags" class="action-link active">태그 관리</a>
+                </div>
+
+                <div class="sidebar-nav">
+                    <a class="sidebar-link" href="/?view=home">홈</a>
+                    <a class="sidebar-link" href="/?view=explore">내 파일</a>
+                    <a class="sidebar-link" href="/trash">휴지통</a>
+                </div>
+            </aside>
+
+            <main class="drive-main">
+                <div class="drive-main-inner">
+                    <div class="content-header">
+                        <h2 class="content-title">태그 관리</h2>
+                        <div class="content-sub">파일을 더 쉽게 분류하기 위해 태그를 만들고 관리하세요.</div>
+                    </div>
+
+                    <div class="content-filters" style="padding: 0 18px;">
+                        <form method="post" action="/tags" style="display:flex; gap:8px;">
+                            <input type="text" name="tag_name" placeholder="새 태그 이름" class="search-input-field" style="width: 240px; border-radius: 17px; height: 34px; padding: 0 14px;" required>
+                            <button type="submit" class="search-button" style="height: 34px; padding: 0 18px; border-radius: 17px;">추가</button>
+                        </form>
+                    </div>
+
+                    <div class="fs-grid" style="padding: 12px 18px;">
+                        {{range .Tags}}
+                        <article class="entry-card" style="height: auto; cursor: default; align-items: flex-start;">
+                            <div style="display:flex; justify-content: space-between; width: 100%; align-items: center;">
+                                <div class="entry-title">🏷️ {{.Name}}</div>
+                                <form method="post" action="/tags/{{.Name}}/delete" onsubmit="return confirm('이 태그를 삭제하시겠습니까?');">
+                                    <button type="submit" class="entry-menu-btn" style="color: #ef4444; font-size: 1.3rem;">×</button>
+                                </form>
+                            </div>
+                            <div class="entry-sub">정의된 태그</div>
+                        </article>
+                        {{else}}
+                        <div style="grid-column: 1 / -1; text-align:center; color:#9ca3af; margin-top:40px;">등록된 태그가 없습니다.</div>
+                        {{end}}
+                    </div>
+                </div>
+            </main>
         </div>
     </div>
-
-    <div class="page-actions">
-        <a href="/" class="action-link">작업 목록으로</a>
-        <a href="/upload" class="action-link">새 업로드</a>
-    </div>
-
-    <div style="margin-bottom:16px;padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;">
-        <form method="post" action="/tags" class="form-column">
-            <input type="hidden" name="next" value="/tags">
-            <input type="text" name="tag_name" placeholder="태그명 (공백 불가, 특수문자 _만 허용)" required>
-            <textarea name="tag_description" rows="3" placeholder="태그 설명 (정제 시 자동 설명으로 사용)" required></textarea>
-            <input type="submit" value="태그 저장/수정" class="full-width">
-        </form>
-    </div>
-
-    <table>
-        <thead>
-        <tr>
-            <th>태그명</th>
-            <th>설명</th>
-            <th style="width:140px;">관리</th>
-        </tr>
-        </thead>
-        <tbody>
-        {{range .Tags}}
-        <tr>
-            <td>{{.Name}}</td>
-            <td>{{.Description}}</td>
-            <td>
-                <form method="post" action="/tags/delete" onsubmit="return confirm('태그를 삭제할까요? 해당 태그는 작업에서도 제거됩니다.');">
-                    <input type="hidden" name="tag_name" value="{{.Name}}">
-                    <button type="submit" class="btn-danger" style="width:100%;padding:8px 10px;font-size:0.92em;">삭제</button>
-                </form>
-            </td>
-        </tr>
-        {{end}}
-        </tbody>
-    </table>
 </div>
 </div>
 </body>

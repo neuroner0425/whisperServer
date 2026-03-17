@@ -388,9 +388,15 @@ func uploadPostHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "오디오/비디오 파일만 업로드할 수 있습니다.")
 	}
 
-	inputName := c.FormValue("input_name")
+	inputName := c.FormValue("display_name")
 	description := strings.TrimSpace(c.FormValue("description"))
+	
+	// 단일 태그(tag)와 다중 태그(tags) 모두 지원
 	selectedTags := parseSelectedTags(c)
+	if singleTag := c.FormValue("tag"); singleTag != "" {
+		selectedTags = append(selectedTags, singleTag)
+	}
+	
 	folderID := normalizeFolderID(c.FormValue("folder_id"))
 	allowedTags, err := listTagNamesByOwner(u.ID)
 	if err != nil {
@@ -403,7 +409,7 @@ func uploadPostHandler(c echo.Context) error {
 			validatedTags = append(validatedTags, t)
 		}
 	}
-	refineEnabled := truthy(c.FormValue("refine_enabled"))
+	refineEnabled := truthy(c.FormValue("refine"))
 	if folderID != "" {
 		f, err := getFolderByID(u.ID, folderID)
 		if err != nil || f.IsTrashed {
@@ -597,15 +603,17 @@ func jobsUpdatesHandler(c echo.Context) error {
 			"total_items": len(rows),
 		})
 	}
+	allFolders, _ := listAllFoldersByOwner(u.ID, false)
+	path, _ := listFolderPath(u.ID, folderID)
 	return c.JSON(http.StatusOK, map[string]any{
 		"changed":      true,
 		"version":      snapshotVersion,
 		"job_items":    pagedRows,
 		"folder_items": folderItems,
+		"all_folders":  allFolders,
+		"folder_path":  path,
 		"page":         page,
-		"page_size":    pageSize,
 		"total_pages":  totalPages,
-		"total_items":  len(rows),
 	})
 }
 
