@@ -291,9 +291,10 @@ tr:hover {
         #search-controls input[type="submit"] { height:30px; border-radius:15px; padding:0 12px; font-size:.84em; width:auto; flex:0 0 auto; }
         .entries-stack { width:100%; display:flex; flex-direction:column; gap:10px; }
         .fs-grid { width:100%; display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:12px; align-content:start; }
+        .file-grid { margin-top:32px; }
         .home-list { width:100%; display:flex; flex-direction:column; gap:8px; }
-        .entry-card { border:1px solid #dadce0; border-radius:12px; background:#fff; padding:12px; cursor:pointer; transition:background-color .12s,border-color .12s; }
-        .entry-row { border:1px solid #dadce0; border-radius:12px; background:#fff; padding:12px 10px; cursor:pointer; }
+        .entry-card { position:relative; border:1px solid #dadce0; border-radius:12px; background:#fff; padding:12px; cursor:pointer; transition:background-color .12s,border-color .12s; }
+        .entry-row { position:relative; border:1px solid #dadce0; border-radius:12px; background:#fff; padding:12px 10px; cursor:pointer; }
         .entry-row:hover { background:#f3f4f6; }
         .entry-row.is-selected { background:#e8f0fe; border-color:#93b4f8; }
         .entry-card:hover { background:#f3f4f6; border-color:#c6cacf; }
@@ -399,3 +400,180 @@ tr:hover {
         #pagination { padding:0 18px 12px; }
         #pagination:empty { padding:0; display:none; }
         .drive-shell { min-width:1180px; }
+
+/* --- Added UI Enhancements (Unified) --- */
+.drag-badge {
+    position: fixed; top: -100px; left: -100px;
+    padding: 8px 12px; background: #2563eb; color: #fff;
+    border-radius: 20px; font-size: 0.9em; font-weight: 500;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1); pointer-events: none;
+    z-index: 10000;
+}
+#drag-badge-ghost { position: fixed; top: -100px; left: -100px; }
+
+.inline-rename-input {
+    width: 100%; padding: 4px 8px; border: 2px solid #2563eb;
+    border-radius: 4px; font-size: inherit; font-family: inherit;
+    outline: none; box-sizing: border-box;
+}
+
+.selection-rect {
+    position: absolute; border: 1px solid #2563eb;
+    background: rgba(37, 99, 235, 0.15);
+    pointer-events: none; z-index: 9999; display: none;
+}
+
+body.is-selecting {
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+#batch_form {
+    position: relative;
+    overflow: hidden;
+}
+
+.upload-setup-form {
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    gap: 0 !important;
+}
+
+.modal-panel-setup {
+    max-width: 480px !important;
+    padding: 24px !important;
+}
+
+.upload-file-display {
+    color: #1a73e8;
+    font-weight: 600;
+    font-size: 0.95rem;
+    margin-bottom: 24px;
+    padding: 8px 12px;
+    background: #f1f7fe;
+    border-radius: 6px;
+    display: inline-block;
+}
+
+.config-field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.config-label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #5f6368;
+    margin-bottom: 8px;
+}
+
+.config-select {
+    width: 100%;
+    height: 40px;
+    border: 1px solid #dadce0;
+    border-radius: 8px;
+    padding: 0 8px;
+    background: #fff;
+}
+
+.config-textarea {
+    width: 100%;
+    border: 1px solid #dadce0;
+    border-radius: 8px;
+    padding: 10px;
+    font-family: inherit;
+    resize: none;
+    box-sizing: border-box;
+    font-size: 0.95rem;
+}
+
+.ai-refine-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    font-size: 0.95rem;
+    color: #3c4043;
+    padding: 4px 0;
+}
+
+.ai-refine-checkbox {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+.modal-actions-setup {
+    margin-top: 32px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    border-top: 1px solid #eee;
+    padding-top: 20px;
+}
+
+.btn-setup-cancel {
+    height: 40px;
+    padding: 0 20px;
+    background: #fff;
+    color: #3c4043;
+    border: 1px solid #dadce0;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.btn-setup-submit {
+    height: 40px;
+    padding: 0 24px;
+    background: #1a73e8;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.2s;
+    white-space: nowrap;
+}
+
+/* --- Upload Progress UI --- */
+.upload-progress-container {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 5;
+}
+
+.upload-progress-circle {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: conic-gradient(#1a73e8 calc(var(--progress) * 1%), #e5e7eb 0);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.1s;
+}
+
+.upload-progress-circle::after {
+    content: "";
+    width: 18px;
+    height: 18px;
+    background: #fff;
+    border-radius: 50%;
+}
+
+.entry-card.is-uploading, .entry-row.is-uploading {
+    opacity: 0.7;
+    pointer-events: none; /* 업로드 중에는 조작 방지 */
+}
