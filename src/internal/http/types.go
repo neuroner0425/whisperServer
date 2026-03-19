@@ -9,6 +9,7 @@ type JobView struct {
 	Duration        string
 	MediaDuration   string
 	Phase           string
+	ProgressLabel   string
 	ProgressPercent int
 	PreviewText     string
 }
@@ -23,6 +24,7 @@ type JobRow struct {
 	FolderID      string
 	IsTrashed     bool
 	UpdatedAt     string
+	DeletedAt     string
 	OwnerName     string
 	FolderName    string
 }

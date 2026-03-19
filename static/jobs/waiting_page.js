@@ -65,11 +65,11 @@
         return Math.max(0, Math.min(100, value || 0));
     }
 
-    function renderState(phase, progress, preview) {
+    function renderState(phase, progress, preview, progressText) {
         currentPhase = phase || currentPhase || '대기 중';
         shownProgress = clampPercent(progress);
         shownPreview = preview || '';
-        if (progressLabel) progressLabel.textContent = `${currentPhase} ${shownProgress}%`;
+        if (progressLabel) progressLabel.textContent = progressText || `${currentPhase} ${shownProgress}%`;
         if (progressBar) progressBar.style.width = `${shownProgress}%`;
         if (!livePreviewEl) return;
 
@@ -108,13 +108,13 @@
             const ratio = Math.max(0, Math.min(1, elapsed / duration));
             const progress = Math.round(from.progress + ((to.progress - from.progress) * ratio));
             const currentLen = Math.round(from.preview.length + ((to.preview.length - from.preview.length) * ratio));
-            renderState(to.phase, progress, to.preview.slice(0, Math.max(0, currentLen)));
+            renderState(to.phase, progress, to.preview.slice(0, Math.max(0, currentLen)), to.progressLabel);
 
             if (ratio < 1) {
                 setTimeout(tick, 40);
                 return;
             }
-            renderState(to.phase, to.progress, to.preview);
+            renderState(to.phase, to.progress, to.preview, to.progressLabel);
             snapshots.shift();
             playbackRunning = false;
             runPlaybackIfPossible();
@@ -127,7 +127,8 @@
             at: Date.now(),
             phase: data.phase || '대기 중',
             progress: clampPercent(data.progress_percent),
-            preview: toDisplayPreview(data.preview_text || '')
+            preview: toDisplayPreview(data.preview_text || ''),
+            progressLabel: data.progress_label || ''
         };
         const last = snapshots[snapshots.length - 1];
         if (last && last.phase === snapshot.phase && last.progress === snapshot.progress && last.preview === snapshot.preview) return;
@@ -169,9 +170,10 @@
         at: Date.now(),
         phase: currentPhase,
         progress: clampPercent(shownProgress),
-        preview: toDisplayPreview(initialRawPreview)
+        preview: toDisplayPreview(initialRawPreview),
+        progressLabel: pageData.progress_label || ''
     });
-    renderState(currentPhase, shownProgress, toDisplayPreview(initialRawPreview));
+    renderState(currentPhase, shownProgress, toDisplayPreview(initialRawPreview), pageData.progress_label || '');
 
     if (toggleBtn && detailPanel) {
         toggleBtn.addEventListener('click', () => {

@@ -70,7 +70,7 @@
 {{end}}
 {{define "page_scripts"}}
 <script id="waiting-page-data" type="application/json">
-    {"job_id":{{printf "%q" .JobID}},"preview_text":{{printf "%q" .Job.PreviewText}},"progress_percent":{{.Job.ProgressPercent}},"phase":{{printf "%q" .Job.Phase}}}
+    {"job_id":{{printf "%q" .JobID}},"preview_text":{{printf "%q" .Job.PreviewText}},"progress_percent":{{.Job.ProgressPercent}},"phase":{{printf "%q" .Job.Phase}},"progress_label":{{printf "%q" .Job.ProgressLabel}}}
 </script>
 <script src="/static/jobs/waiting_page.js"></script>
 {{end}}

@@ -43,6 +43,9 @@ func CreateFolderHandler(c echo.Context, deps FolderDeps) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "폴더 생성 실패(중복 이름 확인)")
 	}
 	deps.Logf("[FOLDER] create owner_id=%s id=%s name=%s parent_id=%s", u.ID, id, name, parentID)
+	if err := store.TouchFolderAndAncestors(u.ID, parentID); err != nil {
+		deps.Errf("folder.createTouchParent", err, "owner_id=%s folder_id=%s parent_id=%s", u.ID, id, parentID)
+	}
 	if parentID == "" {
 		return c.Redirect(http.StatusSeeOther, routes.FilesRoot)
 	}
@@ -67,9 +70,16 @@ func MoveJobsHandler(c echo.Context, deps FolderDeps) error {
 		}
 	}
 
+	touchedFolders := map[string]struct{}{}
 	for _, id := range c.Request().PostForm["job_ids"] {
 		job := deps.GetJob(id)
 		if job != nil && job.OwnerID == u.ID && !deps.IsJobTrashed(job) {
+			if job.FolderID != "" {
+				touchedFolders[job.FolderID] = struct{}{}
+			}
+			if targetFolder != "" {
+				touchedFolders[targetFolder] = struct{}{}
+			}
 			deps.SetJobFields(id, map[string]any{"folder_id": targetFolder})
 		}
 	}
@@ -90,6 +100,18 @@ func MoveJobsHandler(c echo.Context, deps FolderDeps) error {
 		}
 		if err := store.MoveFolder(u.ID, id, targetFolder); err != nil {
 			deps.Errf("batchMove.folder", err, "owner_id=%s folder_id=%s target=%s", u.ID, id, targetFolder)
+			continue
+		}
+		if f.ParentID != "" {
+			touchedFolders[f.ParentID] = struct{}{}
+		}
+		if targetFolder != "" {
+			touchedFolders[targetFolder] = struct{}{}
+		}
+	}
+	for id := range touchedFolders {
+		if err := store.TouchFolderAndAncestors(u.ID, id); err != nil {
+			deps.Errf("batchMove.touchFolder", err, "owner_id=%s folder_id=%s", u.ID, id)
 		}
 	}
 	return c.Redirect(http.StatusSeeOther, returnTo)
@@ -151,6 +173,12 @@ func MoveFolderHandler(c echo.Context, deps FolderDeps) error {
 	if err := store.MoveFolder(u.ID, folderID, targetParent); err != nil {
 		deps.Errf("folder.move", err, "owner_id=%s folder_id=%s target_parent=%s", u.ID, folderID, targetParent)
 		return echo.NewHTTPError(http.StatusBadRequest, "폴더 이동 실패")
+	}
+	if err := store.TouchFolderAndAncestors(u.ID, f.ParentID); err != nil {
+		deps.Errf("folder.moveTouchSourceParent", err, "owner_id=%s folder_id=%s parent_id=%s", u.ID, folderID, f.ParentID)
+	}
+	if err := store.TouchFolderAndAncestors(u.ID, targetParent); err != nil {
+		deps.Errf("folder.moveTouchTargetParent", err, "owner_id=%s folder_id=%s parent_id=%s", u.ID, folderID, targetParent)
 	}
 	if targetParent == "" {
 		return c.Redirect(http.StatusSeeOther, routes.FilesRoot)

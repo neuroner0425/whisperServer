@@ -3,6 +3,7 @@ package httpx
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"whisperserver/src/internal/model"
@@ -33,7 +34,7 @@ func RestoreJobHandler(c echo.Context, deps TrashDeps) error {
 		return c.Redirect(http.StatusSeeOther, routes.Trash)
 	}
 	folderID := deps.NormalizeFolderID(job.FolderID)
-	updates := map[string]any{"is_trashed": false}
+	updates := map[string]any{"is_trashed": false, "deleted_at": ""}
 	if folderID != "" {
 		f, ferr := store.GetFolderByID(u.ID, folderID)
 		if ferr == nil {
@@ -54,6 +55,13 @@ func RestoreJobHandler(c echo.Context, deps TrashDeps) error {
 		}
 	}
 	deps.SetJobFields(jobID, updates)
+	restoreFolderID := folderID
+	if nextFolderID, ok := updates["folder_id"].(string); ok {
+		restoreFolderID = nextFolderID
+	}
+	if err := store.TouchFolderAndAncestors(u.ID, restoreFolderID); err != nil {
+		deps.Errf("job.restoreTouchFolder", err, "owner_id=%s job_id=%s folder_id=%s", u.ID, jobID, restoreFolderID)
+	}
 	return c.Redirect(http.StatusSeeOther, routes.Trash)
 }
 
@@ -67,7 +75,10 @@ func TrashJobHandler(c echo.Context, deps TrashDeps) error {
 	if job == nil || job.OwnerID != u.ID {
 		return c.Redirect(http.StatusSeeOther, routes.FilesHome)
 	}
-	deps.SetJobFields(jobID, map[string]any{"is_trashed": true})
+	deps.SetJobFields(jobID, map[string]any{"is_trashed": true, "deleted_at": time.Now().Format("2006-01-02 15:04:05")})
+	if err := store.TouchFolderAndAncestors(u.ID, job.FolderID); err != nil {
+		deps.Errf("job.trashTouchFolder", err, "owner_id=%s job_id=%s folder_id=%s", u.ID, jobID, job.FolderID)
+	}
 	return c.Redirect(http.StatusSeeOther, routes.FilesHome)
 }
 
@@ -102,6 +113,11 @@ func RestoreFolderHandler(c echo.Context, deps TrashDeps) error {
 	if err := store.SetFolderTrashed(u.ID, folderID, false); err != nil {
 		deps.Errf("folder.restore", err, "owner_id=%s folder_id=%s", u.ID, folderID)
 	}
+	if f, err := store.GetFolderByID(u.ID, folderID); err == nil {
+		if err := store.TouchFolderAndAncestors(u.ID, f.ParentID); err != nil {
+			deps.Errf("folder.restoreTouchParent", err, "owner_id=%s folder_id=%s parent_id=%s", u.ID, folderID, f.ParentID)
+		}
+	}
 	return c.Redirect(http.StatusSeeOther, routes.Trash)
 }
 
@@ -111,10 +127,16 @@ func TrashFolderHandler(c echo.Context, deps TrashDeps) error {
 		return c.Redirect(http.StatusSeeOther, routes.Login)
 	}
 	folderID := c.Param("folder_id")
+	f, _ := store.GetFolderByID(u.ID, folderID)
 	subtree := deps.CollectFolderSubtree(u.ID, []string{folderID}, false)
 	if err := store.SetFolderTrashed(u.ID, folderID, true); err != nil {
 		deps.Errf("folder.trash", err, "owner_id=%s folder_id=%s", u.ID, folderID)
 	}
 	deps.MarkSubtreeJobsTrashed(u.ID, subtree)
+	if f != nil {
+		if err := store.TouchFolderAndAncestors(u.ID, f.ParentID); err != nil {
+			deps.Errf("folder.trashTouchParent", err, "owner_id=%s folder_id=%s parent_id=%s", u.ID, folderID, f.ParentID)
+		}
+	}
 	return c.Redirect(http.StatusSeeOther, routes.FilesHome)
 }

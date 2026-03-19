@@ -21,8 +21,8 @@ func sortJobRows(rows []JobRow, sortBy, sortOrder string) {
 	httpx.SortJobRows(rows, sortBy, sortOrder, uploadedTS)
 }
 
-func sortFolderRows(rows []FolderRow, sortOrder string) {
-	httpx.SortFolderRows(rows, sortOrder)
+func sortFolderRows(rows []FolderRow, sortBy, sortOrder string) {
+	httpx.SortFolderRows(rows, sortBy, sortOrder)
 }
 
 func jobsSnapshotVersion(jobItems []JobRow, folderItems []FolderRow, page, pageSize, totalPages, totalItems int) string {

@@ -370,14 +370,18 @@ tr:hover {
         .home-folder-info .entry-sub { font-size:0.82rem; color:#5f6368; }
 
         .home-files-stack { display:flex; flex-direction:column; margin-top:4px; }
-        .file-list-header { display:grid; grid-template-columns: 2.2fr 1.8fr 1.2fr 1.2fr 48px; align-items:center; padding:12px 16px; border-bottom:1px solid #dadce0; color:#5f6368; font-size:0.88rem; font-weight:500; }
-        .home-file-row { display:grid; grid-template-columns: 2.2fr 1.8fr 1.2fr 1.2fr 48px; align-items:center; padding:12px 16px; border-bottom:1px solid #f1f3f4; cursor:pointer; transition: background 0.1s; border-radius:0; margin:0; position:relative; }
+        .file-list-header { display:grid; grid-template-columns: 2.5fr 1.5fr 1.5fr 48px; align-items:center; padding:12px 16px; border-bottom:1px solid #dadce0; color:#5f6368; font-size:0.88rem; font-weight:500; }
+        .file-list-header-trash { grid-template-columns: 2.2fr 1.4fr 1.4fr 1.3fr 80px; }
+        .home-file-row { display:grid; grid-template-columns: 2.5fr 1.5fr 1.5fr 48px; align-items:center; padding:12px 16px; border-bottom:1px solid #f1f3f4; cursor:pointer; transition: background 0.1s; border-radius:0; margin:0; position:relative; }
         .home-file-row:hover { background:#f1f3f4; }
         .home-file-row.is-selected { background:#e8f0fe; }
         .home-file-row .col-name { display:flex; align-items:center; gap:14px; font-weight:500; color:#202124; font-size:0.95rem; }
-        .home-file-row .col-reason { color:#5f6368; font-size:0.92rem; }
-        .home-file-row .col-owner { display:flex; align-items:center; gap:10px; color:#5f6368; font-size:0.92rem; }
+        .home-file-row .col-date { color:#5f6368; font-size:0.92rem; }
+        .home-file-row .col-deleted { color:#5f6368; font-size:0.92rem; }
         .home-file-row .col-location { display:flex; align-items:center; gap:10px; color:#5f6368; font-size:0.92rem; }
+        .home-file-row .col-action { display:flex; justify-content:flex-end; }
+        .trash-file-row { grid-template-columns: 2.2fr 1.4fr 1.4fr 1.3fr 80px; cursor:default; }
+        .trash-file-row:hover { background:#fff; }
         
         .owner-avatar { width:26px; height:26px; background:#34a853; color:#fff; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:0.78rem; font-weight:700; }
         .loc-icon, .file-icon { font-size:1.2rem; }

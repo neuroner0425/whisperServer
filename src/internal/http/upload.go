@@ -169,6 +169,9 @@ func UploadPostHandler(c echo.Context, deps UploadDeps) error {
 	}
 
 	deps.AddJob(jobID, job)
+	if err := store.TouchFolderAndAncestors(u.ID, folderID); err != nil {
+		deps.Errf("upload.touchFolder", err, "owner_id=%s folder_id=%s job_id=%s", u.ID, folderID, jobID)
+	}
 
 	if err := store.SaveJobBlob(jobID, store.BlobKindWav, wavBytes); err != nil {
 		_ = os.Remove(wavPath)

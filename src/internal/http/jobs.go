@@ -31,7 +31,7 @@ type JobsDeps struct {
 	BuildJobRows        func(string, string, string, string, bool) []JobRow
 	BuildFolderRows     func(string, string, string) []FolderRow
 	RecentFolderRows    func(string) []FolderRow
-	SortFolderRows      func([]FolderRow, string)
+	SortFolderRows      func([]FolderRow, string, string)
 	SortJobRows         func([]JobRow, string, string)
 	JobsSnapshotVersion func([]JobRow, []FolderRow, int, int, int, int) string
 	SelectedTagMap      func([]string) map[string]bool
@@ -85,7 +85,7 @@ func JobsHandler(c echo.Context, deps JobsDeps) error {
 	if view == "explore" {
 		rows = deps.BuildJobRows(u.ID, q, tag, folderID, false)
 		folderItems = deps.BuildFolderRows(u.ID, folderID, q)
-		deps.SortFolderRows(folderItems, sortOrder)
+		deps.SortFolderRows(folderItems, sortBy, sortOrder)
 	} else if view == "home" {
 		folderItems = deps.RecentFolderRows(u.ID)
 	}
@@ -155,7 +155,7 @@ func JobsUpdatesHandler(c echo.Context, deps JobsDeps) error {
 	if view == "explore" {
 		rows = deps.BuildJobRows(u.ID, q, tag, folderID, false)
 		folderItems = deps.BuildFolderRows(u.ID, folderID, q)
-		deps.SortFolderRows(folderItems, sortOrder)
+		deps.SortFolderRows(folderItems, sortBy, sortOrder)
 	} else if view == "home" {
 		folderItems = deps.RecentFolderRows(u.ID)
 	}

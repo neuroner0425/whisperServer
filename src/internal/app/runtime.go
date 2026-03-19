@@ -2,6 +2,7 @@ package app
 
 import (
 	"sync"
+	"time"
 
 	"whisperserver/src/internal/model"
 	"whisperserver/src/internal/store"
@@ -75,6 +76,7 @@ func markSubtreeJobsTrashed(userID string, subtree map[string]struct{}) {
 	if len(subtree) == 0 {
 		return
 	}
+	deletedAt := time.Now().Format("2006-01-02 15:04:05")
 	runtimeState.jobsMu.Lock()
 	defer runtimeState.jobsMu.Unlock()
 	for _, job := range runtimeState.jobs {
@@ -83,6 +85,7 @@ func markSubtreeJobsTrashed(userID string, subtree map[string]struct{}) {
 		}
 		if _, ok := subtree[normalizeFolderID(job.FolderID)]; ok {
 			job.IsTrashed = true
+			job.DeletedAt = deletedAt
 		}
 	}
 	saveJobsLocked()

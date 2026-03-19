@@ -124,8 +124,7 @@ function createHomeFileRow(job) {
     row.dataset.openUrl = `/job/${job.ID}`;
     const date = (job.UpdatedAt || '').split(' ')[0] || '';
     row.innerHTML = `<div class="col-name"><span class="file-icon">📄</span> <span class="entry-title">${job.Filename}</span></div>
-        <div class="col-reason">내가 수정함 · ${date}</div>
-        <div class="col-owner"><span class="owner-avatar">${(job.OwnerName || '나')[0]}</span> ${job.OwnerName || '나'}</div>
+        <div class="col-date">${date}</div>
         <div class="col-location"><span class="loc-icon">📁</span> ${job.FolderName || '내 파일'}</div>
         <div class="col-action"><button type="button" class="entry-menu-btn">⋮</button></div>`;
     return row;

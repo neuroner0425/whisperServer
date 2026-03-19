@@ -144,6 +144,8 @@ func applyJobFields(job *model.Job, fields map[string]any) {
 			job.FolderID = intutil.AsString(v)
 		case "is_trashed":
 			job.IsTrashed = intutil.AsBool(v)
+		case "deleted_at":
+			job.DeletedAt = intutil.AsString(v)
 		case "started_at":
 			job.StartedAt = intutil.AsString(v)
 		case "started_ts":
@@ -248,6 +250,7 @@ func toJobView(job *model.Job) JobView {
 		Duration:        durationString(job.Duration),
 		MediaDuration:   intutil.Fallback(job.MediaDuration, "-"),
 		Phase:           intutil.Fallback(job.Phase, "대기 중"),
+		ProgressLabel:   intutil.Fallback(job.ProgressLabel, ""),
 		ProgressPercent: job.ProgressPercent,
 		PreviewText:     sanitizePreviewText(job.PreviewText),
 	}
