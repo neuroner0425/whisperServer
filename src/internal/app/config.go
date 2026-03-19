@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	intutil "whisperserver/src/internal/util"
 )
 
 var (
@@ -29,7 +31,7 @@ func loadConfigFile() (map[string][]string, string, error) {
 	userPath := filepath.Join(projectRoot, "app.conf")
 	defaultPath := filepath.Join(projectRoot, "app.conf.default")
 	targetPath := defaultPath
-	if fileExists(userPath) {
+	if intutil.FileExists(userPath) {
 		targetPath = userPath
 	}
 
@@ -121,7 +123,7 @@ func confInt(key string) int {
 }
 
 func confBool(key string) bool {
-	return truthy(confString(key))
+	return intutil.Truthy(confString(key))
 }
 
 func confList(key string) []string {

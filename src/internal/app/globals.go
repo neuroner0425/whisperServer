@@ -1,13 +1,12 @@
 package app
 
 import (
-	htmpl "html/template"
 	"os"
 	"path/filepath"
 	"regexp"
-	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
+	httpx "whisperserver/src/internal/http"
 )
 
 const (
@@ -34,17 +33,10 @@ var (
 	geminiModel       string
 	splitTaskQueues   bool
 
-	jobsMu sync.RWMutex
-	jobs   = map[string]map[string]any{}
-
-	taskQueue       = make(chan task, 256)
-	transcribeQueue = make(chan task, 256)
-	refineQueue     = make(chan task, 256)
-	workerOnce      sync.Once
-	secureRe        = regexp.MustCompile(`[^A-Za-z0-9_.-]+`)
-	lineRe1         = regexp.MustCompile(`\[(\d{2}):(\d{2}):(\d{2}\.\d+)`)
-	lineRe2         = regexp.MustCompile(`\[(\d{2}):(\d{2}):(\d{2})`)
-	progressRe      = regexp.MustCompile(`\[(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)\s*-->`)
+	secureRe   = regexp.MustCompile(`[^A-Za-z0-9_.-]+`)
+	lineRe1    = regexp.MustCompile(`\[(\d{2}):(\d{2}):(\d{2}\.\d+)`)
+	lineRe2    = regexp.MustCompile(`\[(\d{2}):(\d{2}):(\d{2})`)
+	progressRe = regexp.MustCompile(`\[(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)\s*-->`)
 
 	jobsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{Name: "whisper_jobs_total", Help: "Total jobs finished by status"},
@@ -86,48 +78,6 @@ var (
 교정된 텍스트만 출력하십시오. 부가적인 설명은 생략합니다.`
 )
 
-type task struct {
-	jobID string
-	kind  taskType
-}
-
-type taskType string
-
-const (
-	taskTypeTranscribe taskType = "transcribe"
-	taskTypeRefine     taskType = "refine"
-)
-
-type renderer struct {
-	templates map[string]*htmpl.Template
-}
-
-type JobView struct {
-	Filename        string
-	Status          string
-	UploadedAt      string
-	StartedAt       string
-	CompletedAt     string
-	Duration        string
-	MediaDuration   string
-	Phase           string
-	ProgressPercent int
-	PreviewText     string
-}
-
-type JobRow struct {
-	ID            string
-	Filename      string
-	MediaDuration string
-	Status        string
-	IsRefined     bool
-	TagText       string
-	FolderID      string
-	IsTrashed     bool
-}
-
-type FolderRow struct {
-	ID       string
-	Name     string
-	ParentID string
-}
+type JobView = httpx.JobView
+type JobRow = httpx.JobRow
+type FolderRow = httpx.FolderRow

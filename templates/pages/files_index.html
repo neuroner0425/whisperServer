@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>내 파일</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<div class="page-shell">
+<div class="container">
+    <div class="drive-shell">
+        <header class="drive-topbar">
+            <div class="drive-brand">파일 탐색기</div>
+            <div class="drive-top-filler"></div>
+            <div class="profile-menu">
+                <button type="button" class="profile-button">{{.CurrentUserName}}</button>
+                <div class="profile-dropdown">
+                    <form method="post" action="/logout"><button type="submit">로그아웃</button></form>
+                </div>
+            </div>
+        </header>
+
+        <div class="drive-body">
+            <aside class="drive-sidebar">
+                <div class="drive-cta">
+                    <button type="button" class="action-link" onclick="triggerFileUpload()" style="width: 100%; border: none; cursor: pointer;">+ 새 업로드</button>
+                    <a href="/tags" class="action-link">태그 관리</a>
+                </div>
+
+                <div class="sidebar-nav">
+                    <a class="sidebar-link {{if eq .ViewMode "home"}}active{{end}}" href="/files/home">홈</a>
+                    <a class="sidebar-link {{if ne .ViewMode "home"}}active{{end}}" href="/files/root">내 파일</a>
+                    <a class="sidebar-link" href="/trash">휴지통</a>
+                </div>
+            </aside>
+
+            <main class="drive-main">
+                <div class="drive-main-inner">
+                <div class="content-header">
+                    <h2 class="content-title">
+                        {{if eq .ViewMode "home"}}
+                        {{else}}
+                        <a class="crumb-link crumb-drop-target" data-folder-id="" href="/files/root">내 파일</a>{{range .FolderPath}}<span class="crumb-sep">&gt;</span><a class="crumb-link crumb-drop-target" data-folder-id="{{.ID}}" href="/files/folders/{{.ID}}">{{.Name}}</a>{{end}}
+                        {{end}}
+                    </h2>
+                </div>
+                
+                <form id="searchForm" action="/" method="get" class="content-filters">
+                    <input type="hidden" name="view" value="{{.ViewMode}}">
+                    <input type="hidden" name="folder" value="{{.CurrentFolderID}}">
+                    <input type="hidden" id="searchPage" name="page" value="{{.Page}}">
+                    <input type="hidden" id="searchSort" name="sort" value="{{.SelectedSort}}">
+                    <input type="hidden" id="searchOrder" name="order" value="{{.SelectedOrder}}">
+                    
+                    <!-- Search Controls -->
+                    <div id="search-controls" style="display:flex;align-items:center;gap:6px;flex-wrap:nowrap;{{if eq .ViewMode "home"}}display:none;{{end}}">
+                        <input id="searchQuery" type="text" name="q" placeholder="파일명 검색" value="{{.SearchQuery}}" class="search-input-field">
+                        <select id="searchTag" name="tag" class="search-input-field">
+                            <option value="">전체 태그</option>
+                            {{range .Tags}}<option value="{{.Name}}" {{if eq $.SelectedTag .Name}}selected{{end}}>{{.Name}}</option>{{end}}
+                        </select>
+                        <input type="submit" value="검색" class="search-button">
+                    </div>
+
+                    <!-- Selection Controls (Replaces Search Controls when items are selected) -->
+                    <div id="selection-controls" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;">
+                        <button type="button" id="cancel-selection-btn" style="background:transparent;color:#6b7280;border:none;margin-left:8px;padding:6px 10px;font-size:1.1em;line-height:1;">X</button>
+                        <span id="selection-count-label" style="color:#374151;font-size:0.95em;">0개 선택됨</span>
+                        <button type="button" onclick="submitDownload()">다운로드</button>
+                        <button type="button" class="btn-danger" onclick="confirmTrash()">삭제</button>
+                        <button type="button" onclick="openMoveDialog()">이동</button>
+                    </div>
+                </form>
+
+                <form id="batch_form" method="post" class="form-column">
+                    {{if eq .ViewMode "home"}}
+                    <div class="home-sections">
+                        <section class="home-section">
+                            <div class="section-header">
+                                <div class="section-title-wrap">
+                                    <span class="section-title">최근 수정 폴더</span>
+                                </div>
+                            </div>
+                            <div id="home-folders-grid" class="fs-grid folder-grid home-folder-grid">
+                                <!-- Folders will be rendered here by JS -->
+                            </div>
+                        </section>
+
+                        <section class="home-section">
+                            <div class="section-header">
+                                <div class="section-title-wrap">
+                                    <span class="section-title">최근 수정 파일</span>
+                                </div>
+                            </div>
+                            <div id="home-files-stack" class="home-files-stack">
+                                <div class="file-list-header">
+                                    <span class="col-name">이름</span>
+                                    <span class="col-reason">수정 이유</span>
+                                    <span class="col-owner">소유자</span>
+                                    <span class="col-location">위치</span>
+                                    <span class="col-action"></span>
+                                </div>
+                                <div id="home-files-list">
+                                    <!-- Files will be rendered here by JS -->
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+                    {{else}}
+                    <div class="grid-toolbar">
+                        <div class="filter-wrap">
+                            <button id="sort-filter-toggle" type="button" class="filter-chip-btn">
+                                <span id="sort-filter-label">정렬 기준</span>
+                                <span class="filter-caret"></span>
+                            </button>
+                            <div id="sort-filter-panel" class="filter-panel">
+                                <div class="filter-section">
+                                    <div class="filter-title">정렬 기준</div>
+                                    <button type="button" class="filter-option" data-kind="sort" data-value="name"><span class="filter-check">✓</span><span>이름</span></button>
+                                    <button type="button" class="filter-option" data-kind="sort" data-value="updated"><span class="filter-check">✓</span><span>수정 날짜</span></button>
+                                </div>
+                                <div class="filter-section">
+                                    <div class="filter-title">정렬 방향</div>
+                                    <button type="button" class="filter-option" data-kind="order" data-value="asc"><span class="filter-check">✓</span><span>오름차순</span></button>
+                                    <button type="button" class="filter-option" data-kind="order" data-value="desc"><span class="filter-check">✓</span><span>내림차순</span></button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div id="entries-grid" class="entries-stack selection-mode">
+                        <div id="folder-grid" class="fs-grid folder-grid" {{if eq (len .FolderItems) 0}}style="display:none;"{{end}}>
+                            {{range .FolderItems}}
+                            <article class="entry-card is-folder folder-drop-target" data-type="folder" data-folder-id="{{.ID}}" data-open-url="/files/folders/{{.ID}}" draggable="true">
+                                <div class="entry-actions"><button type="button" class="entry-menu-btn" data-folder-id="{{.ID}}" aria-label="폴더 메뉴">⋮</button></div>
+                                <input class="entry-check" type="checkbox" name="folder_ids" value="{{.ID}}">
+                                <div class="entry-title">📁 {{.Name}}</div>
+                            </article>
+                            {{end}}
+                        </div>
+                        <div id="file-grid" class="fs-grid file-grid" {{if eq (len .JobItems) 0}}style="display:none;"{{end}}>
+                            {{range .JobItems}}
+                            <article class="entry-card file-entry" data-type="file" data-job-id="{{.ID}}" data-folder-id="{{.FolderID}}" data-open-url="/job/{{.ID}}" draggable="true">
+                                <div class="entry-actions"><button type="button" class="entry-menu-btn" data-job-id="{{.ID}}" aria-label="파일 메뉴">⋮</button></div>
+                                <div style="display:flex;align-items:flex-start;gap:8px;">
+                                    <label style="display:flex;gap:6px;align-items:flex-start;flex:1;cursor:pointer;">
+                                        <input class="entry-check" type="checkbox" name="job_ids" value="{{.ID}}">
+                                        <div><div class="entry-title">📄 {{.Filename}}</div><div class="entry-sub">{{.MediaDuration}}</div></div>
+                                    </label>
+                                </div>
+                                {{if .TagText}}<div class="entry-sub">태그: {{.TagText}}</div>{{end}}
+                                <div class="status" style="font-size:.84em;margin-top:4px;">{{.Status}}{{if .IsRefined}} (정제됨){{end}}</div>
+                            </article>
+                            {{end}}
+                        </div>
+                    </div>
+                    
+                    <div id="empty-jobs" style="text-align:center;color:#9ca3af;margin-top:24px;{{if or (gt (len .JobItems) 0) (gt (len .FolderItems) 0)}}display:none;{{end}}">표시할 항목이 없습니다.</div>
+                    {{end}}
+                </form>
+
+                <div id="pagination" class="pagination"></div>
+                </div>
+            </main>
+        </div>
+    </div>
+</div>
+
+<div id="move-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="move-modal-title">
+    <div class="modal-panel move-modal-panel">
+        <h3 id="move-modal-title" class="modal-title">선택 항목 이동</h3>
+        <div class="move-current-wrap">
+            <span class="move-current-label">현재 위치:</span>
+            <div class="move-current-chip"><span>📁</span><span id="move-current-chip-name">내 파일</span></div>
+        </div>
+        <button type="button" id="move-up-btn" class="move-up-btn" aria-label="상위 폴더로 이동">← 상위 폴더로 이동</button>
+        <div id="move-browser-path" class="move-browser-path"></div>
+        <div class="move-browser-container">
+            <div class="move-list-head"><span>이름</span><span>수정 날짜</span><span></span></div>
+            <div id="move-browser-list" class="move-browser-list move-browser-list-table"></div>
+        </div>
+        <div class="modal-actions">
+            <button type="button" id="move-cancel-btn" style="background:#fff;color:#374151;border:1px solid #d1d5db;">취소</button>
+            <button type="button" id="move-confirm-btn">현재 위치로 이동</button>
+        </div>
+    </div>
+</div>
+
+<!-- 새 업로드 설정 모달 -->
+<div id="upload-setup-modal" class="modal-backdrop" role="dialog" aria-modal="true">
+    <div class="modal-panel modal-panel-setup">
+        <h3 class="modal-title">업로드 설정</h3>
+        <div id="upload-file-display-name" class="upload-file-display"></div>
+        
+        <form id="upload-setup-form" class="upload-setup-form" method="post" enctype="multipart/form-data">
+            <input type="file" id="real-file-input" name="file" style="display: none;">
+            
+            <div style="display: flex; flex-direction: column; gap: 20px;">
+                <div class="config-field">
+                    <label class="config-label">파일명</label>
+                    <input type="text" id="upload-filename" name="display_name" class="inline-rename-input" style="height: 40px;">
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div class="config-field">
+                        <label class="config-label">저장 위치</label>
+                        <select id="upload-folder-id" name="folder_id" class="config-select">
+                            <option value="">내 파일 (루트)</option>
+                            {{range .AllFolders}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+                        </select>
+                    </div>
+                    <div class="config-field">
+                        <label class="config-label">태그</label>
+                        <select id="upload-tag" name="tag" class="config-select">
+                            <option value="">태그 없음</option>
+                            {{range .Tags}}<option value="{{.Name}}">{{.Name}}</option>{{end}}
+                        </select>
+                    </div>
+                </div>
+
+                <div class="config-field">
+                    <label class="config-label">설명 (선택)</label>
+                    <textarea id="upload-desc" name="description" rows="2" class="config-textarea"></textarea>
+                </div>
+
+                <label class="ai-refine-label">
+                    <input type="checkbox" name="refine" value="true" checked class="ai-refine-checkbox">
+                    <span>Gemini AI로 텍스트 정제하기</span>
+                </label>
+
+                <div class="modal-actions-setup">
+                    <button type="button" onclick="closeUploadModal()" class="btn-setup-cancel">취소</button>
+                    <button type="submit" id="upload-submit-btn" class="btn-setup-submit">업로드 시작</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="file-action-menu" class="file-action-menu">
+    <button type="button" id="file-action-download" class="file-action-item">다운로드</button>
+    <button type="button" id="file-action-rename" class="file-action-item">이름 변경</button>
+    <button type="button" id="file-action-delete" class="file-action-item danger">삭제</button>
+</div>
+<div id="workspace-action-menu" class="file-action-menu">
+    <button type="button" id="workspace-action-new-folder" class="file-action-item">새 폴더</button>
+    <button type="button" id="workspace-action-upload" class="file-action-item">파일 업로드</button>
+</div>
+
+<script src="/static/files/state.js"></script>
+<script src="/static/files/render.js"></script>
+<script src="/static/files/upload.js"></script>
+<script src="/static/files/interactions.js"></script>
+<script src="/static/files/drag.js"></script>
+<script src="/static/files/filter.js"></script>
+<script src="/static/files/boot.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        initApp({
+            currentFolderID: '{{.CurrentFolderID}}'.trim(),
+            viewMode: '{{.ViewMode}}',
+            currentPage: {{.Page}},
+            totalPages: {{.TotalPages}},
+            currentVersion: '{{.SnapshotVersion}}',
+            allFolders: JSON.parse({{.AllFoldersJSON}} || "[]")
+        });
+    });
+</script>
+</body>
+</html>

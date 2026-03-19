@@ -1,0 +1,129 @@
+{{define "page_title"}}STT 서비스{{end}}
+{{define "page_head_extra"}}{{end}}
+{{define "page_body_attrs"}}{{end}}
+{{define "page_body"}}
+<div class="page-shell">
+<div class="container">
+    <div class="topbar">
+        <h2>작업 결과</h2>
+        <div class="profile-menu">
+            <button type="button" class="profile-button">{{.CurrentUserName}}</button>
+            <div class="profile-dropdown">
+                <form method="post" action="/logout">
+                    <button type="submit">로그아웃</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="page-actions">
+        <a href="/" class="action-link">작업 목록으로</a>
+        <a href="/upload" class="action-link">새 업로드</a>
+    </div>
+
+    <div class="info">제목: {{.Job.Filename}}</div>
+    <div class="info">태그: {{if .TagText}}{{.TagText}}{{else}}-{{end}}</div>
+    <div style="margin:10px 0 12px 0;">
+        <button type="button" id="detail-toggle-btn" style="background:none;border:none;color:#6b7280;padding:0;font-size:0.96em;font-weight:400;text-decoration:underline;cursor:pointer;">자세히 보기</button>
+    </div>
+    <div id="detail-panel" style="display:none;margin:10px 0;padding:10px;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;">
+        <div class="info">상태: {{.Job.Status}}</div>
+        <div class="info">업로드: {{.Job.UploadedAt}}</div>
+        <div class="info">작업 시작: {{.Job.StartedAt}}</div>
+        <div class="info">작업 완료: {{.Job.CompletedAt}}</div>
+        <div class="info">작업 소요(초): {{.Job.Duration}}</div>
+        <div class="info">미디어 길이: {{.Job.MediaDuration}}</div>
+        <button type="button" id="open-tag-modal-btn" style="margin-top:6px;">태그 수정</button>
+    </div>
+    <div style="margin:10px 0;display:flex;align-items:center;gap:10px;">
+        {{if .HasRefined}}
+        <label style="display:flex;align-items:center;gap:6px;">
+            <input type="checkbox" id="toggleOriginal" {{if eq .Variant "original"}}checked{{end}}>
+            <span>원본 보기</span>
+        </label>
+        <script>
+        (function(){
+            const cb = document.getElementById('toggleOriginal');
+            if (!cb) return;
+            cb.addEventListener('change', function(){
+                const baseUrl = '/job/{{.JobID}}';
+                const next = cb.checked ? (baseUrl + '?original=true') : baseUrl;
+                window.location.href = next;
+            });
+        })();
+        </script>
+        {{else}}
+        <span style="color:#aaa;">정제본 없음(원본 표시)</span>
+        {{end}}
+    </div>
+    <div class="result-text">{{.Text}}</div>
+    <div style="margin-top:10px;">
+        <a class="download-btn" href="/download/{{.JobID}}">원본 txt 다운로드</a>
+        {{if .HasRefined}}
+        <a class="download-btn" href="/download/{{.JobID}}/refined" style="margin-left:8px;">정제본 txt 다운로드</a>
+        {{end}}
+
+        {{if .CanRefine}}
+        <form method="post" action="/job/{{.JobID}}/refine" style="display:inline-block;margin-left:8px;">
+            <button type="submit" class="download-btn" style="background:#0ea5e9;border:none;cursor:pointer;" onclick="return confirm('다시 정제하시겠습니까? 기존 정제 결과는 덮어씌워집니다.');">
+                {{if .HasRefined}}정제 다시 하기{{else}}정제 시작{{end}}
+            </button>
+        </form>
+        {{end}}
+    </div>
+
+    <div id="tag-modal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:50;align-items:center;justify-content:center;padding:16px;">
+        <div style="width:100%;max-width:560px;background:#fff;border-radius:12px;border:1px solid #dbe2ea;padding:16px;box-shadow:0 20px 40px rgba(0,0,0,.2);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                <h3 style="margin:0;color:#111827;">작업 태그 수정</h3>
+                <button type="button" id="close-tag-modal-btn" style="padding:6px 10px;">닫기</button>
+            </div>
+            <form method="post" action="/job/{{.JobID}}/tags" class="form-column">
+                <div style="display:flex;flex-wrap:wrap;gap:10px;">
+                    {{range .Tags}}
+                    <label style="display:flex;align-items:center;gap:6px;">
+                        <input type="checkbox" name="tags" value="{{.Name}}" {{if index $.SelectedTagsMap .Name}}checked{{end}}>
+                        <span>{{.Name}}</span>
+                    </label>
+                    {{end}}
+                </div>
+                <input type="submit" value="태그 저장" class="full-width">
+            </form>
+        </div>
+    </div>
+</div>
+</div>
+{{end}}
+{{define "page_scripts"}}
+<script>
+(function(){
+    const toggleBtn = document.getElementById('detail-toggle-btn');
+    const detailPanel = document.getElementById('detail-panel');
+    const openModalBtn = document.getElementById('open-tag-modal-btn');
+    const closeModalBtn = document.getElementById('close-tag-modal-btn');
+    const modal = document.getElementById('tag-modal');
+    if (toggleBtn && detailPanel) {
+        toggleBtn.addEventListener('click', function() {
+            const opened = detailPanel.style.display !== 'none';
+            detailPanel.style.display = opened ? 'none' : 'block';
+            toggleBtn.textContent = opened ? '자세히 보기' : '간단히 보기';
+        });
+    }
+    if (openModalBtn && modal) {
+        openModalBtn.addEventListener('click', function() {
+            modal.style.display = 'flex';
+        });
+    }
+    if (closeModalBtn && modal) {
+        closeModalBtn.addEventListener('click', function() {
+            modal.style.display = 'none';
+        });
+    }
+    if (modal) {
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal) modal.style.display = 'none';
+        });
+    }
+})();
+</script>
+{{end}}

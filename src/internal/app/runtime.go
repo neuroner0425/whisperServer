@@ -1,0 +1,89 @@
+package app
+
+import (
+	"sync"
+
+	"whisperserver/src/internal/model"
+	"whisperserver/src/internal/store"
+	"whisperserver/src/internal/worker"
+)
+
+type Runtime struct {
+	jobsMu sync.RWMutex
+	jobs   map[string]*model.Job
+}
+
+var (
+	runtimeState = &Runtime{jobs: map[string]*model.Job{}}
+	appWorker    *worker.Worker
+)
+
+func jobsSnapshot() map[string]*model.Job {
+	runtimeState.jobsMu.RLock()
+	defer runtimeState.jobsMu.RUnlock()
+	out := make(map[string]*model.Job, len(runtimeState.jobs))
+	for id, job := range runtimeState.jobs {
+		out[id] = job.Clone()
+	}
+	return out
+}
+
+func addJob(id string, job *model.Job) {
+	runtimeState.jobsMu.Lock()
+	defer runtimeState.jobsMu.Unlock()
+	runtimeState.jobs[id] = job
+	saveJobsLocked()
+}
+
+func collectFolderSubtree(userID string, folderIDs []string, trashFolders bool) map[string]struct{} {
+	allFolders, _ := store.ListAllFoldersByOwner(userID, false)
+	selectedFolders := make(map[string]struct{}, len(folderIDs))
+	for _, id := range folderIDs {
+		id = normalizeFolderID(id)
+		if id == "" {
+			continue
+		}
+		f, err := store.GetFolderByID(userID, id)
+		if err != nil || f.IsTrashed {
+			continue
+		}
+		selectedFolders[id] = struct{}{}
+		if trashFolders {
+			_ = store.SetFolderTrashed(userID, id, true)
+		}
+	}
+	subtree := make(map[string]struct{}, len(selectedFolders))
+	for id := range selectedFolders {
+		subtree[id] = struct{}{}
+	}
+	changed := true
+	for changed {
+		changed = false
+		for _, f := range allFolders {
+			if _, ok := subtree[f.ParentID]; ok {
+				if _, exists := subtree[f.ID]; !exists {
+					subtree[f.ID] = struct{}{}
+					changed = true
+				}
+			}
+		}
+	}
+	return subtree
+}
+
+func markSubtreeJobsTrashed(userID string, subtree map[string]struct{}) {
+	if len(subtree) == 0 {
+		return
+	}
+	runtimeState.jobsMu.Lock()
+	defer runtimeState.jobsMu.Unlock()
+	for _, job := range runtimeState.jobs {
+		if job.OwnerID != userID {
+			continue
+		}
+		if _, ok := subtree[normalizeFolderID(job.FolderID)]; ok {
+			job.IsTrashed = true
+		}
+	}
+	saveJobsLocked()
+}
