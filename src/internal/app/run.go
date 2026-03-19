@@ -15,10 +15,15 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	httpx "whisperserver/src/internal/http"
+	"whisperserver/src/internal/store"
+	intutil "whisperserver/src/internal/util"
+	"whisperserver/src/internal/view"
+	"whisperserver/src/internal/worker"
 )
 
 func Run() {
-	mustEnsureDirs(staticDir, tmpFolder)
+	intutil.MustEnsureDirs(staticDir, tmpFolder)
 	if err := initRuntimeConfig(); err != nil {
 		log.Fatalf("config init failed: %v", err)
 	}
@@ -27,18 +32,50 @@ func Run() {
 	}
 	defer closeProcessingLogger()
 	procLogf("[BOOT] config source=%s", configPath)
-	if err := initDB(); err != nil {
+	store.ConfigureLogging(procLogf, procErrf)
+	if err := store.Init(projectRoot); err != nil {
 		log.Fatalf("db init failed: %v", err)
 	}
-	defer closeDB()
+	defer store.Close()
 	initAuthSecret()
+	initAuthHandlers()
 	procLogf("[BOOT] application start")
 	loadJobs()
 
 	prometheus.MustRegister(jobsTotal, jobsInProgress, jobDurationSec, uploadBytes, queueLength)
 	queueLength.Set(0)
 
-	startWorker()
+	appWorker = worker.New(worker.Config{
+		SplitTaskQueues:       splitTaskQueues,
+		ModelDir:              modelDir,
+		WhisperCLI:            whisperCLI,
+		JobTimeoutSec:         jobTimeoutSec,
+		ProgressRe:            progressRe,
+		StatusPending:         statusPending,
+		StatusRunning:         statusRunning,
+		StatusRefiningPending: statusRefiningPending,
+		StatusRefining:        statusRefining,
+		StatusCompleted:       statusCompleted,
+		StatusFailed:          statusFailed,
+	}, worker.Deps{
+		GetJob:               getJob,
+		SetJobFields:         setJobFields,
+		AppendJobPreviewLine: appendJobPreviewLine,
+		HasGeminiConfigured:  hasGeminiConfigured,
+		RefineTranscript:     refineTranscript,
+		UniqueStrings:        intutil.UniqueStringsKeepOrder,
+		GetTagDescriptions:   store.GetTagDescriptionsByNames,
+		Logf:                 procLogf,
+		Errf:                 procErrf,
+		IncInProgress:        jobsInProgress.Inc,
+		DecInProgress:        jobsInProgress.Dec,
+		SetQueueLength:       queueLength.Set,
+		IncJobsTotal: func(status string) {
+			jobsTotal.WithLabelValues(status).Inc()
+		},
+		ObserveJobDuration: jobDurationSec.Observe,
+	})
+	appWorker.Start()
 	requeuePending()
 
 	e := echo.New()
@@ -50,45 +87,45 @@ func Run() {
 			return strings.HasPrefix(p, "/status/") || p == "/jobs/updates"
 		},
 	}))
-	e.Renderer = mustRenderer()
-	e.Use(authMiddleware)
-
-	e.Static("/static", staticDir)
-
-	e.GET("/login", loginGetHandler)
-	e.POST("/login", loginPostHandler)
-	e.GET("/signup", signupGetHandler)
-	e.POST("/signup", signupPostHandler)
-	e.POST("/logout", logoutPostHandler)
-
-	e.GET("/", jobsHandler)
-	e.GET("/tags", tagsPageHandler)
-	e.GET("/trash", trashHandler)
-	e.GET("/upload", uploadGetHandler)
-	e.POST("/upload", uploadPostHandler)
-	e.GET("/jobs", redirectJobsToRootHandler)
-	e.GET("/jobs/updates", jobsUpdatesHandler)
-	e.GET("/status/:job_id", statusHandler)
-	e.GET("/job/:job_id", jobHandler)
-	e.GET("/download/:job_id", downloadHandler)
-	e.GET("/download/:job_id/refined", downloadRefinedHandler)
-	e.POST("/batch-download", batchDownloadHandler)
-	e.POST("/batch-delete", batchDeleteHandler)
-	e.POST("/batch-move", moveJobsHandler)
-	e.POST("/tags", createTagHandler)
-	e.POST("/tags/delete", deleteTagHandler)
-	e.POST("/folders", createFolderHandler)
-	e.POST("/folders/:folder_id/trash", trashFolderHandler)
-	e.POST("/folders/:folder_id/restore", restoreFolderHandler)
-	e.POST("/folders/:folder_id/rename", renameFolderHandler)
-	e.POST("/folders/:folder_id/move", moveFolderHandler)
-	e.POST("/job/:job_id/trash", trashJobHandler)
-	e.POST("/job/:job_id/restore", restoreJobHandler)
-	e.POST("/job/:job_id/rename", renameJobHandler)
-	e.POST("/job/:job_id/tags", updateJobTagsHandler)
-	e.GET("/healthz", healthzHandler)
-	e.GET("/metrics", echo.WrapHandler(promhttp.Handler()))
-	e.POST("/job/:job_id/refine", refineRetryHandler)
+	e.Renderer = view.MustRenderer(templateDir)
+	httpx.Routes{
+		AuthMiddleware:  authMiddleware,
+		LoginGet:        loginGetHandler,
+		LoginPost:       loginPostHandler,
+		SignupGet:       signupGetHandler,
+		SignupPost:      signupPostHandler,
+		LogoutPost:      logoutPostHandler,
+		RootRedirect:    rootRedirectHandler,
+		FilesRedirect:   redirectFilesToHomeHandler,
+		FilesList:       jobsHandler,
+		TagsPage:        tagsPageHandler,
+		TrashPage:       trashHandler,
+		UploadGet:       uploadGetHandler,
+		UploadPost:      uploadPostHandler,
+		JobsRedirect:    redirectJobsToRootHandler,
+		JobsUpdates:     jobsUpdatesHandler,
+		Status:          statusHandler,
+		JobDetail:       jobHandler,
+		Download:        downloadHandler,
+		DownloadRefined: downloadRefinedHandler,
+		BatchDownload:   batchDownloadHandler,
+		BatchDelete:     batchDeleteHandler,
+		BatchMove:       moveJobsHandler,
+		CreateTag:       createTagHandler,
+		DeleteTag:       deleteTagHandler,
+		CreateFolder:    createFolderHandler,
+		TrashFolder:     trashFolderHandler,
+		RestoreFolder:   restoreFolderHandler,
+		RenameFolder:    renameFolderHandler,
+		MoveFolder:      moveFolderHandler,
+		TrashJob:        trashJobHandler,
+		RestoreJob:      restoreJobHandler,
+		RenameJob:       renameJobHandler,
+		UpdateJobTags:   updateJobTagsHandler,
+		Healthz:         healthzHandler,
+		RefineRetry:     refineRetryHandler,
+		Metrics:         promhttp.Handler(),
+	}.Register(e, staticDir)
 
 	port, err := appPort()
 	if err != nil {
@@ -111,10 +148,7 @@ func Run() {
 		procErrf("shutdown", err, "echo shutdown failed")
 	}
 	procLogf("[BOOT] application stop")
-	if splitTaskQueues {
-		close(transcribeQueue)
-		close(refineQueue)
-	} else {
-		close(taskQueue)
+	if appWorker != nil {
+		appWorker.Close()
 	}
 }

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>휴지통 - 파일 탐색기</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<div class="page-shell">
+<div class="container">
+    <div class="drive-shell">
+        <header class="drive-topbar">
+            <div class="drive-brand">파일 탐색기</div>
+            <div class="drive-top-filler"></div>
+            <div class="profile-menu">
+                <button type="button" class="profile-button">{{.CurrentUserName}}</button>
+                <div class="profile-dropdown">
+                    <form method="post" action="/logout"><button type="submit">로그아웃</button></form>
+                </div>
+            </div>
+        </header>
+
+        <div class="drive-body">
+            <aside class="drive-sidebar">
+                <div class="drive-cta">
+                    <a href="/upload" class="action-link">+ 새 업로드</a>
+                    <a href="/tags" class="action-link">태그 관리</a>
+                </div>
+
+                <div class="sidebar-nav">
+                    <a class="sidebar-link" href="/?view=home">홈</a>
+                    <a class="sidebar-link" href="/?view=explore">내 파일</a>
+                    <a class="sidebar-link active" href="/trash">휴지통</a>
+                </div>
+            </aside>
+
+            <main class="drive-main">
+                <div class="drive-main-inner">
+                    <div class="content-header">
+                        <h2 class="content-title">휴지통</h2>
+                        <div class="content-sub">삭제된 항목은 여기서 복구하거나 영구 삭제할 수 있습니다.</div>
+                    </div>
+
+                    <div class="content-filters" style="display:flex; justify-content: flex-end; gap: 8px;">
+                        <form method="post" action="/trash/clear" onsubmit="return confirm('휴지통을 완전히 비우시겠습니까?');">
+                            <button type="submit" class="btn-danger">휴지통 비우기</button>
+                        </form>
+                    </div>
+
+                    <div id="entries-grid" class="home-list" style="padding: 0 18px;">
+                        {{range .Items}}
+                        <article class="entry-row" style="cursor: default;">
+                            <div style="display:flex; align-items:center; justify-content: space-between; width: 100%;">
+                                <div style="display:flex; align-items:center; gap:12px; min-width: 0; flex: 1;">
+                                    <div style="font-size: 1.5rem;">{{if .IsFolder}}📁{{else}}📄{{end}}</div>
+                                    <div style="min-width: 0;">
+                                        <div class="entry-title">{{.Name}}</div>
+                                        <div class="entry-sub">삭제됨: {{.DeletedAt}}</div>
+                                    </div>
+                                </div>
+                                <div style="display:flex; gap:8px;">
+                                    <form method="post" action="/trash/{{if .IsFolder}}folders{{else}}jobs{{end}}/{{.ID}}/restore">
+                                        <button type="submit" style="background:#f3f4f6; color:#374151; border:1px solid #d1d5db; height: 32px; padding: 0 12px; border-radius: 16px; font-size: 0.85em;">복구</button>
+                                    </form>
+                                    <form method="post" action="/trash/{{if .IsFolder}}folders{{else}}jobs{{end}}/{{.ID}}/purge" onsubmit="return confirm('영구 삭제하시겠습니까?');">
+                                        <button type="submit" class="btn-danger" style="height: 32px; padding: 0 12px; border-radius: 16px; font-size: 0.85em;">영구 삭제</button>
+                                    </form>
+                                </div>
+                            </div>
+                        </article>
+                        {{else}}
+                        <div style="text-align:center; color:#9ca3af; margin-top:40px;">휴지통이 비어 있습니다.</div>
+                        {{end}}
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+</div>
+</div>
+</body>
+</html>
