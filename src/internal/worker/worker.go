@@ -386,7 +386,6 @@ func (w *Worker) runWhisper(jobID, wavPath string, totalSec *int) (string, error
 		"--max-context", "0",
 		"--no-speech-thold", "0.01",
 		"--suppress-nst",
-		"--no-prints",
 		"--vad",
 		"--vad-model", vadModel,
 		"--vad-threshold", "0.01",

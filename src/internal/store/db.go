@@ -513,6 +513,32 @@ func MoveFolder(ownerID, folderID, parentID string) error {
 	return err
 }
 
+func TouchFolderAndAncestors(ownerID, folderID string) error {
+	if dbConn == nil {
+		return fmt.Errorf("db is not initialized")
+	}
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return nil
+	}
+	_, err := dbConn.Exec(`
+		WITH RECURSIVE folder_line(id, parent_id) AS (
+			SELECT id, parent_id
+			FROM folders
+			WHERE owner_id = ? AND id = ?
+			UNION ALL
+			SELECT f.id, f.parent_id
+			FROM folders f
+			JOIN folder_line fl ON f.id = fl.parent_id
+			WHERE f.owner_id = ?
+		)
+		UPDATE folders
+		SET updated_at = CURRENT_TIMESTAMP
+		WHERE id IN (SELECT id FROM folder_line)
+	`, ownerID, folderID, ownerID)
+	return err
+}
+
 func IsFolderDescendant(ownerID, folderID, maybeDescendantID string) (bool, error) {
 	if dbConn == nil {
 		return false, fmt.Errorf("db is not initialized")

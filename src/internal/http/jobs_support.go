@@ -66,7 +66,8 @@ func BuildJobRowsForUser(userID, q, tag, folderID string, trashed bool, deps Job
 			TagText:       strings.Join(tags, ", "),
 			FolderID:      fID,
 			IsTrashed:     deps.IsJobTrashed(job),
-			UpdatedAt:     job.UploadedAt,
+			UpdatedAt:     jobDisplayUpdatedAt(job),
+			DeletedAt:     job.DeletedAt,
 			OwnerName:     "나",
 			FolderName:    fName,
 		})
@@ -135,7 +136,8 @@ func BuildRecentJobRowsForUser(userID, q, tag string, deps JobSupportDeps) []Job
 			TagText:       strings.Join(tags, ", "),
 			FolderID:      fID,
 			IsTrashed:     false,
-			UpdatedAt:     job.UploadedAt,
+			UpdatedAt:     jobDisplayUpdatedAt(job),
+			DeletedAt:     job.DeletedAt,
 			OwnerName:     "나",
 			FolderName:    fName,
 		})
@@ -172,9 +174,29 @@ func SortJobRows(rows []JobRow, sortBy, sortOrder string, uploadedTS func(string
 	}
 }
 
-func SortFolderRows(rows []FolderRow, sortOrder string) {
+func SortFolderRows(rows []FolderRow, sortBy, sortOrder string) {
 	desc := sortOrder == "desc"
 	sort.Slice(rows, func(i, j int) bool {
+		if sortBy != "name" {
+			if rows[i].UpdatedAt == rows[j].UpdatedAt {
+				a := strings.ToLower(rows[i].Name)
+				b := strings.ToLower(rows[j].Name)
+				if a == b {
+					if desc {
+						return rows[i].ID > rows[j].ID
+					}
+					return rows[i].ID < rows[j].ID
+				}
+				if desc {
+					return a > b
+				}
+				return a < b
+			}
+			if desc {
+				return rows[i].UpdatedAt > rows[j].UpdatedAt
+			}
+			return rows[i].UpdatedAt < rows[j].UpdatedAt
+		}
 		a := strings.ToLower(rows[i].Name)
 		b := strings.ToLower(rows[j].Name)
 		if a == b {
@@ -197,7 +219,7 @@ func JobsSnapshotVersion(jobItems []JobRow, folderItems []FolderRow, page, pageS
 		fmt.Fprintf(h, "F|%s|%s|%s;", f.ID, f.Name, f.ParentID)
 	}
 	for _, j := range jobItems {
-		fmt.Fprintf(h, "J|%s|%s|%s|%s|%t|%s|%s|%t;", j.ID, j.Filename, j.MediaDuration, j.Status, j.IsRefined, j.TagText, j.FolderID, j.IsTrashed)
+		fmt.Fprintf(h, "J|%s|%s|%s|%s|%t|%s|%s|%t|%s|%s;", j.ID, j.Filename, j.MediaDuration, j.Status, j.IsRefined, j.TagText, j.FolderID, j.IsTrashed, j.UpdatedAt, j.DeletedAt)
 	}
 	return fmt.Sprintf("%x", h.Sum64())
 }
@@ -226,4 +248,17 @@ func containsTag(tags []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func jobDisplayUpdatedAt(job *model.Job) string {
+	if job == nil {
+		return ""
+	}
+	if strings.TrimSpace(job.CompletedAt) != "" {
+		return job.CompletedAt
+	}
+	if strings.TrimSpace(job.StartedAt) != "" {
+		return job.StartedAt
+	}
+	return job.UploadedAt
 }

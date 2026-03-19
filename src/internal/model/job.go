@@ -15,6 +15,7 @@ type Job struct {
 	Tags                 []string `json:"tags,omitempty"`
 	FolderID             string   `json:"folder_id,omitempty"`
 	IsTrashed            bool     `json:"is_trashed,omitempty"`
+	DeletedAt            string   `json:"deleted_at,omitempty"`
 	StartedAt            string   `json:"started_at,omitempty"`
 	StartedTS            float64  `json:"started_ts,omitempty"`
 	CompletedAt          string   `json:"completed_at,omitempty"`

@@ -44,6 +44,11 @@ function initElements() {
         uploadModal: document.getElementById('upload-setup-modal'),
         fileInput: document.getElementById('real-file-input'),
         uploadForm: document.getElementById('upload-setup-form'),
+        uploadFileDisplayName: document.getElementById('upload-file-display-name'),
+        uploadFilename: document.getElementById('upload-filename'),
+        uploadFolderID: document.getElementById('upload-folder-id'),
+        uploadTag: document.getElementById('upload-tag'),
+        uploadDesc: document.getElementById('upload-desc'),
         moveConfirmBtn: document.getElementById('move-confirm-btn'),
         moveCancelBtn: document.getElementById('move-cancel-btn'),
         moveUpBtn: document.getElementById('move-up-btn'),
@@ -160,7 +165,13 @@ function toggleCard(card, multi, shift) {
 }
 
 window.triggerFileUpload = function () { if (els.fileInput) els.fileInput.click(); };
-window.closeUploadModal = function () { if (els.uploadModal) els.uploadModal.classList.remove('show'); if (els.fileInput) els.fileInput.value = ''; };
+window.closeUploadModal = function () {
+    if (els.uploadModal) els.uploadModal.classList.remove('show');
+    if (els.uploadForm) els.uploadForm.reset();
+    if (els.fileInput) els.fileInput.value = '';
+    if (els.uploadFolderID) els.uploadFolderID.value = state.currentFolderID || '';
+    if (els.uploadFileDisplayName) els.uploadFileDisplayName.textContent = '';
+};
 window.navigateFolder = function (id) {
     const trimmed = (id || '').trim();
     window.location.href = trimmed ? `/files/folders/${trimmed}` : '/files/root';
