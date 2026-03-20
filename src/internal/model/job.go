@@ -3,6 +3,7 @@ package model
 type Job struct {
 	Status               string   `json:"status,omitempty"`
 	Filename             string   `json:"filename,omitempty"`
+	FileType             string   `json:"file_type,omitempty"`
 	Result               string   `json:"result,omitempty"`
 	UploadedAt           string   `json:"uploaded_at,omitempty"`
 	UploadedTS           float64  `json:"uploaded_ts,omitempty"`

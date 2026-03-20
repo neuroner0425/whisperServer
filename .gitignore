@@ -11,3 +11,5 @@ app.conf
 /main
 *.test
 coverage.out
+frontend/node_modules/
+static/app/

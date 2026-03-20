@@ -34,6 +34,9 @@ go run ./src/cmd/server
 
 - `PORT` (기본: `8000`)
 - `MAX_UPLOAD_SIZE_MB` (기본: `512`)
+- `UPLOAD_RATE_LIMIT_KBPS` (기본: `0`)
+  - `0`: 제한 없음
+  - 양수: 클라이언트 요청당 업로드 속도 제한(KB/s)
 - `JOB_TIMEOUT_SEC` (기본: `3600`)
 - `GEMINI_MODEL` (기본: `gemini-3.1-flash-lite-preview`)
 - `SPLIT_TRANSCRIBE_REFINE_QUEUE` (기본: `false`)
@@ -46,6 +49,18 @@ go run ./src/cmd/server
 - `AUTH_COOKIE_SECURE` (기본: `false`, HTTPS 환경에서는 `true` 권장)
 
 `app.conf`는 `.gitignore`에 포함되어 Git에 올라가지 않습니다.
+
+## SPA 프런트엔드 개발
+
+Vite 기반 SPA는 `frontend/`에 추가됩니다.
+
+```bash
+cd frontend
+npm install
+npm run build
+```
+
+빌드 결과물은 `static/app/`에 생성되며, 서버 실행 후 [http://localhost:8000/app](http://localhost:8000/app) 에서 확인할 수 있습니다.
 
 ## 엔드포인트
 

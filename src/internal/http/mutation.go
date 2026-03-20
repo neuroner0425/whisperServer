@@ -14,6 +14,7 @@ type MutationDeps struct {
 	CurrentUser            func(echo.Context) (*User, error)
 	GetJob                 func(string) *model.Job
 	SetJobFields           func(string, map[string]any)
+	CancelJob              func(string)
 	IsJobTrashed           func(*model.Job) bool
 	CollectFolderSubtree   func(string, []string, bool) map[string]struct{}
 	MarkSubtreeJobsTrashed func(string, map[string]struct{})
@@ -50,6 +51,9 @@ func BatchDeleteHandler(c echo.Context, deps MutationDeps) error {
 		}
 	}
 	for _, id := range ownedJobs {
+		if deps.CancelJob != nil {
+			deps.CancelJob(id)
+		}
 		deps.SetJobFields(id, map[string]any{"is_trashed": true, "deleted_at": deletedAt})
 	}
 

@@ -1,0 +1,1965 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import type { ChangeEvent, DragEvent as ReactDragEvent, FormEvent, MouseEvent as ReactMouseEvent } from 'react'
+
+import { batchDownloadJobs, createFolder, downloadFolder, fetchFiles, moveEntries, renameFolder, renameJob, trashFolder, trashJob, uploadFileWithProgress } from './api'
+import type { FilesResponse, FolderNode, JobItem } from './types'
+
+type FilesPageProps = {
+  viewMode: 'home' | 'explore' | 'search'
+}
+
+type MoveState =
+  | { type: 'file'; id: string; name: string }
+  | { type: 'folder'; id: string; name: string }
+
+type UploadState = {
+  file: File
+  displayName: string
+  folderId: string
+  description: string
+  refineEnabled: boolean
+}
+
+type TypeFilter = 'all' | 'folder' | 'document'
+type DateFilter = 'all' | 'past_hour' | 'today' | 'past_7_days' | 'past_30_days' | 'this_year' | 'last_year'
+type SortKey = 'name' | 'updated' | 'kind' | 'location'
+type SortDirection = 'asc' | 'desc'
+
+type MenuState =
+  | {
+      kind: 'file'
+      item: JobItem
+      x: number
+      y: number
+    }
+  | {
+      kind: 'folder'
+      item: FolderNode
+      x: number
+      y: number
+    }
+  | {
+      kind: 'surface'
+      x: number
+      y: number
+    }
+
+type VisibleEntry =
+  | { key: string; kind: 'folder'; item: FolderNode }
+  | { key: string; kind: 'file'; item: JobItem }
+
+type FilterMenu = 'type' | 'date' | null
+type SelectionBox = {
+  startX: number
+  startY: number
+  currentX: number
+  currentY: number
+}
+
+type DragState = {
+  jobIds: string[]
+  folderIds: string[]
+}
+
+type PendingUpload = {
+  localId: string
+  jobId?: string
+  folderId: string
+  filename: string
+  stage: 'uploading' | 'queued' | 'processing' | 'failed'
+  progress: number
+}
+
+type FileListJob = JobItem & {
+  __pending?: boolean
+  __jobId?: string
+}
+
+type TextDialogState =
+  | {
+      kind: 'create-folder'
+      title: string
+      label: string
+      submitLabel: string
+      value: string
+      parentId: string
+      after: 'refresh' | 'move-browser'
+    }
+  | {
+      kind: 'rename-folder'
+      title: string
+      label: string
+      submitLabel: string
+      value: string
+      folderId: string
+    }
+  | {
+      kind: 'rename-file'
+      title: string
+      label: string
+      submitLabel: string
+      value: string
+      jobId: string
+    }
+
+type ConfirmDialogState =
+  | {
+      kind: 'delete-file'
+      title: string
+      body: string
+      item: JobItem
+    }
+  | {
+      kind: 'delete-folder'
+      title: string
+      body: string
+      item: FolderNode
+    }
+
+const TYPE_OPTIONS: Array<{ value: TypeFilter; label: string }> = [
+  { value: 'folder', label: '폴더' },
+  { value: 'document', label: '문서' },
+]
+
+const DATE_OPTIONS: Array<{ value: DateFilter; label: string }> = [
+  { value: 'past_hour', label: '지난 1시간' },
+  { value: 'today', label: '오늘' },
+  { value: 'past_7_days', label: '지난 7일' },
+  { value: 'past_30_days', label: '지난 30일' },
+  { value: 'this_year', label: '올해' },
+  { value: 'last_year', label: '지난 해' },
+]
+
+export function FilesPage({ viewMode }: FilesPageProps) {
+  const navigate = useNavigate()
+  const params = useParams()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [data, setData] = useState<FilesResponse | null>(null)
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+  const [reloadToken, setReloadToken] = useState(0)
+  const [moveState, setMoveState] = useState<MoveState | null>(null)
+  const [moveTargetId, setMoveTargetId] = useState('')
+  const [moveBrowserFolderId, setMoveBrowserFolderId] = useState('')
+  const [moveBrowserData, setMoveBrowserData] = useState<FilesResponse | null>(null)
+  const [uploadState, setUploadState] = useState<UploadState | null>(null)
+  const [menuState, setMenuState] = useState<MenuState | null>(null)
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([])
+  const [selectionAnchor, setSelectionAnchor] = useState<string | null>(null)
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
+  const [dateFilter, setDateFilter] = useState<DateFilter>('all')
+  const [sortKey, setSortKey] = useState<SortKey>(() => defaultSortState(viewMode).key)
+  const [sortDirection, setSortDirection] = useState<SortDirection>(() => defaultSortState(viewMode).direction)
+  const [filterMenu, setFilterMenu] = useState<FilterMenu>(null)
+  const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null)
+  const [dragState, setDragState] = useState<DragState | null>(null)
+  const [dropTargetFolderId, setDropTargetFolderId] = useState('')
+  const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([])
+  const [textDialog, setTextDialog] = useState<TextDialogState | null>(null)
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const driveTableRef = useRef<HTMLDivElement | null>(null)
+  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
+
+  const folderId = viewMode === 'explore' ? params.folderId ?? '' : ''
+  const query = searchParams.get('q') ?? ''
+  const page = normalizePage(searchParams.get('page'))
+
+  useEffect(() => {
+    const openPicker = () => {
+      fileInputRef.current?.click()
+    }
+    window.addEventListener('whisper:new-file', openPicker as EventListener)
+    return () => {
+      window.removeEventListener('whisper:new-file', openPicker as EventListener)
+    }
+  }, [])
+
+  useEffect(() => {
+    let closed = false
+    const controller = new AbortController()
+
+    async function load() {
+      try {
+        const payload = await fetchFiles({
+          viewMode,
+          folderId,
+          query,
+          tag: '',
+          sort: 'updated',
+          order: 'desc',
+          page,
+          signal: controller.signal,
+        })
+        if (!closed && payload) {
+          setData(payload)
+          const serverJobIDs = new Set(payload.job_items.map((job) => job.ID))
+          setPendingUploads((current) =>
+            current.filter((item) => {
+              if (!item.jobId) {
+                return true
+              }
+              return !serverJobIDs.has(item.jobId)
+            }),
+          )
+          setError('')
+        }
+      } catch (loadError) {
+        if (!closed && !controller.signal.aborted) {
+          setError(loadError instanceof Error ? loadError.message : '목록을 불러오지 못했습니다.')
+        }
+      }
+    }
+
+    void load()
+    return () => {
+      closed = true
+      controller.abort()
+    }
+  }, [viewMode, folderId, query, page, reloadToken])
+
+  useEffect(() => {
+    if (!moveState) {
+      return
+    }
+
+    let closed = false
+    const controller = new AbortController()
+
+    async function loadMoveBrowser() {
+      try {
+        const payload = await fetchFiles({
+          viewMode: 'explore',
+          folderId: moveBrowserFolderId,
+          query: '',
+          tag: '',
+          sort: 'updated',
+          order: 'desc',
+          page: 1,
+          signal: controller.signal,
+        })
+        if (!closed && payload) {
+          setMoveBrowserData(payload)
+        }
+      } catch (loadError) {
+        if (!closed && !controller.signal.aborted) {
+          setError(loadError instanceof Error ? loadError.message : '이동 위치를 불러오지 못했습니다.')
+        }
+      }
+    }
+
+    void loadMoveBrowser()
+    return () => {
+      closed = true
+      controller.abort()
+    }
+  }, [moveBrowserFolderId, moveState])
+
+  useEffect(() => {
+    const source = new EventSource('/api/events')
+    let timer = 0
+
+    const scheduleRefresh = () => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        setReloadToken((value) => value + 1)
+      }, 120)
+    }
+
+    source.addEventListener('update', scheduleRefresh)
+    source.onerror = () => {
+      // EventSource reconnects automatically.
+    }
+
+    return () => {
+      window.clearTimeout(timer)
+      source.removeEventListener('update', scheduleRefresh)
+      source.close()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!menuState) {
+      return
+    }
+
+    const close = () => setMenuState(null)
+    window.addEventListener('click', close)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      window.removeEventListener('click', close)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [menuState])
+
+  useEffect(() => {
+    if (!message && !error) {
+      return
+    }
+    const timer = window.setTimeout(() => {
+      setMessage('')
+      setError('')
+    }, 2800)
+    return () => window.clearTimeout(timer)
+  }, [error, message])
+
+  useEffect(() => {
+    if (!filterMenu) {
+      return
+    }
+
+    const close = () => setFilterMenu(null)
+    window.addEventListener('click', close)
+    window.addEventListener('resize', close)
+    window.addEventListener('scroll', close, true)
+    return () => {
+      window.removeEventListener('click', close)
+      window.removeEventListener('resize', close)
+      window.removeEventListener('scroll', close, true)
+    }
+  }, [filterMenu])
+
+  const allFolders = useMemo(() => data?.all_folders ?? [], [data?.all_folders])
+  const folderItems = useMemo(() => data?.folder_items ?? [], [data?.folder_items])
+  const jobItems = useMemo(() => data?.job_items ?? [], [data?.job_items])
+  const folderPath = data?.folder_path ?? []
+  const filteredFolderItems = useMemo(
+    () => folderItems.filter((folder) => matchesFolderFilters(folder, dateFilter)),
+    [dateFilter, folderItems],
+  )
+  const filteredJobItems = useMemo(
+    () => jobItems.filter((job) => matchesJobFilters(job, dateFilter)),
+    [dateFilter, jobItems],
+  )
+  const pendingVisibleJobs = useMemo(
+    () =>
+      pendingUploads
+        .filter((item) => viewMode === 'home' || item.folderId === folderId)
+        .map((item) => ({
+          ID: item.jobId || item.localId,
+          Filename: item.filename,
+          FileType: 'audio',
+          MediaDuration: '',
+          Status:
+            item.stage === 'uploading'
+              ? `업로드 중 ${item.progress}%`
+              : item.stage === 'failed'
+                ? '업로드 실패'
+                : formatPendingStatus(item.stage, item.progress),
+          Phase: item.stage === 'queued' ? '대기 중' : item.stage === 'processing' ? '전사 중' : '',
+          ProgressPercent: item.progress,
+          IsRefined: false,
+          TagText: '',
+          FolderID: item.folderId,
+          UpdatedAt: '',
+          FolderName: currentFolderName(item.folderId, allFolders),
+          __pending: true,
+          __jobId: item.jobId || '',
+        })),
+    [allFolders, folderId, pendingUploads, viewMode],
+  )
+  const actualJobItems = useMemo(
+    () => jobItems.filter((job) => !pendingUploads.some((item) => item.jobId && item.jobId === job.ID)),
+    [jobItems, pendingUploads],
+  )
+  const sortedHomeJobs = useMemo(
+    () => sortJobs(actualJobItems, sortKey === 'kind' ? 'updated' : sortKey, sortDirection),
+    [actualJobItems, sortDirection, sortKey],
+  )
+  const sortedExploreEntries = useMemo<VisibleEntry[]>(
+    () =>
+      sortEntries(
+        [
+          ...(typeFilter === 'document' ? [] : filteredFolderItems.map((folder) => ({ key: entryKey('folder', folder.ID), kind: 'folder' as const, item: folder }))),
+          ...(typeFilter === 'folder'
+            ? []
+            : [...pendingVisibleJobs, ...filteredJobItems.filter((job) => !pendingUploads.some((item) => item.jobId && item.jobId === job.ID))].map((job) => ({
+                key: entryKey('file', job.ID),
+                kind: 'file' as const,
+                item: job,
+              }))),
+        ],
+        sortKey,
+        sortDirection,
+      ),
+    [filteredFolderItems, filteredJobItems, pendingUploads, pendingVisibleJobs, sortDirection, sortKey, typeFilter],
+  )
+  const visibleEntries = useMemo<VisibleEntry[]>(
+    () => (viewMode === 'explore' ? sortedExploreEntries : []),
+    [sortedExploreEntries, viewMode],
+  )
+  const selectedEntries = useMemo(
+    () => visibleEntries.filter((entry) => selectedKeys.includes(entry.key)),
+    [selectedKeys, visibleEntries],
+  )
+  const selectedJobIds = selectedEntries.filter((entry) => entry.kind === 'file').map((entry) => entry.item.ID)
+  const selectedFolderIds = selectedEntries.filter((entry) => entry.kind === 'folder').map((entry) => entry.item.ID)
+  const moveSelectionFolderIds = useMemo(
+    () => (moveState?.id === '__selection__' ? selectedFolderIds : moveState?.type === 'folder' ? [moveState.id] : []),
+    [moveState, selectedFolderIds],
+  )
+  const moveSelectionJobIds = useMemo(
+    () => (moveState?.id === '__selection__' ? selectedJobIds : moveState?.type === 'file' ? [moveState.id] : []),
+    [moveState, selectedJobIds],
+  )
+  const moveFolderChildren = useMemo(
+    () => (moveBrowserData?.folder_items ?? []).filter((folder) => !moveSelectionFolderIds.includes(folder.ID)),
+    [moveBrowserData?.folder_items, moveSelectionFolderIds],
+  )
+  const moveFileChildren = useMemo(
+    () => (moveBrowserData?.job_items ?? []).filter((job) => !moveSelectionJobIds.includes(job.ID)),
+    [moveBrowserData?.job_items, moveSelectionJobIds],
+  )
+
+  useEffect(() => {
+    if (!selectionBox || viewMode !== 'explore') {
+      return
+    }
+
+    const handleMouseMove = (event: MouseEvent) => {
+      const table = driveTableRef.current
+      if (!table) {
+        return
+      }
+      const bounds = table.getBoundingClientRect()
+      const nextBox = {
+        startX: selectionBox.startX,
+        startY: selectionBox.startY,
+        currentX: clamp(event.clientX - bounds.left, 0, bounds.width),
+        currentY: clamp(event.clientY - bounds.top, 0, bounds.height),
+      }
+      setSelectionBox(nextBox)
+
+      const relativeRect = normalizeRect(nextBox)
+      const selectionRect = {
+        left: bounds.left + relativeRect.left,
+        top: bounds.top + relativeRect.top,
+        right: bounds.left + relativeRect.right,
+        bottom: bounds.top + relativeRect.bottom,
+      }
+      const nextSelectedKeys = visibleEntries
+        .filter((entry) => {
+          const node = rowRefs.current[entry.key]
+          if (!node) {
+            return false
+          }
+          const rect = node.getBoundingClientRect()
+          return rectanglesIntersect(selectionRect, rect)
+        })
+        .map((entry) => entry.key)
+
+      setSelectedKeys(nextSelectedKeys)
+    }
+
+    const handleMouseUp = () => {
+      setSelectionBox(null)
+    }
+
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [selectionBox, viewMode, visibleEntries])
+
+  const refresh = () => {
+    setMenuState(null)
+    setSelectedKeys([])
+    setSelectionAnchor(null)
+    setReloadToken((value) => value + 1)
+  }
+
+  const handleUploadFileInput = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) {
+      return
+    }
+    setUploadState({
+      file,
+      displayName: stripExtension(file.name),
+      folderId,
+      description: '',
+      refineEnabled: true,
+    })
+    event.target.value = ''
+  }
+
+  const handleUploadSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!uploadState) {
+      return
+    }
+    let localId = ''
+    const formData = new FormData()
+    formData.append('file', uploadState.file)
+    formData.append('display_name', uploadState.displayName)
+    formData.append('folder_id', uploadState.folderId)
+    formData.append('description', uploadState.description)
+    formData.append('refine', String(uploadState.refineEnabled))
+    try {
+      localId = `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      const pendingItem: PendingUpload = {
+        localId,
+        folderId: uploadState.folderId,
+        filename: uploadState.displayName,
+        stage: 'uploading',
+        progress: 0,
+      }
+      setPendingUploads((current) => [pendingItem, ...current])
+      setUploadState(null)
+      setMessage('업로드를 시작했습니다.')
+
+      const response = await uploadFileWithProgress(formData, (percent) => {
+        setPendingUploads((current) =>
+          current.map((item) => (item.localId === localId ? { ...item, progress: percent, stage: 'uploading' } : item)),
+        )
+      })
+
+      setPendingUploads((current) =>
+        current.map((item) =>
+          item.localId === localId
+            ? { ...item, jobId: response.job_id, stage: 'queued', progress: 0 }
+            : item,
+        ),
+      )
+      setReloadToken((value) => value + 1)
+    } catch (submitError) {
+      if (localId) {
+        setPendingUploads((current) =>
+          current.map((item) => (item.localId === localId ? { ...item, stage: 'failed', progress: 0 } : item)),
+        )
+      }
+      setError(submitError instanceof Error ? submitError.message : '업로드에 실패했습니다.')
+    }
+  }
+
+  const openCreateFolderDialog = (parentId: string, after: 'refresh' | 'move-browser' = 'refresh') => {
+    setTextDialog({
+      kind: 'create-folder',
+      title: '새 폴더',
+      label: '폴더 이름',
+      submitLabel: '생성',
+      value: '',
+      parentId,
+      after,
+    })
+  }
+
+  const handleCreateFolder = async (name: string, parentId: string, after: 'refresh' | 'move-browser') => {
+    try {
+      await createFolder(name.trim(), parentId)
+      setMessage('폴더를 만들었습니다.')
+      setTextDialog(null)
+      if (after === 'move-browser') {
+        setReloadToken((value) => value + 1)
+        setMoveTargetId(parentId)
+        setMoveBrowserFolderId(parentId)
+        return
+      }
+      refresh()
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : '폴더를 만들지 못했습니다.')
+    }
+  }
+
+  const handleMove = async () => {
+    if (!moveState) {
+      return
+    }
+    try {
+      if (moveState.id === '__selection__') {
+        await moveEntries(selectedJobIds, selectedFolderIds, moveTargetId)
+      } else {
+        await moveEntries(moveState.type === 'file' ? [moveState.id] : [], moveState.type === 'folder' ? [moveState.id] : [], moveTargetId)
+      }
+      setMessage('항목을 이동했습니다.')
+      setMoveState(null)
+      setMoveTargetId('')
+      setMoveBrowserFolderId('')
+      refresh()
+    } catch (moveError) {
+      setError(moveError instanceof Error ? moveError.message : '이동에 실패했습니다.')
+    }
+  }
+
+  const handleBulkMove = async () => {
+    if (selectedEntries.length === 0) {
+      return
+    }
+    setMoveState({
+      type: 'folder',
+      id: '__selection__',
+      name: `${selectedEntries.length}개 항목`,
+    })
+    setMoveTargetId(folderId)
+    setMoveBrowserFolderId(folderId)
+  }
+
+  const handleBulkDelete = async () => {
+    if (selectedEntries.length === 0) {
+      return
+    }
+    try {
+      for (const id of selectedFolderIds) {
+        await trashFolder(id)
+      }
+      for (const id of selectedJobIds) {
+        await trashJob(id)
+      }
+      setMessage(`${selectedEntries.length}개 항목을 휴지통으로 보냈습니다.`)
+      refresh()
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : '선택 항목 삭제에 실패했습니다.')
+    }
+  }
+
+  const handleBulkDownload = async () => {
+    if (selectedEntries.length === 0) {
+      return
+    }
+    selectedFolderIds.forEach((id) => {
+      void downloadFolder(id)
+    })
+    batchDownloadJobs(selectedJobIds)
+  }
+
+  const handleFileAction = async (action: 'move' | 'delete' | 'download', item: JobItem) => {
+    try {
+      if (action === 'move') {
+        setMoveState({ type: 'file', id: item.ID, name: item.Filename })
+        setMoveTargetId(folderId || item.FolderID || '')
+        setMoveBrowserFolderId(folderId || item.FolderID || '')
+        return
+      }
+      if (action === 'delete') {
+        setConfirmDialog({
+          kind: 'delete-file',
+          title: '파일 삭제',
+          body: `"${displayFilename(item.Filename)}" 파일을 휴지통으로 보낼까요?`,
+          item,
+        })
+        return
+      }
+      window.location.href = item.IsRefined ? `/download/${item.ID}/refined` : `/download/${item.ID}`
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : '파일 작업에 실패했습니다.')
+    }
+  }
+
+  const handleFolderAction = async (action: 'move' | 'delete' | 'download', item: FolderNode) => {
+    try {
+      if (action === 'move') {
+        setMoveState({ type: 'folder', id: item.ID, name: item.Name })
+        setMoveTargetId(folderId || item.ParentID || '')
+        setMoveBrowserFolderId(folderId || item.ParentID || '')
+        return
+      }
+      if (action === 'delete') {
+        setConfirmDialog({
+          kind: 'delete-folder',
+          title: '폴더 삭제',
+          body: `"${item.Name}" 폴더를 휴지통으로 보낼까요?`,
+          item,
+        })
+        return
+      }
+      await downloadFolder(item.ID)
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : '폴더 작업에 실패했습니다.')
+    }
+  }
+
+  const openFileMenu = (item: JobItem, event: ReactMouseEvent<HTMLElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    syncMenuSelection(entryKey('file', item.ID))
+    setMenuState({ kind: 'file', item, x: event.clientX, y: event.clientY })
+  }
+
+  const openFolderMenu = (item: FolderNode, event: ReactMouseEvent<HTMLElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    syncMenuSelection(entryKey('folder', item.ID))
+    setMenuState({ kind: 'folder', item, x: event.clientX, y: event.clientY })
+  }
+
+  const openSurfaceMenu = (event: ReactMouseEvent<HTMLElement>) => {
+    if (viewMode !== 'explore') {
+      return
+    }
+    const target = event.target as HTMLElement
+    if (
+      target.closest('.drive-table-row') ||
+      target.closest('.drive-table-header') ||
+      target.closest('.row-menu-button') ||
+      target.closest('.filter-toolbar') ||
+      target.closest('.selection-toolbar') ||
+      target.closest('.drive-pathbar')
+    ) {
+      return
+    }
+    event.preventDefault()
+    clearSelection()
+    setMenuState({ kind: 'surface', x: event.clientX, y: event.clientY })
+  }
+
+  const syncMenuSelection = (key: string) => {
+    const hasKey = selectedKeys.includes(key)
+    setSelectedKeys((current) => {
+      if (viewMode === 'home') {
+        return [key]
+      }
+      if (current.includes(key)) {
+        return current
+      }
+      return [key]
+    })
+    setSelectionAnchor((current) => (hasKey ? current : key))
+  }
+
+  const handleEntryClick = (key: string, event: ReactMouseEvent<HTMLElement>) => {
+    setMenuState(null)
+    if (viewMode === 'home') {
+      setSelectedKeys([key])
+      setSelectionAnchor(key)
+      return
+    }
+    if (event.shiftKey && selectionAnchor) {
+      const anchorIndex = visibleEntries.findIndex((entry) => entry.key === selectionAnchor)
+      const targetIndex = visibleEntries.findIndex((entry) => entry.key === key)
+      if (anchorIndex >= 0 && targetIndex >= 0) {
+        const start = Math.min(anchorIndex, targetIndex)
+        const end = Math.max(anchorIndex, targetIndex)
+        setSelectedKeys(visibleEntries.slice(start, end + 1).map((entry) => entry.key))
+        return
+      }
+    }
+
+    if (event.metaKey || event.ctrlKey) {
+      setSelectedKeys((current) => (current.includes(key) ? current.filter((entry) => entry !== key) : [...current, key]))
+      setSelectionAnchor(key)
+      return
+    }
+
+    setSelectedKeys([key])
+    setSelectionAnchor(key)
+  }
+
+  const openFolder = (id: string) => navigate(`/files/folder/${id}`)
+  const openFile = (id: string) => navigate(`/file/${id}`)
+  const handleRenameFromMenu = async () => {
+    if (!menuState || menuState.kind === 'surface' || selectedKeys.length !== 1) {
+      return
+    }
+    if (menuState.kind === 'folder') {
+      setTextDialog({
+        kind: 'rename-folder',
+        title: '폴더 이름 변경',
+        label: '새 이름',
+        submitLabel: '변경',
+        value: menuState.item.Name,
+        folderId: menuState.item.ID,
+      })
+      return
+    }
+    setTextDialog({
+      kind: 'rename-file',
+      title: '파일 이름 변경',
+      label: '새 이름',
+      submitLabel: '변경',
+      value: menuState.item.Filename,
+      jobId: menuState.item.ID,
+    })
+  }
+  const clearSelection = () => {
+    setSelectedKeys([])
+    setSelectionAnchor(null)
+    setMenuState(null)
+  }
+
+  const beginSelectionBox = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (viewMode !== 'explore' || event.button !== 0) {
+      return
+    }
+    const target = event.target as HTMLElement
+    if (
+      target.closest('.drive-table-row') ||
+      target.closest('.drive-table-header') ||
+      target.closest('.row-menu-button') ||
+      target.closest('.filter-toolbar') ||
+      target.closest('.selection-toolbar') ||
+      target.closest('.drive-pathbar')
+    ) {
+      return
+    }
+    const table = driveTableRef.current
+    if (!table) {
+      return
+    }
+    const bounds = table.getBoundingClientRect()
+    const startX = event.clientX - bounds.left
+    const startY = event.clientY - bounds.top
+    setMenuState(null)
+    setSelectionAnchor(null)
+    setSelectedKeys([])
+    setSelectionBox({ startX, startY, currentX: startX, currentY: startY })
+    event.preventDefault()
+  }
+
+  const getDraggedEntryIds = (key: string) => {
+    const activeKeys = selectedKeys.includes(key) ? selectedKeys : [key]
+    const entries = visibleEntries.filter((entry) => activeKeys.includes(entry.key))
+    return {
+      jobIds: entries.filter((entry) => entry.kind === 'file').map((entry) => entry.item.ID),
+      folderIds: entries.filter((entry) => entry.kind === 'folder').map((entry) => entry.item.ID),
+    }
+  }
+
+  const handleRowDragStart = (key: string, event: ReactDragEvent<HTMLDivElement>) => {
+    if (viewMode !== 'explore') {
+      return
+    }
+    const payload = getDraggedEntryIds(key)
+    setDragState(payload)
+    if (!selectedKeys.includes(key)) {
+      setSelectedKeys([key])
+      setSelectionAnchor(key)
+    }
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('application/x-whisper-entries', JSON.stringify(payload))
+    event.dataTransfer.setData('text/plain', key)
+  }
+
+  const handleFolderDragOver = (folderId: string, event: ReactDragEvent<HTMLDivElement>) => {
+    const payload = readDragPayload(event.dataTransfer) ?? dragState
+    if (!payload || payload.folderIds.includes(folderId)) {
+      return
+    }
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+    setDropTargetFolderId(folderId)
+  }
+
+  const handleFolderDragLeave = (folderId: string, event: ReactDragEvent<HTMLDivElement>) => {
+    const nextTarget = event.relatedTarget as Node | null
+    if (nextTarget && event.currentTarget.contains(nextTarget)) {
+      return
+    }
+    setDropTargetFolderId((current) => (current === folderId ? '' : current))
+  }
+
+  const handleFolderDrop = async (folderId: string, event: ReactDragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    const payload = readDragPayload(event.dataTransfer) ?? dragState
+    if (!payload || payload.folderIds.includes(folderId)) {
+      setDropTargetFolderId('')
+      setDragState(null)
+      return
+    }
+    try {
+      await moveEntries(payload.jobIds, payload.folderIds, folderId)
+      setMessage('항목을 이동했습니다.')
+      setDropTargetFolderId('')
+      setDragState(null)
+      refresh()
+    } catch (moveError) {
+      setError(moveError instanceof Error ? moveError.message : '이동에 실패했습니다.')
+      setDropTargetFolderId('')
+      setDragState(null)
+    }
+  }
+
+  const handleRowDragEnd = () => {
+    setDropTargetFolderId('')
+    setDragState(null)
+  }
+
+  const handleHomeSelect = (key: string) => {
+    setMenuState(null)
+    setSelectedKeys([key])
+    setSelectionAnchor(key)
+  }
+
+  const toggleSort = (nextKey: SortKey) => {
+    if (sortKey === nextKey) {
+      setSortDirection((current) => (current === 'desc' ? 'asc' : 'desc'))
+      return
+    }
+    setSortKey(nextKey)
+    setSortDirection(nextKey === 'updated' ? 'desc' : 'asc')
+  }
+
+  const resetFilters = () => {
+    setTypeFilter('all')
+    setDateFilter('all')
+    setFilterMenu(null)
+  }
+
+  const hasActiveFilters = typeFilter !== 'all' || dateFilter !== 'all'
+  const moveCurrentPath = buildMovePath(moveBrowserData?.all_folders ?? allFolders, moveBrowserFolderId)
+  const moveTitle = moveState
+    ? moveState.id === '__selection__'
+      ? `${selectedEntries.length}개 항목 이동중`
+      : `"${displayFilename(moveState.name)}" 이동중`
+    : ''
+  const homeDisplayJobs = [...pendingVisibleJobs, ...sortedHomeJobs]
+
+  const submitTextDialog = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!textDialog || !textDialog.value.trim()) {
+      return
+    }
+    try {
+      if (textDialog.kind === 'create-folder') {
+        await handleCreateFolder(textDialog.value, textDialog.parentId, textDialog.after)
+        return
+      }
+      if (textDialog.kind === 'rename-folder') {
+        await renameFolder(textDialog.folderId, textDialog.value.trim())
+      } else {
+        await renameJob(textDialog.jobId, textDialog.value.trim())
+      }
+      setMessage('이름을 변경했습니다.')
+      setTextDialog(null)
+      setMenuState(null)
+      refresh()
+    } catch (renameError) {
+      setError(renameError instanceof Error ? renameError.message : textDialog.kind === 'create-folder' ? '폴더를 만들지 못했습니다.' : '이름 변경에 실패했습니다.')
+    }
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!confirmDialog) {
+      return
+    }
+    try {
+      if (confirmDialog.kind === 'delete-file') {
+        await trashJob(confirmDialog.item.ID)
+        setMessage('파일을 휴지통으로 보냈습니다.')
+      } else {
+        await trashFolder(confirmDialog.item.ID)
+        setMessage('폴더를 휴지통으로 보냈습니다.')
+      }
+      setConfirmDialog(null)
+      refresh()
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : '삭제에 실패했습니다.')
+    }
+  }
+
+  return (
+    <div className="view-shell">
+      <input hidden onChange={handleUploadFileInput} ref={fileInputRef} type="file" />
+
+      <section
+        className="content-surface"
+        onClick={(event) => {
+          if (event.target === event.currentTarget) {
+            clearSelection()
+          }
+        }}
+      >
+        {!data ? <div className="empty-panel">목록을 불러오는 중입니다.</div> : null}
+
+        {data && viewMode === 'home' ? (
+          <div className="drive-sections">
+            <section className="drive-section">
+              <div className="drive-section-header">
+                <h2>최근 수정 폴더</h2>
+              </div>
+              <div className="drive-folder-strip">
+                {folderItems.map((folder) => {
+                  const key = entryKey('folder', folder.ID)
+                  return (
+                  <article
+                    className={`drive-folder-card${selectedKeys.includes(key) ? ' selected' : ''}`}
+                    key={folder.ID}
+                    onContextMenu={(event) => openFolderMenu(folder, event)}
+                    onClick={() => handleHomeSelect(key)}
+                    onDoubleClick={() => openFolder(folder.ID)}
+                  >
+                    <div className="drive-folder-card-main" role="button" tabIndex={0}>
+                      <span className="drive-item-icon">📁</span>
+                      <span className="drive-folder-card-copy">
+                        <strong>{folder.Name}</strong>
+                        <span>위치: {folder.ParentID ? '하위 폴더' : '내 파일'}</span>
+                      </span>
+                    </div>
+                    <button
+                      aria-label={`${folder.Name} 작업 열기`}
+                      className="row-menu-button"
+                      onClick={(event) => openFolderMenu(folder, event)}
+                      type="button"
+                    >
+                      ⋮
+                    </button>
+                  </article>
+                  )
+                })}
+              </div>
+            </section>
+
+            <section className="drive-section">
+              <div className="drive-section-header">
+                <h2>최근 수정 파일</h2>
+              </div>
+              <div className="drive-table">
+                <div className="drive-table-header">
+                  <button className="column-sort-button" onClick={() => toggleSort('name')} type="button">
+                    이름{renderSortMark(sortKey, sortDirection, 'name')}
+                  </button>
+                  <button className="column-sort-button" onClick={() => toggleSort('updated')} type="button">
+                    수정 날짜{renderSortMark(sortKey, sortDirection, 'updated')}
+                  </button>
+                  <button className="column-sort-button" onClick={() => toggleSort('location')} type="button">
+                    위치{renderSortMark(sortKey, sortDirection, 'location')}
+                  </button>
+                  <span className="drive-table-menu-col" />
+                </div>
+                {homeDisplayJobs.map((job) => {
+                  const key = entryKey('file', job.ID)
+                  const isPending = Boolean((job as FileListJob).__pending)
+                  const canOpen = !isPending || Boolean((job as FileListJob).__jobId)
+                  return (
+                  <div
+                    className={`drive-table-row${selectedKeys.includes(key) ? ' selected' : ''}`}
+                    key={job.ID}
+                    onContextMenu={canOpen ? (event) => openFileMenu(job, event) : undefined}
+                    onClick={() => handleHomeSelect(key)}
+                    onDoubleClick={canOpen ? () => openFile(job.ID) : undefined}
+                  >
+                    <div className="drive-table-primary" role="button" tabIndex={0}>
+                      <span className="drive-item-icon">🎧</span>
+                      <span className="drive-item-copy">
+                        <span className="drive-item-title">{displayFilename(job.Filename)}</span>
+                        <span className="drive-item-sub">{formatJobSub(job)}</span>
+                      </span>
+                    </div>
+                    <span className="drive-table-meta">{extractDate(job.UpdatedAt)}</span>
+                    <button
+                      className="drive-link-button"
+                      onClick={() => navigate(job.FolderID ? `/files/folder/${job.FolderID}` : '/files/root')}
+                      type="button"
+                    >
+                      {job.FolderName || '내 파일'}
+                    </button>
+                    {!canOpen ? <span className="drive-table-menu-col" /> : (
+                      <button
+                        aria-label={`${displayFilename(job.Filename)} 작업 열기`}
+                        className="row-menu-button"
+                        onClick={(event) => openFileMenu(job, event)}
+                        type="button"
+                      >
+                        ⋮
+                      </button>
+                    )}
+                  </div>
+                  )
+                })}
+              </div>
+            </section>
+          </div>
+        ) : null}
+
+        {data && viewMode === 'search' ? (
+          <section className="drive-section">
+            <div className="drive-section-header">
+              <h2>{query ? `"${query}" 검색 결과` : '검색 결과'}</h2>
+            </div>
+            <div className="drive-table">
+              <div className="drive-table-header">
+                <button className="column-sort-button" onClick={() => toggleSort('name')} type="button">
+                  이름{renderSortMark(sortKey, sortDirection, 'name')}
+                </button>
+                <button className="column-sort-button" onClick={() => toggleSort('updated')} type="button">
+                  수정 날짜{renderSortMark(sortKey, sortDirection, 'updated')}
+                </button>
+                <button className="column-sort-button" onClick={() => toggleSort('location')} type="button">
+                  위치{renderSortMark(sortKey, sortDirection, 'location')}
+                </button>
+                <span className="drive-table-menu-col" />
+              </div>
+              {sortedHomeJobs.map((job) => {
+                const key = entryKey('file', job.ID)
+                return (
+                  <div
+                    className={`drive-table-row${selectedKeys.includes(key) ? ' selected' : ''}`}
+                    key={job.ID}
+                    onContextMenu={(event) => openFileMenu(job, event)}
+                    onClick={() => handleHomeSelect(key)}
+                    onDoubleClick={() => openFile(job.ID)}
+                  >
+                    <div className="drive-table-primary" role="button" tabIndex={0}>
+                      <span className="drive-item-icon">🎧</span>
+                      <span className="drive-item-copy">
+                        <span className="drive-item-title">{displayFilename(job.Filename)}</span>
+                        <span className="drive-item-sub">{formatJobSub(job)}</span>
+                      </span>
+                    </div>
+                    <span className="drive-table-meta">{extractDate(job.UpdatedAt)}</span>
+                    <button
+                      className="drive-link-button"
+                      onClick={() => navigate(job.FolderID ? `/files/folder/${job.FolderID}` : '/files/root')}
+                      type="button"
+                    >
+                      {job.FolderName || '내 파일'}
+                    </button>
+                    <button
+                      aria-label={`${displayFilename(job.Filename)} 작업 열기`}
+                      className="row-menu-button"
+                      onClick={(event) => openFileMenu(job, event)}
+                      type="button"
+                    >
+                      ⋮
+                    </button>
+                  </div>
+                )
+              })}
+              {sortedHomeJobs.length === 0 ? <div className="empty-panel">검색 결과가 없습니다.</div> : null}
+            </div>
+          </section>
+        ) : null}
+
+        {data && viewMode === 'explore' ? (
+          <section
+            className="drive-section explore-section"
+            onClick={(event) => {
+              if (event.target === event.currentTarget) {
+                clearSelection()
+              }
+            }}
+          >
+            <div className="drive-pathbar">
+              <div className="drive-path">
+                <button className="drive-path-segment" onClick={() => navigate('/files/root')} type="button">
+                  내 파일
+                </button>
+                {folderPath.map((folder) => (
+                  <button
+                    className="drive-path-segment"
+                    key={folder.ID}
+                    onClick={() => navigate(`/files/folder/${folder.ID}`)}
+                    type="button"
+                  >
+                    {folder.Name}
+                  </button>
+                ))}
+              </div>
+              <div className="drive-path-meta">
+                <button className="ghost-button small" onClick={() => openCreateFolderDialog(folderId, 'refresh')} type="button">
+                  폴더 추가
+                </button>
+              </div>
+            </div>
+
+            {selectedEntries.length > 0 ? (
+              <div className="selection-toolbar">
+                <div className="selection-toolbar-inner">
+                  <div className="selection-toolbar-main">
+                    <button className="selection-toolbar-close" onClick={() => clearSelection()} type="button">
+                      ×
+                    </button>
+                    <div className="selection-toolbar-copy">{selectedEntries.length}개 선택됨</div>
+                  </div>
+                  <div className="selection-toolbar-actions">
+                    <button className="toolbar-button" onClick={() => void handleBulkDownload()} type="button">
+                      다운로드
+                    </button>
+                    <button className="toolbar-button" onClick={() => void handleBulkMove()} type="button">
+                      이동
+                    </button>
+                    <button className="toolbar-button danger" onClick={() => void handleBulkDelete()} type="button">
+                      삭제
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="filter-toolbar">
+                <div className="filter-group">
+                  <div className="filter-control">
+                    <button
+                      className={`filter-toggle-button${typeFilter !== 'all' ? ' active' : ''}`}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        setFilterMenu((current) => (current === 'type' ? null : 'type'))
+                      }}
+                      type="button"
+                    >
+                      <span>{typeFilterLabel(typeFilter)}</span>
+                      <span className="filter-toggle-caret">▾</span>
+                    </button>
+                    {filterMenu === 'type' ? (
+                      <div className="filter-menu">
+                        {TYPE_OPTIONS.map((option) => (
+                          <button
+                            className={`filter-menu-item${typeFilter === option.value ? ' active' : ''}`}
+                            key={option.value}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              setTypeFilter(option.value)
+                              setFilterMenu(null)
+                            }}
+                            type="button"
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                  {typeFilter !== 'all' ? (
+                    <button className="filter-clear-button" onClick={() => setTypeFilter('all')} type="button">
+                      ×
+                    </button>
+                  ) : null}
+                </div>
+                <div className="filter-group">
+                  <div className="filter-control">
+                    <button
+                      className={`filter-toggle-button${dateFilter !== 'all' ? ' active' : ''}`}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        setFilterMenu((current) => (current === 'date' ? null : 'date'))
+                      }}
+                      type="button"
+                    >
+                      <span>{dateFilterLabel(dateFilter)}</span>
+                      <span className="filter-toggle-caret">▾</span>
+                    </button>
+                    {filterMenu === 'date' ? (
+                      <div className="filter-menu">
+                        {DATE_OPTIONS.map((option) => (
+                          <button
+                            className={`filter-menu-item${dateFilter === option.value ? ' active' : ''}`}
+                            key={option.value}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              setDateFilter(option.value)
+                              setFilterMenu(null)
+                            }}
+                            type="button"
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                  {dateFilter !== 'all' ? (
+                    <button className="filter-clear-button" onClick={() => setDateFilter('all')} type="button">
+                      ×
+                    </button>
+                  ) : null}
+                </div>
+                {hasActiveFilters ? (
+                  <div className="filter-group">
+                    <button className="filter-reset-button" onClick={resetFilters} type="button">
+                      필터 지우기
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            )}
+
+            <div
+              className="drive-explorer-body"
+              onDragOver={(event) => {
+                const target = event.target as HTMLElement
+                if (!target.closest('.drive-table-row')) {
+                  setDropTargetFolderId('')
+                }
+              }}
+              onContextMenu={openSurfaceMenu}
+              onMouseDown={beginSelectionBox}
+              onClick={(event) => {
+                if (event.target === event.currentTarget) {
+                  clearSelection()
+                }
+              }}
+              ref={driveTableRef}
+            >
+              <div className="drive-table">
+                <div className="drive-table-header explore">
+                  <button className="column-sort-button" onClick={() => toggleSort('name')} type="button">
+                    이름{renderSortMark(sortKey, sortDirection, 'name')}
+                  </button>
+                  <button className="column-sort-button" onClick={() => toggleSort('kind')} type="button">
+                    종류{renderSortMark(sortKey, sortDirection, 'kind')}
+                  </button>
+                  <button className="column-sort-button" onClick={() => toggleSort('updated')} type="button">
+                    수정 날짜{renderSortMark(sortKey, sortDirection, 'updated')}
+                  </button>
+                  <span>크기</span>
+                  <span className="drive-table-menu-col" />
+                </div>
+                {sortedExploreEntries.map((entry) =>
+                  entry.kind === 'folder' ? (
+                    <div
+                      className={`drive-table-row explore${selectedKeys.includes(entry.key) ? ' selected' : ''}${dropTargetFolderId === entry.item.ID ? ' drop-target' : ''}`}
+                      draggable
+                      key={entry.key}
+                      onClick={(event) => handleEntryClick(entry.key, event)}
+                      onContextMenu={(event) => openFolderMenu(entry.item, event)}
+                      onDoubleClick={() => openFolder(entry.item.ID)}
+                      onDragEnd={handleRowDragEnd}
+                      onDragLeave={(event) => handleFolderDragLeave(entry.item.ID, event)}
+                      onDragOver={(event) => handleFolderDragOver(entry.item.ID, event)}
+                      onDragStart={(event) => handleRowDragStart(entry.key, event)}
+                      onDrop={(event) => void handleFolderDrop(entry.item.ID, event)}
+                      ref={(node) => {
+                        rowRefs.current[entry.key] = node
+                      }}
+                    >
+                      <div className="drive-table-primary" role="button" tabIndex={0}>
+                        <span className="drive-item-icon">📁</span>
+                        <span className="drive-item-copy">
+                          <span className="drive-item-title">{entry.item.Name}</span>
+                        </span>
+                      </div>
+                      <span className="drive-table-meta">폴더</span>
+                      <span className="drive-table-meta">{extractDate(entry.item.UpdatedAt)}</span>
+                      <span className="drive-table-meta">-</span>
+                      <button
+                        aria-label={`${entry.item.Name} 작업 열기`}
+                        className="row-menu-button"
+                        onClick={(event) => openFolderMenu(entry.item, event)}
+                        type="button"
+                      >
+                        ⋮
+                      </button>
+                    </div>
+                  ) : (
+                    (() => {
+                      const isPending = Boolean((entry.item as FileListJob).__pending)
+                      const canOpen = !isPending || Boolean((entry.item as FileListJob).__jobId)
+                      return (
+                        <div
+                          className={`drive-table-row explore${selectedKeys.includes(entry.key) ? ' selected' : ''}`}
+                          draggable={!isPending}
+                          key={entry.key}
+                          onClick={(event) => handleEntryClick(entry.key, event)}
+                          onContextMenu={canOpen ? (event) => openFileMenu(entry.item, event) : undefined}
+                          onDoubleClick={canOpen ? () => openFile(entry.item.ID) : undefined}
+                          onDragEnd={isPending ? undefined : handleRowDragEnd}
+                          onDragStart={isPending ? undefined : (event) => handleRowDragStart(entry.key, event)}
+                          ref={(node) => {
+                            rowRefs.current[entry.key] = node
+                          }}
+                        >
+                          <div className="drive-table-primary" role="button" tabIndex={0}>
+                            <span className="drive-item-icon">🎧</span>
+                            <span className="drive-item-copy">
+                              <span className="drive-item-title">{displayFilename(entry.item.Filename)}</span>
+                              <span className="drive-item-sub">{formatJobSub(entry.item)}</span>
+                            </span>
+                          </div>
+                          <span className="drive-table-meta">{fileTypeLabel(entry.item.FileType)}</span>
+                          <span className="drive-table-meta">{extractDate(entry.item.UpdatedAt)}</span>
+                          <span className="drive-table-meta">{entry.item.MediaDuration || '-'}</span>
+                          {!canOpen ? (
+                            <span className="drive-table-menu-col" />
+                          ) : (
+                            <button
+                              aria-label={`${displayFilename(entry.item.Filename)} 작업 열기`}
+                              className="row-menu-button"
+                              onClick={(event) => openFileMenu(entry.item, event)}
+                              type="button"
+                            >
+                              ⋮
+                            </button>
+                          )}
+                        </div>
+                      )
+                    })()
+                  ),
+                )}
+              </div>
+              {selectionBox ? <div className="selection-box" style={selectionBoxStyle(selectionBox)} /> : null}
+            </div>
+          </section>
+        ) : null}
+
+        {data && data.total_pages > 1 ? (
+          <div className="pagination">
+            {Array.from({ length: data.total_pages }, (_, index) => index + 1).map((pageNumber) => (
+              <button
+                className={`ghost-button${pageNumber === page ? ' active' : ''}`}
+                key={pageNumber}
+                onClick={() => updateQuery(searchParams, setSearchParams, { page: String(pageNumber) })}
+                type="button"
+              >
+                {pageNumber}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </section>
+
+      {menuState ? (
+        <div className="context-menu" style={{ left: clampMenu(menuState.x), top: clampMenu(menuState.y) }}>
+          {menuState.kind === 'surface' ? (
+            <>
+              <button
+                className="context-menu-item"
+                onClick={() => {
+                  setMenuState(null)
+                  fileInputRef.current?.click()
+                }}
+                type="button"
+              >
+                새 파일 업로드
+              </button>
+              <button
+                className="context-menu-item"
+                onClick={() => {
+                  setMenuState(null)
+                  openCreateFolderDialog(folderId, 'refresh')
+                }}
+                type="button"
+              >
+                폴더 추가
+              </button>
+            </>
+          ) : menuState.kind === 'folder' ? (
+            <>
+              <button
+                className="context-menu-item"
+                disabled={selectedKeys.length !== 1}
+                onClick={() => void handleRenameFromMenu()}
+                type="button"
+              >
+                이름 변경
+              </button>
+              <button className="context-menu-item" onClick={() => void handleFolderAction('download', menuState.item)} type="button">
+                다운로드
+              </button>
+              <button className="context-menu-item" onClick={() => void handleFolderAction('move', menuState.item)} type="button">
+                이동
+              </button>
+              <button className="context-menu-item danger" onClick={() => void handleFolderAction('delete', menuState.item)} type="button">
+                삭제
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                className="context-menu-item"
+                disabled={selectedKeys.length !== 1}
+                onClick={() => void handleRenameFromMenu()}
+                type="button"
+              >
+                이름 변경
+              </button>
+              <button className="context-menu-item" onClick={() => void handleFileAction('download', menuState.item)} type="button">
+                다운로드
+              </button>
+              <button className="context-menu-item" onClick={() => void handleFileAction('move', menuState.item)} type="button">
+                이동
+              </button>
+              <button className="context-menu-item danger" onClick={() => void handleFileAction('delete', menuState.item)} type="button">
+                삭제
+              </button>
+            </>
+          )}
+        </div>
+      ) : null}
+
+      {moveState ? (
+        <div className="modal-shell">
+          <div className="modal-card move-modal-card">
+            <h3>{moveTitle}</h3>
+            <div className="move-current-path">
+              {moveCurrentPath.map((segment) => (
+                <button
+                  className="move-path-segment"
+                  key={segment.id || 'root'}
+                  onClick={() => {
+                    setMoveBrowserFolderId(segment.id)
+                    setMoveTargetId(segment.id)
+                  }}
+                  type="button"
+                >
+                  {segment.label}
+                </button>
+              ))}
+            </div>
+            <div className="move-folder-list">
+              {moveFolderChildren.map((folder) => (
+                <button
+                  className={`move-folder-row${moveTargetId === folder.ID ? ' active' : ''}`}
+                  key={folder.ID}
+                  onClick={() => {
+                    setMoveBrowserFolderId(folder.ID)
+                    setMoveTargetId(folder.ID)
+                  }}
+                  type="button"
+                >
+                  <span className="drive-item-icon">📁</span>
+                  <span>{folder.Name}</span>
+                </button>
+              ))}
+              {moveFileChildren.map((job) => (
+                <div className="move-folder-row is-disabled" key={job.ID}>
+                  <span className="drive-item-icon">📄</span>
+                  <span>{job.Filename}</span>
+                </div>
+              ))}
+              {moveFolderChildren.length === 0 && moveFileChildren.length === 0 ? (
+                <div className="empty-panel move-empty">이 위치에 항목이 없습니다.</div>
+              ) : null}
+            </div>
+            <div className="move-modal-footer">
+              <button
+                className="toolbar-button"
+                onClick={() => openCreateFolderDialog(moveBrowserFolderId, 'move-browser')}
+                type="button"
+              >
+                현재 위치에 폴더 추가
+              </button>
+              <div className="move-modal-actions">
+                <button
+                  className="ghost-button"
+                  onClick={() => {
+                    setMoveState(null)
+                    setMoveBrowserFolderId('')
+                    setMoveTargetId('')
+                  }}
+                  type="button"
+                >
+                  취소
+                </button>
+                <button className="primary-button" onClick={() => void handleMove()} type="button">
+                  이동
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {uploadState ? (
+        <div className="modal-shell">
+          <div className="modal-card">
+            <h3>업로드</h3>
+            <form className="stack-form" onSubmit={handleUploadSubmit}>
+              <div className="label-field">
+                <label>파일명</label>
+                <input
+                  className="dark-input"
+                  onChange={(event) => setUploadState((current) => (current ? { ...current, displayName: event.target.value } : current))}
+                  value={uploadState.displayName}
+                />
+              </div>
+              <div className="label-field">
+                <label>처리 방식</label>
+                <select
+                  className="dark-select"
+                  onChange={(event) =>
+                    setUploadState((current) => (current ? { ...current, refineEnabled: event.target.value === 'true' } : current))
+                  }
+                  value={String(uploadState.refineEnabled)}
+                >
+                  <option value="true">전사 후 정제</option>
+                  <option value="false">전사만</option>
+                </select>
+              </div>
+              <div className="label-field">
+                <label>설명</label>
+                <textarea
+                  className="dark-input"
+                  onChange={(event) => setUploadState((current) => (current ? { ...current, description: event.target.value } : current))}
+                  rows={4}
+                  value={uploadState.description}
+                />
+              </div>
+              <div className="modal-actions">
+                <button className="ghost-button" onClick={() => setUploadState(null)} type="button">
+                  취소
+                </button>
+                <button className="primary-button" type="submit">
+                  업로드 시작
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {textDialog ? (
+        <div className="modal-shell">
+          <div className="modal-card">
+            <h3>{textDialog.title}</h3>
+            <form className="stack-form" onSubmit={submitTextDialog}>
+              <div className="label-field">
+                <label>{textDialog.label}</label>
+                <input
+                  autoFocus
+                  className="dark-input"
+                  onChange={(event) => setTextDialog((current) => (current ? { ...current, value: event.target.value } : current))}
+                  value={textDialog.value}
+                />
+              </div>
+              <div className="modal-actions">
+                <button className="ghost-button" onClick={() => setTextDialog(null)} type="button">
+                  취소
+                </button>
+                <button className="primary-button" type="submit">
+                  {textDialog.submitLabel}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {confirmDialog ? (
+        <div className="modal-shell">
+          <div className="modal-card">
+            <h3>{confirmDialog.title}</h3>
+            <p className="modal-text">{confirmDialog.body}</p>
+            <div className="modal-actions">
+              <button className="ghost-button" onClick={() => setConfirmDialog(null)} type="button">
+                취소
+              </button>
+              <button className="primary-button danger" onClick={() => void handleConfirmDelete()} type="button">
+                삭제
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {error || message ? (
+        <div className="toast-stack">
+          {error ? <div className="alert error toast-alert">{error}</div> : null}
+          {message ? <div className="alert info toast-alert">{message}</div> : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function currentFolderName(folderId: string, allFolders: FolderNode[]) {
+  if (!folderId) {
+    return '내 파일'
+  }
+  return allFolders.find((folder) => folder.ID === folderId)?.Name || '내 파일'
+}
+
+function stripExtension(filename: string) {
+  const dotIndex = filename.lastIndexOf('.')
+  return dotIndex > 0 ? filename.slice(0, dotIndex) : filename
+}
+
+function displayFilename(filename: string) {
+  const ext = filename.split('.').pop()?.toLowerCase() || ''
+  if (ext === 'mp3' || ext === 'wav' || ext === 'm4a') {
+    return stripExtension(filename)
+  }
+  return filename
+}
+
+function formatPendingStatus(stage: PendingUpload['stage'], progress: number) {
+  if (stage === 'queued') {
+    return '작업 대기 중'
+  }
+  if (stage === 'processing') {
+    return `전사 중 ${Math.max(0, progress)}%`
+  }
+  if (stage === 'failed') {
+    return '업로드 실패'
+  }
+  return `업로드 중 ${Math.max(0, progress)}%`
+}
+
+function formatJobSub(job: FileListJob) {
+  if (job.__pending) {
+    return job.Status
+  }
+  if (job.Status === '작업 대기 중') {
+    return '작업 대기 중'
+  }
+  if (job.Status === '작업 중') {
+    return `전사 중 ${Math.max(0, job.ProgressPercent ?? 0)}%`
+  }
+  if (job.Status === '정제 대기 중') {
+    return '정제 대기 중'
+  }
+  if (job.Status === '정제 중') {
+    return `정제 중 ${Math.max(0, job.ProgressPercent ?? 0)}%`
+  }
+  return job.MediaDuration || job.Status
+}
+
+function extractDate(value?: string) {
+  if (!value) {
+    return '-'
+  }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return '-'
+  }
+
+  const now = new Date()
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const yesterdayStart = todayStart - 24 * 60 * 60 * 1000
+  const timestamp = date.getTime()
+  const time = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+
+  if (timestamp >= todayStart) {
+    return `오늘 ${time}`
+  }
+  if (timestamp >= yesterdayStart) {
+    return `어제 ${time}`
+  }
+
+  return `${date.getFullYear()}년 ${String(date.getMonth() + 1).padStart(2, '0')}월 ${String(date.getDate()).padStart(2, '0')}일 ${time}`
+}
+
+function normalizePage(value: string | null): number {
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 1
+}
+
+function clampMenu(value: number) {
+  return Math.max(12, Math.min(value, window.innerWidth - 196))
+}
+
+function entryKey(kind: 'file' | 'folder', id: string) {
+  return `${kind}:${id}`
+}
+
+function updateQuery(
+  searchParams: URLSearchParams,
+  setSearchParams: (params: URLSearchParams) => void,
+  updates: Record<string, string>,
+) {
+  const next = new URLSearchParams(searchParams)
+  Object.entries(updates).forEach(([key, value]) => {
+    if (value) {
+      next.set(key, value)
+    } else {
+      next.delete(key)
+    }
+  })
+  setSearchParams(next)
+}
+
+function sortJobs(items: JobItem[], sortKey: SortKey | 'location', sortDirection: SortDirection) {
+  return [...items].sort((a, b) => compareJob(a, b, sortKey, sortDirection))
+}
+
+function compareDate(a?: string, b?: string) {
+  const aTime = Date.parse(a || '') || 0
+  const bTime = Date.parse(b || '') || 0
+  return bTime - aTime
+}
+
+function compareJob(a: JobItem, b: JobItem, sortKey: SortKey | 'location', sortDirection: SortDirection) {
+  let value = 0
+  if (sortKey === 'name') {
+    value = a.Filename.localeCompare(b.Filename, 'ko')
+  } else if (sortKey === 'location') {
+    value = (a.FolderName || '').localeCompare(b.FolderName || '', 'ko')
+  } else {
+    value = compareDate(a.UpdatedAt, b.UpdatedAt)
+  }
+  return sortDirection === 'asc' ? value : -value
+}
+
+function sortEntries(entries: VisibleEntry[], sortKey: SortKey, sortDirection: SortDirection) {
+  return [...entries].sort((a, b) => {
+    if (a.kind !== b.kind) {
+      return a.kind === 'folder' ? -1 : 1
+    }
+    let value = 0
+    if (sortKey === 'name') {
+      value = getEntryLabel(a).localeCompare(getEntryLabel(b), 'ko')
+    } else if (sortKey === 'kind') {
+      value = a.kind.localeCompare(b.kind, 'ko')
+    } else if (sortKey === 'location') {
+      value = getEntryLocation(a).localeCompare(getEntryLocation(b), 'ko')
+    } else {
+      value = compareDate(getEntryUpdatedAt(a), getEntryUpdatedAt(b))
+    }
+    return sortDirection === 'asc' ? value : -value
+  })
+}
+
+function getEntryLabel(entry: VisibleEntry) {
+  return entry.kind === 'folder' ? entry.item.Name : entry.item.Filename
+}
+
+function getEntryUpdatedAt(entry: VisibleEntry) {
+  return entry.kind === 'folder' ? entry.item.UpdatedAt : entry.item.UpdatedAt
+}
+
+function getEntryLocation(entry: VisibleEntry) {
+  if (entry.kind === 'folder') {
+    return entry.item.ParentID ? '하위 폴더' : '내 파일'
+  }
+  return entry.item.FolderName || '내 파일'
+}
+
+function matchesFolderFilters(folder: FolderNode, dateFilter: DateFilter) {
+  return matchesDateFilter(folder.UpdatedAt, dateFilter)
+}
+
+function matchesJobFilters(job: JobItem, dateFilter: DateFilter) {
+  return matchesDateFilter(job.UpdatedAt, dateFilter)
+}
+
+function matchesDateFilter(value: string | undefined, dateFilter: DateFilter) {
+  if (dateFilter === 'all') {
+    return true
+  }
+  const timestamp = Date.parse(value || '')
+  if (Number.isNaN(timestamp)) {
+    return false
+  }
+  const now = new Date()
+  const diff = now.getTime() - timestamp
+  switch (dateFilter) {
+    case 'past_hour':
+      return diff <= 60 * 60 * 1000
+    case 'today': {
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+      return timestamp >= startOfDay
+    }
+    case 'past_7_days':
+      return diff <= 7 * 24 * 60 * 60 * 1000
+    case 'past_30_days':
+      return diff <= 30 * 24 * 60 * 60 * 1000
+    case 'this_year':
+      return new Date(timestamp).getFullYear() === now.getFullYear()
+    case 'last_year':
+      return new Date(timestamp).getFullYear() === now.getFullYear() - 1
+    default:
+      return true
+  }
+}
+
+function renderSortMark(currentKey: SortKey, currentDirection: SortDirection, targetKey: SortKey) {
+  if (currentKey !== targetKey) {
+    return ''
+  }
+  return currentDirection === 'desc' ? ' ↓' : ' ↑'
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(value, max))
+}
+
+function normalizeRect(box: SelectionBox) {
+  return {
+    left: Math.min(box.startX, box.currentX),
+    top: Math.min(box.startY, box.currentY),
+    right: Math.max(box.startX, box.currentX),
+    bottom: Math.max(box.startY, box.currentY),
+  }
+}
+
+function rectanglesIntersect(selectionRect: { left: number; top: number; right: number; bottom: number }, rect: DOMRect) {
+  return !(
+    selectionRect.right < rect.left ||
+    selectionRect.left > rect.right ||
+    selectionRect.bottom < rect.top ||
+    selectionRect.top > rect.bottom
+  )
+}
+
+function selectionBoxStyle(box: SelectionBox) {
+  const rect = normalizeRect(box)
+  return {
+    left: `${rect.left}px`,
+    top: `${rect.top}px`,
+    width: `${rect.right - rect.left}px`,
+    height: `${rect.bottom - rect.top}px`,
+  }
+}
+
+function readDragPayload(dataTransfer: DataTransfer): DragState | null {
+  const payload = dataTransfer.getData('application/x-whisper-entries')
+  if (!payload) {
+    return null
+  }
+  try {
+    const parsed = JSON.parse(payload) as Partial<DragState>
+    return {
+      jobIds: Array.isArray(parsed.jobIds) ? parsed.jobIds : [],
+      folderIds: Array.isArray(parsed.folderIds) ? parsed.folderIds : [],
+    }
+  } catch {
+    return null
+  }
+}
+
+function buildMovePath(allFolders: FolderNode[], folderID: string) {
+  const path: Array<{ id: string; label: string }> = [{ id: '', label: '내 파일' }]
+  if (!folderID) {
+    return path
+  }
+  const byId = new Map(allFolders.map((folder) => [folder.ID, folder]))
+  const stack: FolderNode[] = []
+  let current = byId.get(folderID)
+  while (current) {
+    stack.unshift(current)
+    current = current.ParentID ? byId.get(current.ParentID) : undefined
+  }
+  stack.forEach((folder) => {
+    path.push({ id: folder.ID, label: folder.Name })
+  })
+  return path
+}
+
+function typeFilterLabel(typeFilter: TypeFilter) {
+  if (typeFilter === 'folder') {
+    return '폴더'
+  }
+  if (typeFilter === 'document') {
+    return '문서'
+  }
+  return '유형'
+}
+
+function dateFilterLabel(dateFilter: DateFilter) {
+  switch (dateFilter) {
+    case 'past_hour':
+      return '지난 1시간'
+    case 'today':
+      return '오늘'
+    case 'past_7_days':
+      return '지난 7일'
+    case 'past_30_days':
+      return '지난 30일'
+    case 'this_year':
+      return '올해'
+    case 'last_year':
+      return '지난 해'
+    default:
+      return '수정 날짜'
+  }
+}
+
+function defaultSortState(viewMode: FilesPageProps['viewMode']) {
+  if (viewMode === 'home') {
+    return { key: 'updated' as const, direction: 'asc' as const }
+  }
+  if (viewMode === 'search') {
+    return { key: 'updated' as const, direction: 'desc' as const }
+  }
+  return { key: 'name' as const, direction: 'asc' as const }
+}
+
+function fileTypeLabel(fileType?: string) {
+  const normalized = (fileType || '').trim()
+  if (!normalized) {
+    return '파일'
+  }
+  return normalized.toUpperCase()
+}

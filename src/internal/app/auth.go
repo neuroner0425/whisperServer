@@ -61,3 +61,15 @@ func loginPostHandler(c echo.Context) error {
 func logoutPostHandler(c echo.Context) error {
 	return authHandlers.LogoutPostHandler(c)
 }
+
+func signupJSONHandler(c echo.Context) error {
+	return authHandlers.SignupJSONHandler(c)
+}
+
+func loginJSONHandler(c echo.Context) error {
+	return authHandlers.LoginJSONHandler(c)
+}
+
+func logoutJSONHandler(c echo.Context) error {
+	return authHandlers.LogoutJSONHandler(c)
+}

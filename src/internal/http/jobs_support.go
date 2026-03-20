@@ -58,18 +58,21 @@ func BuildJobRowsForUser(userID, q, tag, folderID string, trashed bool, deps Job
 		}
 
 		rows = append(rows, JobRow{
-			ID:            id,
-			Filename:      filename,
-			MediaDuration: deps.Fallback(job.MediaDuration, "-"),
-			Status:        job.Status,
-			IsRefined:     job.IsRefined(),
-			TagText:       strings.Join(tags, ", "),
-			FolderID:      fID,
-			IsTrashed:     deps.IsJobTrashed(job),
-			UpdatedAt:     jobDisplayUpdatedAt(job),
-			DeletedAt:     job.DeletedAt,
-			OwnerName:     "나",
-			FolderName:    fName,
+			ID:              id,
+			Filename:        filename,
+			FileType:        job.FileType,
+			MediaDuration:   deps.Fallback(job.MediaDuration, "-"),
+			Status:          job.Status,
+			Phase:           job.Phase,
+			ProgressPercent: job.ProgressPercent,
+			IsRefined:       job.IsRefined(),
+			TagText:         strings.Join(tags, ", "),
+			FolderID:        fID,
+			IsTrashed:       deps.IsJobTrashed(job),
+			UpdatedAt:       jobDisplayUpdatedAt(job),
+			DeletedAt:       job.DeletedAt,
+			OwnerName:       "나",
+			FolderName:      fName,
 		})
 	}
 	sort.Slice(rows, func(i, j int) bool { return deps.UploadedTS(rows[i].ID) > deps.UploadedTS(rows[j].ID) })
@@ -128,18 +131,21 @@ func BuildRecentJobRowsForUser(userID, q, tag string, deps JobSupportDeps) []Job
 		}
 
 		rows = append(rows, JobRow{
-			ID:            id,
-			Filename:      filename,
-			MediaDuration: deps.Fallback(job.MediaDuration, "-"),
-			Status:        job.Status,
-			IsRefined:     job.IsRefined(),
-			TagText:       strings.Join(tags, ", "),
-			FolderID:      fID,
-			IsTrashed:     false,
-			UpdatedAt:     jobDisplayUpdatedAt(job),
-			DeletedAt:     job.DeletedAt,
-			OwnerName:     "나",
-			FolderName:    fName,
+			ID:              id,
+			Filename:        filename,
+			FileType:        job.FileType,
+			MediaDuration:   deps.Fallback(job.MediaDuration, "-"),
+			Status:          job.Status,
+			Phase:           job.Phase,
+			ProgressPercent: job.ProgressPercent,
+			IsRefined:       job.IsRefined(),
+			TagText:         strings.Join(tags, ", "),
+			FolderID:        fID,
+			IsTrashed:       false,
+			UpdatedAt:       jobDisplayUpdatedAt(job),
+			DeletedAt:       job.DeletedAt,
+			OwnerName:       "나",
+			FolderName:      fName,
 		})
 	}
 	sort.Slice(rows, func(i, j int) bool { return deps.UploadedTS(rows[i].ID) > deps.UploadedTS(rows[j].ID) })
@@ -219,7 +225,23 @@ func JobsSnapshotVersion(jobItems []JobRow, folderItems []FolderRow, page, pageS
 		fmt.Fprintf(h, "F|%s|%s|%s;", f.ID, f.Name, f.ParentID)
 	}
 	for _, j := range jobItems {
-		fmt.Fprintf(h, "J|%s|%s|%s|%s|%t|%s|%s|%t|%s|%s;", j.ID, j.Filename, j.MediaDuration, j.Status, j.IsRefined, j.TagText, j.FolderID, j.IsTrashed, j.UpdatedAt, j.DeletedAt)
+		fmt.Fprintf(
+			h,
+			"J|%s|%s|%s|%s|%s|%s|%d|%t|%s|%s|%t|%s|%s;",
+			j.ID,
+			j.Filename,
+			j.FileType,
+			j.MediaDuration,
+			j.Status,
+			j.Phase,
+			j.ProgressPercent,
+			j.IsRefined,
+			j.TagText,
+			j.FolderID,
+			j.IsTrashed,
+			j.UpdatedAt,
+			j.DeletedAt,
+		)
 	}
 	return fmt.Sprintf("%x", h.Sum64())
 }

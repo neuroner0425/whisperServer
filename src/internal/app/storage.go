@@ -54,6 +54,12 @@ func enqueueRefine(jobID string) {
 	}
 }
 
+func cancelJob(jobID string) {
+	if appWorker != nil {
+		appWorker.Cancel(jobID)
+	}
+}
+
 func setQueueLen() {
 	queueLength.Set(queueLengthValue())
 }
@@ -71,11 +77,19 @@ func requeuePending() {
 func deleteJobs(ids []string) {
 	runtimeState.jobsMu.Lock()
 	defer runtimeState.jobsMu.Unlock()
+	owners := map[string]struct{}{}
 	for _, id := range ids {
+		cancelJob(id)
+		if job := runtimeState.jobs[id]; job != nil && job.OwnerID != "" {
+			owners[job.OwnerID] = struct{}{}
+		}
 		store.DeleteJobBlobs(id)
 		delete(runtimeState.jobs, id)
 	}
 	saveJobsLocked()
+	for ownerID := range owners {
+		eventBroker.Notify(ownerID, "files.changed", nil)
+	}
 }
 
 func loadJobs() {
@@ -111,6 +125,7 @@ func setJobFields(id string, fields map[string]any) {
 	}
 	applyJobFields(job, fields)
 	saveJobsLocked()
+	eventBroker.Notify(job.OwnerID, "files.changed", map[string]any{"job_id": id})
 }
 
 func applyJobFields(job *model.Job, fields map[string]any) {
@@ -120,6 +135,8 @@ func applyJobFields(job *model.Job, fields map[string]any) {
 			job.Status = intutil.AsString(v)
 		case "filename":
 			job.Filename = intutil.AsString(v)
+		case "file_type":
+			job.FileType = intutil.AsString(v)
 		case "result":
 			job.Result = intutil.AsString(v)
 		case "uploaded_at":
@@ -198,6 +215,7 @@ func removeTagFromOwnerJobs(ownerID, tagName string) {
 	}
 	if changed {
 		saveJobsLocked()
+		eventBroker.Notify(ownerID, "files.changed", nil)
 	}
 }
 
@@ -227,7 +245,9 @@ func appendJobPreviewLine(id, line string) {
 	}
 
 	job.PreviewText = prev
-	saveJobsLocked()
+	if err := store.SaveJobBlob(id, store.BlobKindPreview, []byte(prev)); err != nil {
+		procErrf("storage.savePreviewBlob", err, "job_id=%s", id)
+	}
 }
 
 func uploadedTS(id string) float64 {
@@ -243,6 +263,7 @@ func uploadedTS(id string) float64 {
 func toJobView(job *model.Job) JobView {
 	return JobView{
 		Filename:        job.Filename,
+		FileType:        job.FileType,
 		Status:          job.Status,
 		UploadedAt:      intutil.Fallback(job.UploadedAt, "-"),
 		StartedAt:       intutil.Fallback(job.StartedAt, "-"),

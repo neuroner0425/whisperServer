@@ -90,22 +90,22 @@ func Run() {
 	e.Renderer = view.MustRenderer(templateDir)
 	httpx.Routes{
 		AuthMiddleware:  authMiddleware,
-		LoginGet:        loginGetHandler,
+		LoginGet:        spaLoginPageHandler,
 		LoginPost:       loginPostHandler,
-		SignupGet:       signupGetHandler,
+		SignupGet:       spaSignupPageHandler,
 		SignupPost:      signupPostHandler,
 		LogoutPost:      logoutPostHandler,
 		RootRedirect:    rootRedirectHandler,
 		FilesRedirect:   redirectFilesToHomeHandler,
-		FilesList:       jobsHandler,
-		TagsPage:        tagsPageHandler,
-		TrashPage:       trashHandler,
-		UploadGet:       uploadGetHandler,
+		FilesList:       spaFilesPageHandler,
+		TagsPage:        spaTagsPageHandler,
+		TrashPage:       spaTrashPageHandler,
+		UploadGet:       spaUploadPageHandler,
 		UploadPost:      uploadPostHandler,
 		JobsRedirect:    redirectJobsToRootHandler,
 		JobsUpdates:     jobsUpdatesHandler,
 		Status:          statusHandler,
-		JobDetail:       jobHandler,
+		JobDetail:       spaJobPageHandler,
 		Download:        downloadHandler,
 		DownloadRefined: downloadRefinedHandler,
 		BatchDownload:   batchDownloadHandler,
@@ -126,6 +126,41 @@ func Run() {
 		RefineRetry:     refineRetryHandler,
 		Metrics:         promhttp.Handler(),
 	}.Register(e, staticDir)
+	e.GET("/auth/login", spaIndexHandler)
+	e.GET("/auth/join", spaIndexHandler)
+	e.GET("/files/trash", spaIndexHandler)
+	e.GET("/files/search", spaIndexHandler)
+	e.GET("/files/folder/:folder_id", spaIndexHandler)
+	e.GET("/file/:job_id", spaIndexHandler)
+	e.GET("/files/folders/:folder_id", legacyFilesPageRedirectHandler)
+	e.GET("/trash", func(c echo.Context) error { return c.Redirect(http.StatusSeeOther, "/files/trash") })
+	e.GET("/tags", func(c echo.Context) error { return c.Redirect(http.StatusSeeOther, "/files/home") })
+	e.GET("/api/me", apiMeHandler)
+	e.GET("/api/events", apiEventsStreamHandler)
+	e.POST("/api/auth/signup", signupJSONHandler)
+	e.POST("/api/auth/login", loginJSONHandler)
+	e.POST("/api/auth/logout", logoutJSONHandler)
+	e.GET("/api/files", apiFilesHandler)
+	e.GET("/api/jobs/:job_id", apiJobDetailHandler)
+	e.GET("/api/tags", apiTagsHandler)
+	e.POST("/api/tags", apiCreateTagHandler)
+	e.DELETE("/api/tags/:name", apiDeleteTagHandler)
+	e.PUT("/api/jobs/:job_id/tags", apiUpdateJobTagsHandler)
+	e.GET("/api/trash", apiTrashListHandler)
+	e.POST("/api/trash/clear", apiClearTrashHandler)
+	e.POST("/api/trash/jobs/delete", apiDeleteTrashJobsHandler)
+	e.POST("/api/jobs/:job_id/restore", apiRestoreJobHandler)
+	e.POST("/api/folders/:folder_id/restore", apiRestoreFolderHandler)
+	e.POST("/api/move", apiBatchMoveHandler)
+	e.GET("/api/folders/:folder_id/download", apiDownloadFolderHandler)
+	e.POST("/api/upload", apiUploadJSONHandler)
+	e.POST("/api/folders", apiCreateFolderJSONHandler)
+	e.PATCH("/api/folders/:folder_id", apiRenameFolderJSONHandler)
+	e.DELETE("/api/folders/:folder_id", apiTrashFolderJSONHandler)
+	e.PATCH("/api/jobs/:job_id", apiRenameJobJSONHandler)
+	e.DELETE("/api/jobs/:job_id", apiTrashJobJSONHandler)
+	e.GET("/app", spaIndexHandler)
+	e.GET("/app/*", spaIndexHandler)
 
 	port, err := appPort()
 	if err != nil {

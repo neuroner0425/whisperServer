@@ -2,6 +2,7 @@ package httpx
 
 type JobView struct {
 	Filename        string
+	FileType        string
 	Status          string
 	UploadedAt      string
 	StartedAt       string
@@ -15,18 +16,21 @@ type JobView struct {
 }
 
 type JobRow struct {
-	ID            string
-	Filename      string
-	MediaDuration string
-	Status        string
-	IsRefined     bool
-	TagText       string
-	FolderID      string
-	IsTrashed     bool
-	UpdatedAt     string
-	DeletedAt     string
-	OwnerName     string
-	FolderName    string
+	ID              string
+	Filename        string
+	FileType        string
+	MediaDuration   string
+	Status          string
+	Phase           string
+	ProgressPercent int
+	IsRefined       bool
+	TagText         string
+	FolderID        string
+	IsTrashed       bool
+	UpdatedAt       string
+	DeletedAt       string
+	OwnerName       string
+	FolderName      string
 }
 
 type FolderRow struct {

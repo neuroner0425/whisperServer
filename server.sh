@@ -6,6 +6,8 @@ RUN_DIR="$ROOT_DIR/.run"
 PID_FILE="$RUN_DIR/server.pid"
 LOG_FILE="$RUN_DIR/server.log"
 BIN_FILE="$RUN_DIR/server-bin"
+FRONTEND_DIR="$ROOT_DIR/frontend"
+SPA_INDEX_FILE="$ROOT_DIR/static/app/index.html"
 CMD="${SERVER_CMD:-}"
 
 read_conf_value() {
@@ -40,6 +42,25 @@ APP_PORT="$(read_conf_value PORT)"
 APP_PORT="${APP_PORT:-8000}"
 
 mkdir -p "$RUN_DIR"
+
+build_frontend() {
+  if [[ ! -d "$FRONTEND_DIR" ]]; then
+    return 0
+  fi
+
+  if [[ ! -f "$FRONTEND_DIR/package.json" ]]; then
+    return 0
+  fi
+
+  echo "building frontend..."
+  (
+    cd "$FRONTEND_DIR"
+    if [[ ! -d node_modules ]]; then
+      npm install
+    fi
+    npm run build
+  )
+}
 
 is_running() {
   if [[ ! -f "$PID_FILE" ]]; then
@@ -85,6 +106,9 @@ start() {
     start_cmd="$CMD"
     use_shell=1
   else
+    if [[ "$reset_build" -eq 1 || ! -f "$SPA_INDEX_FILE" ]]; then
+      build_frontend
+    fi
     if [[ "$reset_build" -eq 1 || ! -x "$BIN_FILE" ]]; then
       (
         cd "$ROOT_DIR"

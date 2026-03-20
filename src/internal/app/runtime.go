@@ -17,6 +17,7 @@ type Runtime struct {
 var (
 	runtimeState = &Runtime{jobs: map[string]*model.Job{}}
 	appWorker    *worker.Worker
+	eventBroker  = newUserEventBroker()
 )
 
 func jobsSnapshot() map[string]*model.Job {
@@ -34,6 +35,9 @@ func addJob(id string, job *model.Job) {
 	defer runtimeState.jobsMu.Unlock()
 	runtimeState.jobs[id] = job
 	saveJobsLocked()
+	if job != nil {
+		eventBroker.Notify(job.OwnerID, "files.changed", map[string]any{"job_id": id})
+	}
 }
 
 func collectFolderSubtree(userID string, folderIDs []string, trashFolders bool) map[string]struct{} {
@@ -79,14 +83,16 @@ func markSubtreeJobsTrashed(userID string, subtree map[string]struct{}) {
 	deletedAt := time.Now().Format("2006-01-02 15:04:05")
 	runtimeState.jobsMu.Lock()
 	defer runtimeState.jobsMu.Unlock()
-	for _, job := range runtimeState.jobs {
+	for id, job := range runtimeState.jobs {
 		if job.OwnerID != userID {
 			continue
 		}
 		if _, ok := subtree[normalizeFolderID(job.FolderID)]; ok {
 			job.IsTrashed = true
 			job.DeletedAt = deletedAt
+			cancelJob(id)
 		}
 	}
 	saveJobsLocked()
+	eventBroker.Notify(userID, "files.changed", nil)
 }

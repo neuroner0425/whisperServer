@@ -13,9 +13,24 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var ErrUploadTooLarge = errors.New("upload too large")
+
+func DetectFileType(name string) string {
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), ".")
+	switch ext {
+	case "mp3", "wav", "m4a":
+		return "audio"
+	case "pdf":
+		return "pdf"
+	case "ppt", "pptx":
+		return "ppt"
+	default:
+		return "unknown"
+	}
+}
 
 func AllowedFile(name string, allowedExtensions map[string]struct{}) bool {
 	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), ".")
@@ -33,7 +48,7 @@ func SecureFilename(name string, secureRe *regexp.Regexp) string {
 	return base
 }
 
-func SaveUploadWithLimit(h *multipart.FileHeader, dst string, maxBytes int64, chunkSize int) (int64, error) {
+func SaveUploadWithLimit(h *multipart.FileHeader, dst string, maxBytes int64, chunkSize int, bytesPerSec int64) (int64, error) {
 	src, err := h.Open()
 	if err != nil {
 		return 0, err
@@ -48,6 +63,7 @@ func SaveUploadWithLimit(h *multipart.FileHeader, dst string, maxBytes int64, ch
 
 	buf := make([]byte, chunkSize)
 	var written int64
+	startedAt := time.Now()
 	for {
 		n, readErr := src.Read(buf)
 		if n > 0 {
@@ -57,6 +73,12 @@ func SaveUploadWithLimit(h *multipart.FileHeader, dst string, maxBytes int64, ch
 			}
 			if _, err := out.Write(buf[:n]); err != nil {
 				return written, err
+			}
+			if bytesPerSec > 0 {
+				expectedElapsed := time.Duration(float64(written) / float64(bytesPerSec) * float64(time.Second))
+				if sleepFor := time.Until(startedAt.Add(expectedElapsed)); sleepFor > 0 {
+					time.Sleep(sleepFor)
+				}
 			}
 		}
 		if readErr == io.EOF {
