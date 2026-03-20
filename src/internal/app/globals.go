@@ -23,12 +23,14 @@ var (
 	tmpFolder      = filepath.Join(projectRoot, ".run", "tmp")
 	templateDir    = filepath.Join(projectRoot, "templates")
 	staticDir      = filepath.Join(projectRoot, "static")
+	spaIndexPath   = filepath.Join(staticDir, "app", "index.html")
 	modelDir       = filepath.Join(projectRoot, "whisper", "models")
 	whisperCLI     = filepath.Join(projectRoot, "whisper", "bin", "whisper-cli")
 
-	allowedExtensions = map[string]struct{}{"mp3": {}, "mp4": {}, "wav": {}, "m4a": {}}
+	allowedExtensions = map[string]struct{}{"mp3": {}, "wav": {}, "m4a": {}}
 	chunkSize         = 4 * 1024 * 1024
 	maxUploadSizeMB   int
+	uploadRateLimitKB int
 	jobTimeoutSec     int
 	geminiModel       string
 	splitTaskQueues   bool

@@ -22,10 +22,11 @@ type UploadDeps struct {
 	ParseSelectedTags   func(echo.Context) []string
 	NormalizeFolderID   func(string) string
 	Truthy              func(string) bool
+	DetectFileType      func(string) string
 	AllowedFile         func(string) bool
 	SortedExts          func() []string
 	SecureFilename      func(string) string
-	SaveUploadWithLimit func(*multipart.FileHeader, string, int64) (int64, error)
+	SaveUploadWithLimit func(*multipart.FileHeader, string, int64, int64) (int64, error)
 	IsUploadTooLarge    func(error) bool
 	ConvertToWav        func(string, string) error
 	GetMediaDuration    func(string) *int
@@ -38,6 +39,7 @@ type UploadDeps struct {
 	UploadBytesAdd      func(float64)
 	TmpFolder           string
 	MaxUploadSizeMB     int
+	UploadRateLimitKBPS int
 	StatusPending       string
 }
 
@@ -78,8 +80,11 @@ func UploadPostHandler(c echo.Context, deps UploadDeps) error {
 	if !deps.AllowedFile(fileHeader.Filename) {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("허용되지 않는 파일 형식입니다. 허용: %s", strings.Join(deps.SortedExts(), ", ")))
 	}
-	if ct := fileHeader.Header.Get("Content-Type"); ct != "" && !strings.HasPrefix(ct, "audio/") && !strings.HasPrefix(ct, "video/") {
-		return echo.NewHTTPError(http.StatusBadRequest, "오디오/비디오 파일만 업로드할 수 있습니다.")
+	if ct := fileHeader.Header.Get("Content-Type"); ct != "" && !strings.HasPrefix(ct, "audio/") {
+		return echo.NewHTTPError(http.StatusBadRequest, "현재는 오디오 파일만 업로드할 수 있습니다.")
+	}
+	if deps.DetectFileType(fileHeader.Filename) != "audio" {
+		return echo.NewHTTPError(http.StatusBadRequest, "현재는 오디오 파일만 업로드할 수 있습니다.")
 	}
 
 	inputName := c.FormValue("display_name")
@@ -123,7 +128,7 @@ func UploadPostHandler(c echo.Context, deps UploadDeps) error {
 	tempPath := filepath.Join(deps.TmpFolder, fmt.Sprintf("%s_temp%s", jobID, ext))
 	wavPath := filepath.Join(deps.TmpFolder, fmt.Sprintf("%s_%s.wav", jobID, safeName))
 
-	totalBytes, err := deps.SaveUploadWithLimit(fileHeader, tempPath, int64(deps.MaxUploadSizeMB)*1024*1024)
+	totalBytes, err := deps.SaveUploadWithLimit(fileHeader, tempPath, int64(deps.MaxUploadSizeMB)*1024*1024, int64(deps.UploadRateLimitKBPS)*1024)
 	if err != nil {
 		_ = os.Remove(tempPath)
 		if deps.IsUploadTooLarge(err) {
@@ -154,6 +159,7 @@ func UploadPostHandler(c echo.Context, deps UploadDeps) error {
 	job := &model.Job{
 		Status:               deps.StatusPending,
 		Filename:             inputName,
+		FileType:             deps.DetectFileType(originalFilename),
 		UploadedAt:           now.Format("2006-01-02 15:04:05"),
 		UploadedTS:           float64(now.Unix()),
 		MediaDuration:        deps.FormatSecondsPtr(duration),

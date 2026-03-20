@@ -15,6 +15,14 @@ type TrashDeps struct {
 	CurrentUser            func(echo.Context) (*User, error)
 	GetJob                 func(string) *model.Job
 	SetJobFields           func(string, map[string]any)
+	CancelJob              func(string)
+	EnqueueTranscribe      func(string)
+	EnqueueRefine          func(string)
+	HasJobBlob             func(string, string) bool
+	StatusPending          string
+	StatusRunning          string
+	StatusRefiningPending  string
+	StatusRefining         string
 	IsJobTrashed           func(*model.Job) bool
 	NormalizeFolderID      func(string) string
 	CollectFolderSubtree   func(string, []string, bool) map[string]struct{}
@@ -55,6 +63,7 @@ func RestoreJobHandler(c echo.Context, deps TrashDeps) error {
 		}
 	}
 	deps.SetJobFields(jobID, updates)
+	requeueRestoredJob(jobID, deps)
 	restoreFolderID := folderID
 	if nextFolderID, ok := updates["folder_id"].(string); ok {
 		restoreFolderID = nextFolderID
@@ -63,6 +72,44 @@ func RestoreJobHandler(c echo.Context, deps TrashDeps) error {
 		deps.Errf("job.restoreTouchFolder", err, "owner_id=%s job_id=%s folder_id=%s", u.ID, jobID, restoreFolderID)
 	}
 	return c.Redirect(http.StatusSeeOther, routes.Trash)
+}
+
+func requeueRestoredJob(jobID string, deps TrashDeps) {
+	job := deps.GetJob(jobID)
+	if job == nil || deps.HasJobBlob == nil {
+		return
+	}
+	if deps.HasJobBlob(jobID, store.BlobKindWav) {
+		deps.SetJobFields(jobID, map[string]any{
+			"status":           deps.StatusPending,
+			"phase":            "",
+			"progress_percent": 0,
+			"progress_label":   "",
+			"started_at":       "",
+			"started_ts":       0,
+			"completed_at":     "",
+			"completed_ts":     0,
+			"duration":         "",
+			"status_detail":    "",
+		})
+		if deps.EnqueueTranscribe != nil {
+			deps.EnqueueTranscribe(jobID)
+		}
+		return
+	}
+	if deps.HasJobBlob(jobID, store.BlobKindTranscript) && !deps.HasJobBlob(jobID, store.BlobKindRefined) && job.RefineEnabled {
+		deps.SetJobFields(jobID, map[string]any{
+			"status":         deps.StatusRefiningPending,
+			"progress_label": "",
+			"completed_at":   "",
+			"completed_ts":   0,
+			"duration":       "",
+			"status_detail":  "",
+		})
+		if deps.EnqueueRefine != nil {
+			deps.EnqueueRefine(jobID)
+		}
+	}
 }
 
 func TrashJobHandler(c echo.Context, deps TrashDeps) error {
@@ -75,6 +122,7 @@ func TrashJobHandler(c echo.Context, deps TrashDeps) error {
 	if job == nil || job.OwnerID != u.ID {
 		return c.Redirect(http.StatusSeeOther, routes.FilesHome)
 	}
+	deps.CancelJob(jobID)
 	deps.SetJobFields(jobID, map[string]any{"is_trashed": true, "deleted_at": time.Now().Format("2006-01-02 15:04:05")})
 	if err := store.TouchFolderAndAncestors(u.ID, job.FolderID); err != nil {
 		deps.Errf("job.trashTouchFolder", err, "owner_id=%s job_id=%s folder_id=%s", u.ID, jobID, job.FolderID)

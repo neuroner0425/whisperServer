@@ -188,6 +188,11 @@ func initRuntimeConfig() error {
 		return fmt.Errorf("MAX_UPLOAD_SIZE_MB must be > 0 (source: %s)", configPath)
 	}
 
+	uploadRateLimitKB = confInt("UPLOAD_RATE_LIMIT_KBPS")
+	if uploadRateLimitKB < 0 {
+		return fmt.Errorf("UPLOAD_RATE_LIMIT_KBPS must be >= 0 (source: %s)", configPath)
+	}
+
 	jobTimeoutSec = confInt("JOB_TIMEOUT_SEC")
 	if jobTimeoutSec <= 0 {
 		return fmt.Errorf("JOB_TIMEOUT_SEC must be > 0 (source: %s)", configPath)

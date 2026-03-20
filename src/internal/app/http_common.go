@@ -1,6 +1,8 @@
 package app
 
 import (
+	"net/http"
+
 	"github.com/labstack/echo/v4"
 	httpx "whisperserver/src/internal/http"
 	"whisperserver/src/internal/model"
@@ -12,17 +14,68 @@ func disableCache(c echo.Context) {
 }
 
 func rootRedirectHandler(c echo.Context) error {
-	return httpx.RootRedirectHandler(func(c echo.Context) (*httpx.User, error) {
-		return currentUser(c)
-	})(c)
+	if _, err := currentUser(c); err == nil {
+		return c.Redirect(http.StatusSeeOther, "/files/home")
+	}
+	return c.Redirect(http.StatusSeeOther, "/auth/login")
+}
+
+func spaLoginPageHandler(c echo.Context) error {
+	return c.Redirect(http.StatusSeeOther, "/auth/login")
+}
+
+func spaSignupPageHandler(c echo.Context) error {
+	return c.Redirect(http.StatusSeeOther, "/auth/join")
 }
 
 func redirectFilesToHomeHandler(c echo.Context) error {
-	return httpx.RedirectFilesToHomeHandler(c)
+	return c.Redirect(http.StatusMovedPermanently, "/files/home")
+}
+
+func spaFilesPageHandler(c echo.Context) error {
+	return spaIndexHandler(c)
+}
+
+func legacyFilesPageRedirectHandler(c echo.Context) error {
+	target := "/files/home"
+	switch c.Path() {
+	case "/files/root":
+		target = "/files/root"
+	case "/files/home":
+		target = "/files/home"
+	default:
+		if folderID := c.Param("folder_id"); folderID != "" {
+			target = "/files/folder/" + folderID
+		}
+	}
+	if raw := c.QueryString(); raw != "" {
+		target += "?" + raw
+	}
+	return c.Redirect(http.StatusSeeOther, target)
 }
 
 func redirectJobsToRootHandler(c echo.Context) error {
-	return httpx.RedirectJobsToRootHandler(c)
+	return c.Redirect(http.StatusMovedPermanently, "/files/home")
+}
+
+func spaTagsPageHandler(c echo.Context) error {
+	return c.Redirect(http.StatusSeeOther, "/files/home")
+}
+
+func spaTrashPageHandler(c echo.Context) error {
+	return spaIndexHandler(c)
+}
+
+func spaUploadPageHandler(c echo.Context) error {
+	return c.Redirect(http.StatusSeeOther, "/files/root")
+}
+
+func spaJobPageHandler(c echo.Context) error {
+	target := "/file/" + c.Param("job_id")
+	if raw := c.QueryString(); raw != "" {
+		target += "?" + raw
+	}
+	return c.Redirect(http.StatusSeeOther, target)
 }
 
 func safeReturnPath(raw string) string {

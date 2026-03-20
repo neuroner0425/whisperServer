@@ -70,6 +70,8 @@ type Worker struct {
 	transcribeQueue chan task
 	refineQueue     chan task
 	once            sync.Once
+	cancelMu        sync.Mutex
+	cancelMap       map[string]context.CancelFunc
 }
 
 func New(cfg Config, deps Deps) *Worker {
@@ -79,6 +81,7 @@ func New(cfg Config, deps Deps) *Worker {
 		taskQueue:       make(chan task, 256),
 		transcribeQueue: make(chan task, 256),
 		refineQueue:     make(chan task, 256),
+		cancelMap:       map[string]context.CancelFunc{},
 	}
 }
 
@@ -144,6 +147,25 @@ func (w *Worker) RequeuePending(jobs map[string]*model.Job) {
 	}
 }
 
+func (w *Worker) Cancel(jobID string) {
+	w.cancelMu.Lock()
+	cancel := w.cancelMap[jobID]
+	w.cancelMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (w *Worker) setCancel(jobID string, cancel context.CancelFunc) {
+	w.cancelMu.Lock()
+	defer w.cancelMu.Unlock()
+	if cancel == nil {
+		delete(w.cancelMap, jobID)
+		return
+	}
+	w.cancelMap[jobID] = cancel
+}
+
 func (w *Worker) setQueueLen() {
 	if w.deps.SetQueueLength == nil {
 		return
@@ -190,7 +212,7 @@ func (w *Worker) refineWorkerLoop() {
 
 func (w *Worker) processTask(t task, splitMode bool) {
 	job := w.deps.GetJob(t.jobID)
-	if job == nil {
+	if job == nil || job.IsTrashed {
 		return
 	}
 
@@ -222,6 +244,10 @@ func (w *Worker) processTask(t task, splitMode bool) {
 }
 
 func (w *Worker) finalizeRefine(jobID string) {
+	job := w.deps.GetJob(jobID)
+	if job == nil || job.IsTrashed {
+		return
+	}
 	b, err := store.LoadJobBlob(jobID, store.BlobKindTranscript)
 	if err != nil {
 		w.deps.Errf("worker.loadTranscriptBlob", err, "job_id=%s", jobID)
@@ -231,6 +257,9 @@ func (w *Worker) finalizeRefine(jobID string) {
 	if err := w.taskRefining(jobID, string(b)); err != nil {
 		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
 		w.deps.Errf("worker.refine", err, "job_id=%s", jobID)
+		return
+	}
+	if updated := w.deps.GetJob(jobID); updated == nil || updated.IsTrashed {
 		return
 	}
 	w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusCompleted, "result": "db://transcript"})
@@ -246,6 +275,13 @@ func (w *Worker) taskTranscribe(jobID string) error {
 		"started_ts":   float64(started.Unix()),
 		"preview_text": "",
 	})
+	store.DeleteJobBlob(jobID, store.BlobKindPreview)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(w.cfg.JobTimeoutSec)*time.Second)
+	w.setCancel(jobID, cancel)
+	defer func() {
+		cancel()
+		w.setCancel(jobID, nil)
+	}()
 
 	job := w.deps.GetJob(jobID)
 	totalSec := job.MediaDurationSeconds
@@ -256,7 +292,7 @@ func (w *Worker) taskTranscribe(jobID string) error {
 		w.deps.IncJobsTotal("failure")
 		return err
 	}
-	timelineText, err := w.runWhisperFromBlob(jobID, wavBytes, totalSec)
+	timelineText, err := w.runWhisperFromBlob(ctx, jobID, wavBytes, totalSec)
 	if err != nil {
 		statusLabel := "failure"
 		fields := map[string]any{"status": w.cfg.StatusFailed}
@@ -268,6 +304,9 @@ func (w *Worker) taskTranscribe(jobID string) error {
 		w.deps.IncJobsTotal(statusLabel)
 		w.deps.Errf("transcribe.runWhisper", err, "job_id=%s", jobID)
 		return err
+	}
+	if updated := w.deps.GetJob(jobID); updated == nil || updated.IsTrashed {
+		return nil
 	}
 
 	if err := store.SaveJobBlob(jobID, store.BlobKindTranscript, []byte(timelineText)); err != nil {
@@ -301,6 +340,9 @@ func (w *Worker) taskTranscribe(jobID string) error {
 
 func (w *Worker) taskRefining(jobID, timelineText string) error {
 	w.deps.Logf("[REFINE] start job_id=%s", jobID)
+	if updated := w.deps.GetJob(jobID); updated == nil || updated.IsTrashed {
+		return nil
+	}
 	w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusRefining})
 	if !w.deps.HasGeminiConfigured() {
 		w.deps.Logf("[REFINE] skipped job_id=%s reason=no gemini key", jobID)
@@ -320,6 +362,9 @@ func (w *Worker) taskRefining(jobID, timelineText string) error {
 	if err := store.SaveJobBlob(jobID, store.BlobKindRefined, []byte(refined)); err != nil {
 		w.deps.Errf("refine.saveRefinedBlob", err, "job_id=%s", jobID)
 		return err
+	}
+	if updated := w.deps.GetJob(jobID); updated == nil || updated.IsTrashed {
+		return nil
 	}
 	w.deps.SetJobFields(jobID, map[string]any{"result_refined": "db://refined"})
 	w.deps.Logf("[REFINE] done job_id=%s output=db://refined", jobID)
@@ -357,7 +402,7 @@ func (w *Worker) buildRefineDescription(job *model.Job) string {
 	return base + "\n\n" + strings.Join(tagLines, "\n")
 }
 
-func (w *Worker) runWhisperFromBlob(jobID string, wavBytes []byte, totalSec *int) (string, error) {
+func (w *Worker) runWhisperFromBlob(ctx context.Context, jobID string, wavBytes []byte, totalSec *int) (string, error) {
 	tmpDir, err := os.MkdirTemp("", "whisper-job-*")
 	if err != nil {
 		return "", err
@@ -368,17 +413,14 @@ func (w *Worker) runWhisperFromBlob(jobID string, wavBytes []byte, totalSec *int
 	if err := os.WriteFile(wavPath, wavBytes, 0o644); err != nil {
 		return "", err
 	}
-	return w.runWhisper(jobID, wavPath, totalSec)
+	return w.runWhisper(ctx, jobID, wavPath, totalSec)
 }
 
-func (w *Worker) runWhisper(jobID, wavPath string, totalSec *int) (string, error) {
+func (w *Worker) runWhisper(ctx context.Context, jobID, wavPath string, totalSec *int) (string, error) {
 	w.deps.Logf("[WHISPER] start job_id=%s wav=%s total_sec=%v", jobID, wavPath, totalSec)
 	outputPath := wavPath + ".txt"
 	modelBin := filepath.Join(w.cfg.ModelDir, "ggml-large-v3.bin")
 	vadModel := filepath.Join(w.cfg.ModelDir, "ggml-silero-v6.2.0.bin")
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(w.cfg.JobTimeoutSec)*time.Second)
-	defer cancel()
 
 	cmd := exec.CommandContext(ctx, w.cfg.WhisperCLI,
 		"-m", modelBin,
