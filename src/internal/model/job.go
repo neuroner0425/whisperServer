@@ -1,6 +1,7 @@
 package model
 
 type Job struct {
+	StatusCode           int      `json:"status_code,omitempty"`
 	Status               string   `json:"status,omitempty"`
 	Filename             string   `json:"filename,omitempty"`
 	FileType             string   `json:"file_type,omitempty"`
@@ -17,6 +18,7 @@ type Job struct {
 	FolderID             string   `json:"folder_id,omitempty"`
 	IsTrashed            bool     `json:"is_trashed,omitempty"`
 	DeletedAt            string   `json:"deleted_at,omitempty"`
+	DeletedTS            float64  `json:"deleted_ts,omitempty"`
 	StartedAt            string   `json:"started_at,omitempty"`
 	StartedTS            float64  `json:"started_ts,omitempty"`
 	CompletedAt          string   `json:"completed_at,omitempty"`

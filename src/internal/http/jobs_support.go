@@ -14,6 +14,7 @@ import (
 type JobSupportDeps struct {
 	JobsSnapshot      func() map[string]*model.Job
 	UploadedTS        func(string) float64
+	BlobUsageByOwner  func(string) (map[string]int64, error)
 	NormalizeFolderID func(string) string
 	IsJobTrashed      func(*model.Job) bool
 	Fallback          func(string, string) string
@@ -32,6 +33,7 @@ func BuildJobRowsForUser(userID, q, tag, folderID string, trashed bool, deps Job
 	}
 
 	snapshot := deps.JobsSnapshot()
+	sizeMap, _ := deps.BlobUsageByOwner(userID)
 	rows := make([]JobRow, 0, len(snapshot))
 	for id, job := range snapshot {
 		if job.OwnerID != userID || deps.IsJobTrashed(job) != trashed {
@@ -62,6 +64,7 @@ func BuildJobRowsForUser(userID, q, tag, folderID string, trashed bool, deps Job
 			Filename:        filename,
 			FileType:        job.FileType,
 			MediaDuration:   deps.Fallback(job.MediaDuration, "-"),
+			SizeBytes:       sizeMap[id],
 			Status:          job.Status,
 			Phase:           job.Phase,
 			ProgressPercent: job.ProgressPercent,
@@ -108,6 +111,7 @@ func BuildRecentJobRowsForUser(userID, q, tag string, deps JobSupportDeps) []Job
 	}
 
 	snapshot := deps.JobsSnapshot()
+	sizeMap, _ := deps.BlobUsageByOwner(userID)
 	rows := make([]JobRow, 0, len(snapshot))
 	for id, job := range snapshot {
 		if job.OwnerID != userID || deps.IsJobTrashed(job) {
@@ -135,6 +139,7 @@ func BuildRecentJobRowsForUser(userID, q, tag string, deps JobSupportDeps) []Job
 			Filename:        filename,
 			FileType:        job.FileType,
 			MediaDuration:   deps.Fallback(job.MediaDuration, "-"),
+			SizeBytes:       sizeMap[id],
 			Status:          job.Status,
 			Phase:           job.Phase,
 			ProgressPercent: job.ProgressPercent,
@@ -227,11 +232,12 @@ func JobsSnapshotVersion(jobItems []JobRow, folderItems []FolderRow, page, pageS
 	for _, j := range jobItems {
 		fmt.Fprintf(
 			h,
-			"J|%s|%s|%s|%s|%s|%s|%d|%t|%s|%s|%t|%s|%s;",
+			"J|%s|%s|%s|%s|%d|%s|%s|%d|%t|%s|%s|%t|%s|%s;",
 			j.ID,
 			j.Filename,
 			j.FileType,
 			j.MediaDuration,
+			j.SizeBytes,
 			j.Status,
 			j.Phase,
 			j.ProgressPercent,

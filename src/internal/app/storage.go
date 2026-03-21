@@ -3,6 +3,7 @@ package app
 import (
 	"regexp"
 	"strings"
+	"time"
 
 	"whisperserver/src/internal/model"
 	"whisperserver/src/internal/store"
@@ -83,6 +84,7 @@ func deleteJobs(ids []string) {
 		if job := runtimeState.jobs[id]; job != nil && job.OwnerID != "" {
 			owners[job.OwnerID] = struct{}{}
 		}
+		removeTempWav(id)
 		store.DeleteJobBlobs(id)
 		delete(runtimeState.jobs, id)
 	}
@@ -97,6 +99,9 @@ func loadJobs() {
 	if err != nil {
 		procErrf("storage.loadJobs", err, "load from db failed")
 		return
+	}
+	for _, job := range loaded {
+		hydrateJobDerivedFields(job)
 	}
 	runtimeState.jobsMu.Lock()
 	runtimeState.jobs = loaded
@@ -133,6 +138,9 @@ func applyJobFields(job *model.Job, fields map[string]any) {
 		switch k {
 		case "status":
 			job.Status = intutil.AsString(v)
+			job.StatusCode = model.JobStatusCode(job.Status)
+		case "status_code":
+			job.StatusCode = intutil.AsInt(v)
 		case "filename":
 			job.Filename = intutil.AsString(v)
 		case "file_type":
@@ -140,13 +148,13 @@ func applyJobFields(job *model.Job, fields map[string]any) {
 		case "result":
 			job.Result = intutil.AsString(v)
 		case "uploaded_at":
-			job.UploadedAt = intutil.AsString(v)
+			job.UploadedTS = parseJobTimestamp(intutil.AsString(v))
 		case "uploaded_ts":
 			job.UploadedTS = intutil.AsFloat(v)
 		case "duration":
-			job.Duration = intutil.AsString(v)
+			// duration is derived from started_ts/completed_ts.
 		case "media_duration":
-			job.MediaDuration = intutil.AsString(v)
+			// media duration is derived from media_duration_seconds.
 		case "media_duration_seconds":
 			job.MediaDurationSeconds = intutil.AsIntPtr(v)
 		case "description":
@@ -162,13 +170,15 @@ func applyJobFields(job *model.Job, fields map[string]any) {
 		case "is_trashed":
 			job.IsTrashed = intutil.AsBool(v)
 		case "deleted_at":
-			job.DeletedAt = intutil.AsString(v)
+			job.DeletedTS = parseJobTimestamp(intutil.AsString(v))
+		case "deleted_ts":
+			job.DeletedTS = intutil.AsFloat(v)
 		case "started_at":
-			job.StartedAt = intutil.AsString(v)
+			job.StartedTS = parseJobTimestamp(intutil.AsString(v))
 		case "started_ts":
 			job.StartedTS = intutil.AsFloat(v)
 		case "completed_at":
-			job.CompletedAt = intutil.AsString(v)
+			job.CompletedTS = parseJobTimestamp(intutil.AsString(v))
 		case "completed_ts":
 			job.CompletedTS = intutil.AsFloat(v)
 		case "phase":
@@ -176,7 +186,7 @@ func applyJobFields(job *model.Job, fields map[string]any) {
 		case "progress_percent":
 			job.ProgressPercent = intutil.AsInt(v)
 		case "progress_label":
-			job.ProgressLabel = intutil.AsString(v)
+			// progress label is derived from phase/status.
 		case "preview_text":
 			job.PreviewText = intutil.AsString(v)
 		case "result_refined":
@@ -185,6 +195,7 @@ func applyJobFields(job *model.Job, fields map[string]any) {
 			job.StatusDetail = intutil.AsString(v)
 		}
 	}
+	hydrateJobDerivedFields(job)
 }
 
 func removeTagFromOwnerJobs(ownerID, tagName string) {
@@ -258,6 +269,88 @@ func uploadedTS(id string) float64 {
 		return 0
 	}
 	return job.UploadedTS
+}
+
+func hydrateJobDerivedFields(job *model.Job) {
+	if job == nil {
+		return
+	}
+	if job.StatusCode == 0 {
+		job.StatusCode = model.JobStatusCode(job.Status)
+	}
+	job.Status = model.JobStatusName(job.StatusCode)
+	job.UploadedAt = formatJobTimestamp(job.UploadedTS)
+	job.DeletedAt = formatJobTimestamp(job.DeletedTS)
+	job.StartedAt = formatJobTimestamp(job.StartedTS)
+	job.CompletedAt = formatJobTimestamp(job.CompletedTS)
+	job.MediaDuration = formatDurationSeconds(job.MediaDurationSeconds)
+	job.Duration = deriveJobDuration(job.StartedTS, job.CompletedTS)
+	if strings.TrimSpace(job.Phase) == "" {
+		job.Phase = deriveJobPhase(job.StatusCode)
+	}
+	job.ProgressLabel = deriveJobProgressLabel(job)
+}
+
+func parseJobTimestamp(value string) float64 {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if ts, err := time.Parse("2006-01-02 15:04:05", value); err == nil {
+		return float64(ts.Unix())
+	}
+	if ts, err := time.Parse(time.RFC3339, value); err == nil {
+		return float64(ts.Unix())
+	}
+	return 0
+}
+
+func formatJobTimestamp(ts float64) string {
+	if ts <= 0 {
+		return ""
+	}
+	return time.Unix(int64(ts), 0).Format("2006-01-02 15:04:05")
+}
+
+func formatDurationSeconds(sec *int) string {
+	if sec == nil {
+		return ""
+	}
+	return intutil.FormatSeconds(*sec)
+}
+
+func deriveJobDuration(startedTS, completedTS float64) string {
+	if startedTS <= 0 || completedTS <= 0 || completedTS < startedTS {
+		return ""
+	}
+	return intutil.FormatSeconds(int(completedTS - startedTS))
+}
+
+func deriveJobProgressLabel(job *model.Job) string {
+	if job == nil {
+		return ""
+	}
+	if strings.TrimSpace(job.Phase) != "" {
+		return job.Phase
+	}
+	return job.Status
+}
+
+func deriveJobPhase(statusCode int) string {
+	switch statusCode {
+	case model.JobStatusRunningCode:
+		return "전사 중"
+	case model.JobStatusRefiningPendingCode:
+		return "정제 대기 중"
+	case model.JobStatusRefiningCode:
+		return "정제 중"
+	case model.JobStatusCompletedCode:
+		return "완료"
+	case model.JobStatusFailedCode:
+		return "실패"
+	default:
+		return "대기 중"
+	}
 }
 
 func toJobView(job *model.Job) JobView {

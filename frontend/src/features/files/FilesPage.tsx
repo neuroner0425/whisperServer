@@ -4,132 +4,53 @@ import type { ChangeEvent, DragEvent as ReactDragEvent, FormEvent, MouseEvent as
 
 import { batchDownloadJobs, createFolder, downloadFolder, fetchFiles, moveEntries, renameFolder, renameJob, trashFolder, trashJob, uploadFileWithProgress } from './api'
 import type { FilesResponse, FolderNode, JobItem } from './types'
-
-type FilesPageProps = {
-  viewMode: 'home' | 'explore' | 'search'
-}
-
-type MoveState =
-  | { type: 'file'; id: string; name: string }
-  | { type: 'folder'; id: string; name: string }
-
-type UploadState = {
-  file: File
-  displayName: string
-  folderId: string
-  description: string
-  refineEnabled: boolean
-}
-
-type TypeFilter = 'all' | 'folder' | 'document'
-type DateFilter = 'all' | 'past_hour' | 'today' | 'past_7_days' | 'past_30_days' | 'this_year' | 'last_year'
-type SortKey = 'name' | 'updated' | 'kind' | 'location'
-type SortDirection = 'asc' | 'desc'
-
-type MenuState =
-  | {
-      kind: 'file'
-      item: JobItem
-      x: number
-      y: number
-    }
-  | {
-      kind: 'folder'
-      item: FolderNode
-      x: number
-      y: number
-    }
-  | {
-      kind: 'surface'
-      x: number
-      y: number
-    }
-
-type VisibleEntry =
-  | { key: string; kind: 'folder'; item: FolderNode }
-  | { key: string; kind: 'file'; item: JobItem }
-
-type FilterMenu = 'type' | 'date' | null
-type SelectionBox = {
-  startX: number
-  startY: number
-  currentX: number
-  currentY: number
-}
-
-type DragState = {
-  jobIds: string[]
-  folderIds: string[]
-}
-
-type PendingUpload = {
-  localId: string
-  jobId?: string
-  folderId: string
-  filename: string
-  stage: 'uploading' | 'queued' | 'processing' | 'failed'
-  progress: number
-}
-
-type FileListJob = JobItem & {
-  __pending?: boolean
-  __jobId?: string
-}
-
-type TextDialogState =
-  | {
-      kind: 'create-folder'
-      title: string
-      label: string
-      submitLabel: string
-      value: string
-      parentId: string
-      after: 'refresh' | 'move-browser'
-    }
-  | {
-      kind: 'rename-folder'
-      title: string
-      label: string
-      submitLabel: string
-      value: string
-      folderId: string
-    }
-  | {
-      kind: 'rename-file'
-      title: string
-      label: string
-      submitLabel: string
-      value: string
-      jobId: string
-    }
-
-type ConfirmDialogState =
-  | {
-      kind: 'delete-file'
-      title: string
-      body: string
-      item: JobItem
-    }
-  | {
-      kind: 'delete-folder'
-      title: string
-      body: string
-      item: FolderNode
-    }
-
-const TYPE_OPTIONS: Array<{ value: TypeFilter; label: string }> = [
-  { value: 'folder', label: '폴더' },
-  { value: 'document', label: '문서' },
-]
-
-const DATE_OPTIONS: Array<{ value: DateFilter; label: string }> = [
-  { value: 'past_hour', label: '지난 1시간' },
-  { value: 'today', label: '오늘' },
-  { value: 'past_7_days', label: '지난 7일' },
-  { value: 'past_30_days', label: '지난 30일' },
-  { value: 'this_year', label: '올해' },
-  { value: 'last_year', label: '지난 해' },
-]
+import {
+  DATE_OPTIONS,
+  TYPE_OPTIONS,
+  type ConfirmDialogState,
+  type DateFilter,
+  type DragState,
+  type FileListJob,
+  type FilesPageProps,
+  type FilterMenu,
+  type MenuState,
+  type MoveState,
+  type PendingUpload,
+  type SelectionBox,
+  type SortDirection,
+  type SortKey,
+  type UploadState,
+  type TextDialogState,
+  type TypeFilter,
+  type VisibleEntry,
+} from './filesPageTypes'
+import {
+  buildMovePath,
+  clamp,
+  clampMenu,
+  currentFolderName,
+  defaultSortState,
+  displayFilename,
+  entryKey,
+  fileTypeLabel,
+  formatBytes,
+  formatJobSub,
+  formatPendingStatus,
+  matchesFolderFilters,
+  matchesJobFilters,
+  normalizePage,
+  normalizeRect,
+  readDragPayload,
+  rectanglesIntersect,
+  renderSortMark,
+  selectionBoxStyle,
+  sortEntries,
+  sortJobs,
+  stripExtension,
+  typeFilterLabel,
+  updateQuery,
+} from './filesPageUtils'
+import { dateFilterLabel, extractDate } from './filesPageDateUtils'
 
 export function FilesPage({ viewMode }: FilesPageProps) {
   const navigate = useNavigate()
@@ -343,6 +264,7 @@ export function FilesPage({ viewMode }: FilesPageProps) {
           Filename: item.filename,
           FileType: 'audio',
           MediaDuration: '',
+          SizeBytes: 0,
           Status:
             item.stage === 'uploading'
               ? `업로드 중 ${item.progress}%`
@@ -1294,7 +1216,8 @@ export function FilesPage({ viewMode }: FilesPageProps) {
                   <button className="column-sort-button" onClick={() => toggleSort('updated')} type="button">
                     수정 날짜{renderSortMark(sortKey, sortDirection, 'updated')}
                   </button>
-                  <span>크기</span>
+                  <span>파일 길이</span>
+                  <span>파일 크기</span>
                   <span className="drive-table-menu-col" />
                 </div>
                 {sortedExploreEntries.map((entry) =>
@@ -1323,6 +1246,7 @@ export function FilesPage({ viewMode }: FilesPageProps) {
                       </div>
                       <span className="drive-table-meta">폴더</span>
                       <span className="drive-table-meta">{extractDate(entry.item.UpdatedAt)}</span>
+                      <span className="drive-table-meta">-</span>
                       <span className="drive-table-meta">-</span>
                       <button
                         aria-label={`${entry.item.Name} 작업 열기`}
@@ -1361,6 +1285,7 @@ export function FilesPage({ viewMode }: FilesPageProps) {
                           <span className="drive-table-meta">{fileTypeLabel(entry.item.FileType)}</span>
                           <span className="drive-table-meta">{extractDate(entry.item.UpdatedAt)}</span>
                           <span className="drive-table-meta">{entry.item.MediaDuration || '-'}</span>
+                          <span className="drive-table-meta">{formatBytes(entry.item.SizeBytes)}</span>
                           {!canOpen ? (
                             <span className="drive-table-menu-col" />
                           ) : (
@@ -1551,7 +1476,7 @@ export function FilesPage({ viewMode }: FilesPageProps) {
                 <label>파일명</label>
                 <input
                   className="dark-input"
-                  onChange={(event) => setUploadState((current) => (current ? { ...current, displayName: event.target.value } : current))}
+                  onChange={(event) => setUploadState((current: UploadState | null) => (current ? { ...current, displayName: event.target.value } : current))}
                   value={uploadState.displayName}
                 />
               </div>
@@ -1560,7 +1485,7 @@ export function FilesPage({ viewMode }: FilesPageProps) {
                 <select
                   className="dark-select"
                   onChange={(event) =>
-                    setUploadState((current) => (current ? { ...current, refineEnabled: event.target.value === 'true' } : current))
+                    setUploadState((current: UploadState | null) => (current ? { ...current, refineEnabled: event.target.value === 'true' } : current))
                   }
                   value={String(uploadState.refineEnabled)}
                 >
@@ -1572,7 +1497,7 @@ export function FilesPage({ viewMode }: FilesPageProps) {
                 <label>설명</label>
                 <textarea
                   className="dark-input"
-                  onChange={(event) => setUploadState((current) => (current ? { ...current, description: event.target.value } : current))}
+                  onChange={(event) => setUploadState((current: UploadState | null) => (current ? { ...current, description: event.target.value } : current))}
                   rows={4}
                   value={uploadState.description}
                 />
@@ -1642,324 +1567,4 @@ export function FilesPage({ viewMode }: FilesPageProps) {
       ) : null}
     </div>
   )
-}
-
-function currentFolderName(folderId: string, allFolders: FolderNode[]) {
-  if (!folderId) {
-    return '내 파일'
-  }
-  return allFolders.find((folder) => folder.ID === folderId)?.Name || '내 파일'
-}
-
-function stripExtension(filename: string) {
-  const dotIndex = filename.lastIndexOf('.')
-  return dotIndex > 0 ? filename.slice(0, dotIndex) : filename
-}
-
-function displayFilename(filename: string) {
-  const ext = filename.split('.').pop()?.toLowerCase() || ''
-  if (ext === 'mp3' || ext === 'wav' || ext === 'm4a') {
-    return stripExtension(filename)
-  }
-  return filename
-}
-
-function formatPendingStatus(stage: PendingUpload['stage'], progress: number) {
-  if (stage === 'queued') {
-    return '작업 대기 중'
-  }
-  if (stage === 'processing') {
-    return `전사 중 ${Math.max(0, progress)}%`
-  }
-  if (stage === 'failed') {
-    return '업로드 실패'
-  }
-  return `업로드 중 ${Math.max(0, progress)}%`
-}
-
-function formatJobSub(job: FileListJob) {
-  if (job.__pending) {
-    return job.Status
-  }
-  if (job.Status === '작업 대기 중') {
-    return '작업 대기 중'
-  }
-  if (job.Status === '작업 중') {
-    return `전사 중 ${Math.max(0, job.ProgressPercent ?? 0)}%`
-  }
-  if (job.Status === '정제 대기 중') {
-    return '정제 대기 중'
-  }
-  if (job.Status === '정제 중') {
-    return `정제 중 ${Math.max(0, job.ProgressPercent ?? 0)}%`
-  }
-  return job.MediaDuration || job.Status
-}
-
-function extractDate(value?: string) {
-  if (!value) {
-    return '-'
-  }
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return '-'
-  }
-
-  const now = new Date()
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-  const yesterdayStart = todayStart - 24 * 60 * 60 * 1000
-  const timestamp = date.getTime()
-  const time = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
-
-  if (timestamp >= todayStart) {
-    return `오늘 ${time}`
-  }
-  if (timestamp >= yesterdayStart) {
-    return `어제 ${time}`
-  }
-
-  return `${date.getFullYear()}년 ${String(date.getMonth() + 1).padStart(2, '0')}월 ${String(date.getDate()).padStart(2, '0')}일 ${time}`
-}
-
-function normalizePage(value: string | null): number {
-  const parsed = Number(value)
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : 1
-}
-
-function clampMenu(value: number) {
-  return Math.max(12, Math.min(value, window.innerWidth - 196))
-}
-
-function entryKey(kind: 'file' | 'folder', id: string) {
-  return `${kind}:${id}`
-}
-
-function updateQuery(
-  searchParams: URLSearchParams,
-  setSearchParams: (params: URLSearchParams) => void,
-  updates: Record<string, string>,
-) {
-  const next = new URLSearchParams(searchParams)
-  Object.entries(updates).forEach(([key, value]) => {
-    if (value) {
-      next.set(key, value)
-    } else {
-      next.delete(key)
-    }
-  })
-  setSearchParams(next)
-}
-
-function sortJobs(items: JobItem[], sortKey: SortKey | 'location', sortDirection: SortDirection) {
-  return [...items].sort((a, b) => compareJob(a, b, sortKey, sortDirection))
-}
-
-function compareDate(a?: string, b?: string) {
-  const aTime = Date.parse(a || '') || 0
-  const bTime = Date.parse(b || '') || 0
-  return bTime - aTime
-}
-
-function compareJob(a: JobItem, b: JobItem, sortKey: SortKey | 'location', sortDirection: SortDirection) {
-  let value = 0
-  if (sortKey === 'name') {
-    value = a.Filename.localeCompare(b.Filename, 'ko')
-  } else if (sortKey === 'location') {
-    value = (a.FolderName || '').localeCompare(b.FolderName || '', 'ko')
-  } else {
-    value = compareDate(a.UpdatedAt, b.UpdatedAt)
-  }
-  return sortDirection === 'asc' ? value : -value
-}
-
-function sortEntries(entries: VisibleEntry[], sortKey: SortKey, sortDirection: SortDirection) {
-  return [...entries].sort((a, b) => {
-    if (a.kind !== b.kind) {
-      return a.kind === 'folder' ? -1 : 1
-    }
-    let value = 0
-    if (sortKey === 'name') {
-      value = getEntryLabel(a).localeCompare(getEntryLabel(b), 'ko')
-    } else if (sortKey === 'kind') {
-      value = a.kind.localeCompare(b.kind, 'ko')
-    } else if (sortKey === 'location') {
-      value = getEntryLocation(a).localeCompare(getEntryLocation(b), 'ko')
-    } else {
-      value = compareDate(getEntryUpdatedAt(a), getEntryUpdatedAt(b))
-    }
-    return sortDirection === 'asc' ? value : -value
-  })
-}
-
-function getEntryLabel(entry: VisibleEntry) {
-  return entry.kind === 'folder' ? entry.item.Name : entry.item.Filename
-}
-
-function getEntryUpdatedAt(entry: VisibleEntry) {
-  return entry.kind === 'folder' ? entry.item.UpdatedAt : entry.item.UpdatedAt
-}
-
-function getEntryLocation(entry: VisibleEntry) {
-  if (entry.kind === 'folder') {
-    return entry.item.ParentID ? '하위 폴더' : '내 파일'
-  }
-  return entry.item.FolderName || '내 파일'
-}
-
-function matchesFolderFilters(folder: FolderNode, dateFilter: DateFilter) {
-  return matchesDateFilter(folder.UpdatedAt, dateFilter)
-}
-
-function matchesJobFilters(job: JobItem, dateFilter: DateFilter) {
-  return matchesDateFilter(job.UpdatedAt, dateFilter)
-}
-
-function matchesDateFilter(value: string | undefined, dateFilter: DateFilter) {
-  if (dateFilter === 'all') {
-    return true
-  }
-  const timestamp = Date.parse(value || '')
-  if (Number.isNaN(timestamp)) {
-    return false
-  }
-  const now = new Date()
-  const diff = now.getTime() - timestamp
-  switch (dateFilter) {
-    case 'past_hour':
-      return diff <= 60 * 60 * 1000
-    case 'today': {
-      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-      return timestamp >= startOfDay
-    }
-    case 'past_7_days':
-      return diff <= 7 * 24 * 60 * 60 * 1000
-    case 'past_30_days':
-      return diff <= 30 * 24 * 60 * 60 * 1000
-    case 'this_year':
-      return new Date(timestamp).getFullYear() === now.getFullYear()
-    case 'last_year':
-      return new Date(timestamp).getFullYear() === now.getFullYear() - 1
-    default:
-      return true
-  }
-}
-
-function renderSortMark(currentKey: SortKey, currentDirection: SortDirection, targetKey: SortKey) {
-  if (currentKey !== targetKey) {
-    return ''
-  }
-  return currentDirection === 'desc' ? ' ↓' : ' ↑'
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(value, max))
-}
-
-function normalizeRect(box: SelectionBox) {
-  return {
-    left: Math.min(box.startX, box.currentX),
-    top: Math.min(box.startY, box.currentY),
-    right: Math.max(box.startX, box.currentX),
-    bottom: Math.max(box.startY, box.currentY),
-  }
-}
-
-function rectanglesIntersect(selectionRect: { left: number; top: number; right: number; bottom: number }, rect: DOMRect) {
-  return !(
-    selectionRect.right < rect.left ||
-    selectionRect.left > rect.right ||
-    selectionRect.bottom < rect.top ||
-    selectionRect.top > rect.bottom
-  )
-}
-
-function selectionBoxStyle(box: SelectionBox) {
-  const rect = normalizeRect(box)
-  return {
-    left: `${rect.left}px`,
-    top: `${rect.top}px`,
-    width: `${rect.right - rect.left}px`,
-    height: `${rect.bottom - rect.top}px`,
-  }
-}
-
-function readDragPayload(dataTransfer: DataTransfer): DragState | null {
-  const payload = dataTransfer.getData('application/x-whisper-entries')
-  if (!payload) {
-    return null
-  }
-  try {
-    const parsed = JSON.parse(payload) as Partial<DragState>
-    return {
-      jobIds: Array.isArray(parsed.jobIds) ? parsed.jobIds : [],
-      folderIds: Array.isArray(parsed.folderIds) ? parsed.folderIds : [],
-    }
-  } catch {
-    return null
-  }
-}
-
-function buildMovePath(allFolders: FolderNode[], folderID: string) {
-  const path: Array<{ id: string; label: string }> = [{ id: '', label: '내 파일' }]
-  if (!folderID) {
-    return path
-  }
-  const byId = new Map(allFolders.map((folder) => [folder.ID, folder]))
-  const stack: FolderNode[] = []
-  let current = byId.get(folderID)
-  while (current) {
-    stack.unshift(current)
-    current = current.ParentID ? byId.get(current.ParentID) : undefined
-  }
-  stack.forEach((folder) => {
-    path.push({ id: folder.ID, label: folder.Name })
-  })
-  return path
-}
-
-function typeFilterLabel(typeFilter: TypeFilter) {
-  if (typeFilter === 'folder') {
-    return '폴더'
-  }
-  if (typeFilter === 'document') {
-    return '문서'
-  }
-  return '유형'
-}
-
-function dateFilterLabel(dateFilter: DateFilter) {
-  switch (dateFilter) {
-    case 'past_hour':
-      return '지난 1시간'
-    case 'today':
-      return '오늘'
-    case 'past_7_days':
-      return '지난 7일'
-    case 'past_30_days':
-      return '지난 30일'
-    case 'this_year':
-      return '올해'
-    case 'last_year':
-      return '지난 해'
-    default:
-      return '수정 날짜'
-  }
-}
-
-function defaultSortState(viewMode: FilesPageProps['viewMode']) {
-  if (viewMode === 'home') {
-    return { key: 'updated' as const, direction: 'asc' as const }
-  }
-  if (viewMode === 'search') {
-    return { key: 'updated' as const, direction: 'desc' as const }
-  }
-  return { key: 'name' as const, direction: 'asc' as const }
-}
-
-function fileTypeLabel(fileType?: string) {
-  const normalized = (fileType || '').trim()
-  if (!normalized) {
-    return '파일'
-  }
-  return normalized.toUpperCase()
 }

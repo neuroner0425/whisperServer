@@ -1,52 +1,16 @@
 package httpx
 
 import (
-	"archive/zip"
-	"bytes"
 	"encoding/json"
-	"fmt"
 	"html"
-	htmpl "html/template"
 	"net/http"
-	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/labstack/echo/v4"
 	"whisperserver/src/internal/model"
 	"whisperserver/src/internal/routes"
 	"whisperserver/src/internal/store"
 )
-
-type JobsDeps struct {
-	CurrentUser         func(echo.Context) (*User, error)
-	CurrentUserName     func(echo.Context) string
-	RequireOwnedJob     func(echo.Context, string, bool) (*model.Job, *User, error)
-	DisableCache        func(echo.Context)
-	NormalizeSortParams func(string, string) (string, string)
-	NormalizeFolderID   func(string) string
-	ParsePositiveInt    func(string, int) int
-	PaginateRows        func([]JobRow, int, int) ([]JobRow, int, int)
-	BuildRecentJobRows  func(string, string, string) []JobRow
-	BuildJobRows        func(string, string, string, string, bool) []JobRow
-	BuildFolderRows     func(string, string, string) []FolderRow
-	RecentFolderRows    func(string) []FolderRow
-	SortFolderRows      func([]FolderRow, string, string)
-	SortJobRows         func([]JobRow, string, string)
-	JobsSnapshotVersion func([]JobRow, []FolderRow, int, int, int, int) string
-	SelectedTagMap      func([]string) map[string]bool
-	ToJobView           func(*model.Job) JobView
-	RenderResultText    func(string, bool, *int) htmpl.HTML
-	Fallback            func(string, string) string
-	SanitizePreviewText func(string) string
-	HasGeminiConfigured func() bool
-	SetJobFields        func(string, map[string]any)
-	EnqueueRefine       func(string)
-	GetJob              func(string) *model.Job
-	IsJobTrashed        func(*model.Job) bool
-	Logf                func(string, ...any)
-	Errf                func(string, error, string, ...any)
-}
 
 func JobsHandler(c echo.Context, deps JobsDeps) error {
 	deps.DisableCache(c)
@@ -243,7 +207,7 @@ func JobHandler(c echo.Context, deps JobsDeps) error {
 			return c.Render(http.StatusOK, "job_preview.html", map[string]any{
 				"Job":              deps.ToJobView(job),
 				"JobID":            jobID,
-				"OriginalTextHTML": htmpl.HTML(strings.ReplaceAll(esc, "\n", "<br>")),
+				"OriginalTextHTML": strings.ReplaceAll(esc, "\n", "<br>"),
 				"CurrentUserName":  deps.CurrentUserName(c),
 				"Tags":             tags,
 				"SelectedTagsMap":  tagMap,
@@ -295,111 +259,4 @@ func renderWaitingPage(c echo.Context, deps JobsDeps, job *model.Job, jobID stri
 		"SelectedTagsMap": tagMap,
 		"TagText":         tagText,
 	})
-}
-
-func DownloadHandler(c echo.Context, deps JobsDeps) error {
-	return downloadBlobHandler(c, deps, store.BlobKindTranscript, ".txt", "다운로드할 결과가 없습니다.")
-}
-
-func DownloadRefinedHandler(c echo.Context, deps JobsDeps) error {
-	return downloadBlobHandler(c, deps, store.BlobKindRefined, "_refined.txt", "정제본이 없습니다.")
-}
-
-func downloadBlobHandler(c echo.Context, deps JobsDeps, kind, suffix, notFoundMessage string) error {
-	jobID := c.Param("job_id")
-	job, _, err := deps.RequireOwnedJob(c, jobID, false)
-	if err != nil {
-		if _, ok := err.(*echo.HTTPError); ok {
-			return echo.NewHTTPError(http.StatusNotFound, notFoundMessage)
-		}
-		return err
-	}
-	if job.Status != "완료" {
-		return echo.NewHTTPError(http.StatusNotFound, notFoundMessage)
-	}
-	b, err := store.LoadJobBlob(jobID, kind)
-	if err != nil {
-		deps.Errf("download.loadBlob", err, "job_id=%s kind=%s", jobID, kind)
-		return echo.NewHTTPError(http.StatusNotFound, notFoundMessage)
-	}
-	base := strings.TrimSuffix(job.Filename, filepath.Ext(job.Filename))
-	c.Response().Header().Set(echo.HeaderContentDisposition, fmt.Sprintf(`attachment; filename="%s"`, base+suffix))
-	return c.Blob(http.StatusOK, "text/plain; charset=utf-8", b)
-}
-
-func BatchDownloadHandler(c echo.Context, deps JobsDeps) error {
-	u, err := deps.CurrentUser(c)
-	if err != nil {
-		return c.Redirect(http.StatusSeeOther, routes.Login)
-	}
-	if err := c.Request().ParseForm(); err != nil {
-		deps.Errf("batchDownload.parseForm", err, "request parse failed")
-		return c.Redirect(http.StatusSeeOther, routes.FilesHome)
-	}
-	ids := c.Request().PostForm["job_ids"]
-	if len(ids) == 0 {
-		deps.Logf("[BATCH_DOWNLOAD] skipped reason=no selection")
-		return c.Redirect(http.StatusSeeOther, routes.FilesHome)
-	}
-
-	buf := bytes.NewBuffer(nil)
-	zw := zip.NewWriter(buf)
-	added := 0
-	for _, id := range ids {
-		job := deps.GetJob(id)
-		if job == nil || job.Status != "완료" || job.OwnerID != u.ID || deps.IsJobTrashed(job) {
-			continue
-		}
-		blobKind := store.BlobKindTranscript
-		ext := ".txt"
-		if store.HasJobBlob(id, store.BlobKindRefined) {
-			blobKind = store.BlobKindRefined
-			ext = "_refined.txt"
-		}
-		b, err := store.LoadJobBlob(id, blobKind)
-		if err != nil {
-			continue
-		}
-		base := strings.TrimSuffix(job.Filename, filepath.Ext(job.Filename))
-		w, err := zw.Create(base + ext)
-		if err != nil {
-			continue
-		}
-		if _, err := w.Write(b); err != nil {
-			continue
-		}
-		added++
-	}
-	_ = zw.Close()
-
-	if added == 0 {
-		deps.Logf("[BATCH_DOWNLOAD] skipped reason=no downloadable results selected=%d", len(ids))
-		return c.Redirect(http.StatusSeeOther, routes.FilesHome)
-	}
-	deps.Logf("[BATCH_DOWNLOAD] success selected=%d added=%d", len(ids), added)
-	zipName := "whisper_results_" + time.Now().Format("20060102_150405") + ".zip"
-	c.Response().Header().Set(echo.HeaderContentDisposition, fmt.Sprintf(`attachment; filename="%s"`, zipName))
-	return c.Blob(http.StatusOK, "application/zip", buf.Bytes())
-}
-
-func RefineRetryHandler(c echo.Context, deps JobsDeps) error {
-	jobID := c.Param("job_id")
-	job, _, err := deps.RequireOwnedJob(c, jobID, false)
-	if err != nil {
-		return err
-	}
-	if job.Status != "완료" {
-		return echo.NewHTTPError(http.StatusBadRequest, "작업이 완료된 후에만 정제를 시도할 수 있습니다.")
-	}
-	if !deps.HasGeminiConfigured() {
-		return echo.NewHTTPError(http.StatusBadRequest, "정제 기능이 설정되어 있지 않습니다. (GEMINI_API_KEYS 필요)")
-	}
-	if !store.HasJobBlob(jobID, store.BlobKindTranscript) {
-		return echo.NewHTTPError(http.StatusNotFound, "원본 전사 결과를 찾지 못했습니다.")
-	}
-
-	deps.SetJobFields(jobID, map[string]any{"status": "정제 대기 중"})
-	deps.EnqueueRefine(jobID)
-	deps.Logf("[REFINE_RETRY] queued job_id=%s", jobID)
-	return c.Redirect(http.StatusSeeOther, routes.Job(jobID))
 }

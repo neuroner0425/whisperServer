@@ -2,6 +2,7 @@ package app
 
 import (
 	httpx "whisperserver/src/internal/http"
+	"whisperserver/src/internal/store"
 	intutil "whisperserver/src/internal/util"
 )
 
@@ -37,6 +38,7 @@ func jobSupportDeps() httpx.JobSupportDeps {
 	return httpx.JobSupportDeps{
 		JobsSnapshot:      jobsSnapshot,
 		UploadedTS:        uploadedTS,
+		BlobUsageByOwner:  store.JobBlobUsageMapByOwner,
 		NormalizeFolderID: normalizeFolderID,
 		IsJobTrashed:      isJobTrashed,
 		Fallback:          intutil.Fallback,

@@ -41,12 +41,14 @@ func Run() {
 	initAuthHandlers()
 	procLogf("[BOOT] application start")
 	loadJobs()
+	cleanupInactiveTempWavs()
 
 	prometheus.MustRegister(jobsTotal, jobsInProgress, jobDurationSec, uploadBytes, queueLength)
 	queueLength.Set(0)
 
 	appWorker = worker.New(worker.Config{
 		SplitTaskQueues:       splitTaskQueues,
+		TmpFolder:             tmpFolder,
 		ModelDir:              modelDir,
 		WhisperCLI:            whisperCLI,
 		JobTimeoutSec:         jobTimeoutSec,
@@ -129,6 +131,7 @@ func Run() {
 	e.GET("/auth/login", spaIndexHandler)
 	e.GET("/auth/join", spaIndexHandler)
 	e.GET("/files/trash", spaIndexHandler)
+	e.GET("/files/storage", spaIndexHandler)
 	e.GET("/files/search", spaIndexHandler)
 	e.GET("/files/folder/:folder_id", spaIndexHandler)
 	e.GET("/file/:job_id", spaIndexHandler)
@@ -141,6 +144,7 @@ func Run() {
 	e.POST("/api/auth/login", loginJSONHandler)
 	e.POST("/api/auth/logout", logoutJSONHandler)
 	e.GET("/api/files", apiFilesHandler)
+	e.GET("/api/storage", apiStorageJSONHandler)
 	e.GET("/api/jobs/:job_id", apiJobDetailHandler)
 	e.GET("/api/tags", apiTagsHandler)
 	e.POST("/api/tags", apiCreateTagHandler)

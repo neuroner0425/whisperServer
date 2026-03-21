@@ -15,6 +15,7 @@ export type JobItem = {
   Filename: string
   FileType?: string
   MediaDuration: string
+  SizeBytes: number
   Status: string
   Phase?: string
   ProgressPercent?: number

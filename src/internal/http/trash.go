@@ -18,6 +18,7 @@ type TrashDeps struct {
 	CancelJob              func(string)
 	EnqueueTranscribe      func(string)
 	EnqueueRefine          func(string)
+	TempWavExists          func(string) bool
 	HasJobBlob             func(string, string) bool
 	StatusPending          string
 	StatusRunning          string
@@ -79,7 +80,7 @@ func requeueRestoredJob(jobID string, deps TrashDeps) {
 	if job == nil || deps.HasJobBlob == nil {
 		return
 	}
-	if deps.HasJobBlob(jobID, store.BlobKindWav) {
+	if deps.TempWavExists != nil && deps.TempWavExists(jobID) {
 		deps.SetJobFields(jobID, map[string]any{
 			"status":           deps.StatusPending,
 			"phase":            "",
