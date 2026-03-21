@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"mime/multipart"
+	"os"
 
 	"github.com/labstack/echo/v4"
 	httpx "whisperserver/src/internal/http"
@@ -166,6 +167,7 @@ func trashDeps() httpx.TrashDeps {
 		CancelJob:              cancelJob,
 		EnqueueTranscribe:      enqueueTranscribe,
 		EnqueueRefine:          enqueueRefine,
+		TempWavExists:          func(jobID string) bool { _, err := os.Stat(tempWavPath(jobID)); return err == nil },
 		HasJobBlob:             store.HasJobBlob,
 		StatusPending:          statusPending,
 		StatusRunning:          statusRunning,

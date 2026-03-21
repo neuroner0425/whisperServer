@@ -1,6 +1,9 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,10 +36,51 @@ func jobsSnapshot() map[string]*model.Job {
 func addJob(id string, job *model.Job) {
 	runtimeState.jobsMu.Lock()
 	defer runtimeState.jobsMu.Unlock()
+	hydrateJobDerivedFields(job)
 	runtimeState.jobs[id] = job
 	saveJobsLocked()
 	if job != nil {
 		eventBroker.Notify(job.OwnerID, "files.changed", map[string]any{"job_id": id})
+	}
+}
+
+func tempWavPath(jobID string) string {
+	return filepath.Join(tmpFolder, jobID+".wav")
+}
+
+func removeTempWav(jobID string) {
+	if strings.TrimSpace(jobID) == "" {
+		return
+	}
+	_ = os.Remove(tempWavPath(jobID))
+}
+
+func cleanupInactiveTempWavs() {
+	runtimeState.jobsMu.RLock()
+	active := make(map[string]struct{}, len(runtimeState.jobs))
+	for id, job := range runtimeState.jobs {
+		if job == nil || job.IsTrashed {
+			continue
+		}
+		if job.Status == statusPending || job.Status == statusRunning {
+			active[id] = struct{}{}
+		}
+	}
+	runtimeState.jobsMu.RUnlock()
+
+	entries, err := os.ReadDir(tmpFolder)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".wav" {
+			continue
+		}
+		jobID := strings.TrimSuffix(entry.Name(), ".wav")
+		if _, ok := active[jobID]; ok {
+			continue
+		}
+		_ = os.Remove(filepath.Join(tmpFolder, entry.Name()))
 	}
 }
 
@@ -80,7 +124,7 @@ func markSubtreeJobsTrashed(userID string, subtree map[string]struct{}) {
 	if len(subtree) == 0 {
 		return
 	}
-	deletedAt := time.Now().Format("2006-01-02 15:04:05")
+	deletedTS := float64(time.Now().Unix())
 	runtimeState.jobsMu.Lock()
 	defer runtimeState.jobsMu.Unlock()
 	for id, job := range runtimeState.jobs {
@@ -89,8 +133,10 @@ func markSubtreeJobsTrashed(userID string, subtree map[string]struct{}) {
 		}
 		if _, ok := subtree[normalizeFolderID(job.FolderID)]; ok {
 			job.IsTrashed = true
-			job.DeletedAt = deletedAt
+			job.DeletedTS = deletedTS
+			hydrateJobDerivedFields(job)
 			cancelJob(id)
+			removeTempWav(id)
 		}
 	}
 	saveJobsLocked()

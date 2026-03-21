@@ -123,10 +123,9 @@ func UploadPostHandler(c echo.Context, deps UploadDeps) error {
 		inputName += ext
 	}
 
-	safeName := deps.SecureFilename(originalFilename)
 	jobID := uuid.NewString()
 	tempPath := filepath.Join(deps.TmpFolder, fmt.Sprintf("%s_temp%s", jobID, ext))
-	wavPath := filepath.Join(deps.TmpFolder, fmt.Sprintf("%s_%s.wav", jobID, safeName))
+	wavPath := filepath.Join(deps.TmpFolder, jobID+".wav")
 
 	totalBytes, err := deps.SaveUploadWithLimit(fileHeader, tempPath, int64(deps.MaxUploadSizeMB)*1024*1024, int64(deps.UploadRateLimitKBPS)*1024)
 	if err != nil {
@@ -146,13 +145,6 @@ func UploadPostHandler(c echo.Context, deps UploadDeps) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "ffmpeg 변환 실패")
 	}
 	_ = os.Remove(tempPath)
-
-	wavBytes, err := os.ReadFile(wavPath)
-	if err != nil {
-		_ = os.Remove(wavPath)
-		deps.Errf("upload.readWav", err, "job_id=%s path=%s", jobID, wavPath)
-		return echo.NewHTTPError(http.StatusInternalServerError, "업로드 파일 처리 실패")
-	}
 
 	duration := deps.GetMediaDuration(wavPath)
 	now := time.Now()
@@ -178,14 +170,6 @@ func UploadPostHandler(c echo.Context, deps UploadDeps) error {
 	if err := store.TouchFolderAndAncestors(u.ID, folderID); err != nil {
 		deps.Errf("upload.touchFolder", err, "owner_id=%s folder_id=%s job_id=%s", u.ID, folderID, jobID)
 	}
-
-	if err := store.SaveJobBlob(jobID, store.BlobKindWav, wavBytes); err != nil {
-		_ = os.Remove(wavPath)
-		deps.Errf("upload.saveWavBlob", err, "job_id=%s", jobID)
-		deps.DeleteJobs([]string{jobID})
-		return echo.NewHTTPError(http.StatusInternalServerError, "업로드 파일 저장 실패")
-	}
-	_ = os.Remove(wavPath)
 
 	deps.EnqueueTranscribe(jobID)
 	deps.Logf("[UPLOAD] queued job_id=%s filename=%s bytes=%d", jobID, inputName, totalBytes)
