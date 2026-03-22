@@ -44,7 +44,7 @@ export function StoragePage() {
         setData(payload)
         setError('')
       } catch (loadError) {
-        setError(loadError instanceof Error ? loadError.message : '저장용량 정보를 불러오지 못했습니다.')
+        setError(normalizeLoadError(loadError, '저장용량 정보를 불러오지 못했습니다.'))
       }
     }
     void load()
@@ -310,4 +310,11 @@ export function StoragePage() {
       </section>
     </section>
   )
+}
+
+function normalizeLoadError(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message === 'Failed to fetch') {
+    return '서버와 연결할 수 없습니다.'
+  }
+  return error instanceof Error ? error.message : fallback
 }

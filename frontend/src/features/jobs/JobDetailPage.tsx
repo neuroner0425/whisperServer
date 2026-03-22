@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 
-import { fetchJobDetail } from './api'
+import { fetchJobDetail, refineJob, retryJob } from './api'
 import type { JobDetailResponse } from './types'
 
 export function JobDetailPage() {
@@ -9,7 +9,10 @@ export function JobDetailPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [data, setData] = useState<JobDetailResponse | null>(null)
   const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
   const [isLoading, setIsLoading] = useState(true)
+  const [isRetrying, setIsRetrying] = useState(false)
+  const [isRefining, setIsRefining] = useState(false)
   const [showMeta, setShowMeta] = useState(false)
 
   const showOriginal = searchParams.get('original') === 'true'
@@ -32,7 +35,7 @@ export function JobDetailPage() {
         }
       } catch (loadError) {
         if (!closed && !controller.signal.aborted) {
-          setError(loadError instanceof Error ? loadError.message : '작업을 불러오지 못했습니다.')
+          setError(normalizeLoadError(loadError, '작업을 불러오지 못했습니다.'))
         }
       } finally {
         if (!closed && force) {
@@ -74,6 +77,66 @@ export function JobDetailPage() {
     }
     return data.has_refined && data.variant !== 'original' ? data.download_refined_url || data.download_text_url || '' : data.download_text_url || ''
   }, [data])
+  const displayText = useMemo(() => {
+    if (!data) {
+      return ''
+    }
+    const rawText =
+      data.view === 'result'
+        ? data.text || ''
+        : data.view === 'preview'
+          ? data.original_text || ''
+          : data.preview_text || ''
+    return normalizeTranscriptText(rawText)
+  }, [data])
+
+  useEffect(() => {
+    if (!message && !error) {
+      return
+    }
+    if (isPersistentNetworkError(error)) {
+      return
+    }
+    const timer = window.setTimeout(() => {
+      setMessage('')
+      setError('')
+    }, 2800)
+    return () => window.clearTimeout(timer)
+  }, [error, message])
+
+  const handleRetry = async () => {
+    if (!jobId || isRetrying) {
+      return
+    }
+    try {
+      setIsRetrying(true)
+      await retryJob(jobId)
+      setMessage('전사를 다시 시작했습니다.')
+      const payload = await fetchJobDetail(jobId, showOriginal)
+      setData(payload)
+    } catch (retryError) {
+      setError(normalizeLoadError(retryError, '재시도에 실패했습니다.'))
+    } finally {
+      setIsRetrying(false)
+    }
+  }
+
+  const handleRefine = async () => {
+    if (!jobId || isRefining) {
+      return
+    }
+    try {
+      setIsRefining(true)
+      await refineJob(jobId)
+      setMessage('정제를 시작했습니다.')
+      const payload = await fetchJobDetail(jobId, showOriginal)
+      setData(payload)
+    } catch (refineError) {
+      setError(normalizeLoadError(refineError, '정제를 시작하지 못했습니다.'))
+    } finally {
+      setIsRefining(false)
+    }
+  }
 
   return (
     <section className="view-shell job-detail-view">
@@ -83,6 +146,16 @@ export function JobDetailPage() {
           <h1 className="view-title">{currentFileName}</h1>
         </div>
         <div className="view-actions">
+          {data?.status === '완료' && !data?.has_refined && data?.can_refine ? (
+            <button className="ghost-button" disabled={isRefining} onClick={() => void handleRefine()} type="button">
+              {isRefining ? '정제 시작 중...' : '정제하기'}
+            </button>
+          ) : null}
+          {data?.status === '실패' ? (
+            <button className="ghost-button" disabled={isRetrying} onClick={() => void handleRetry()} type="button">
+              {isRetrying ? '재시도 중...' : '재시도'}
+            </button>
+          ) : null}
           {downloadHref ? (
             <a className="primary-button" href={downloadHref}>
               다운로드
@@ -92,6 +165,7 @@ export function JobDetailPage() {
       </header>
 
       {error ? <div className="alert error">{error}</div> : null}
+      {message ? <div className="alert info">{message}</div> : null}
       {isLoading && !data ? <div className="empty-panel">파일 정보를 불러오는 중입니다.</div> : null}
 
       {data ? (
@@ -139,6 +213,12 @@ export function JobDetailPage() {
               </div>
             </div>
 
+            {data.audio_url ? (
+              <div className="audio-player-shell">
+                <audio controls preload="metadata" src={data.audio_url} />
+              </div>
+            ) : null}
+
             {data.view !== 'result' ? (
               <div className="progress-shell">
                 <div className="progress-label">{progressText || '처리 중'}</div>
@@ -149,7 +229,7 @@ export function JobDetailPage() {
             ) : null}
 
             <pre className="result-panel dark">
-              {data.view === 'result' ? data.text || '' : data.view === 'preview' ? data.original_text || '' : data.preview_text || ''}
+              {displayText}
             </pre>
           </section>
         </>
@@ -165,4 +245,31 @@ function displayFilename(filename: string) {
     return dotIndex > 0 ? filename.slice(0, dotIndex) : filename
   }
   return filename
+}
+
+function normalizeTranscriptText(text: string) {
+  if (!text.trim()) {
+    return ''
+  }
+  return text
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) =>
+      line
+        .replace(/^\s*\[[^\]]*-->\s*[^\]]*\]\s*/g, '')
+        .trim(),
+    )
+    .filter((line) => line.length > 0)
+    .join('\n')
+}
+
+function isPersistentNetworkError(error: string) {
+  return error === 'Failed to fetch' || error.includes('서버와 연결할 수 없습니다.')
+}
+
+function normalizeLoadError(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message === 'Failed to fetch') {
+    return '서버와 연결할 수 없습니다.'
+  }
+  return error instanceof Error ? error.message : fallback
 }

@@ -56,28 +56,13 @@ func removeTempWav(jobID string) {
 }
 
 func cleanupInactiveTempWavs() {
-	runtimeState.jobsMu.RLock()
-	active := make(map[string]struct{}, len(runtimeState.jobs))
-	for id, job := range runtimeState.jobs {
-		if job == nil || job.IsTrashed {
-			continue
-		}
-		if job.Status == statusPending || job.Status == statusRunning {
-			active[id] = struct{}{}
-		}
-	}
-	runtimeState.jobsMu.RUnlock()
-
 	entries, err := os.ReadDir(tmpFolder)
 	if err != nil {
 		return
 	}
 	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".wav" {
-			continue
-		}
-		jobID := strings.TrimSuffix(entry.Name(), ".wav")
-		if _, ok := active[jobID]; ok {
+		ext := filepath.Ext(entry.Name())
+		if entry.IsDir() || (ext != ".wav" && ext != ".m4a") {
 			continue
 		}
 		_ = os.Remove(filepath.Join(tmpFolder, entry.Name()))

@@ -60,18 +60,20 @@ func Run() {
 		StatusCompleted:       statusCompleted,
 		StatusFailed:          statusFailed,
 	}, worker.Deps{
-		GetJob:               getJob,
-		SetJobFields:         setJobFields,
-		AppendJobPreviewLine: appendJobPreviewLine,
-		HasGeminiConfigured:  hasGeminiConfigured,
-		RefineTranscript:     refineTranscript,
-		UniqueStrings:        intutil.UniqueStringsKeepOrder,
-		GetTagDescriptions:   store.GetTagDescriptionsByNames,
-		Logf:                 procLogf,
-		Errf:                 procErrf,
-		IncInProgress:        jobsInProgress.Inc,
-		DecInProgress:        jobsInProgress.Dec,
-		SetQueueLength:       queueLength.Set,
+		GetJob:                getJob,
+		SetJobFields:          setJobFields,
+		AppendJobPreviewLine:  appendJobPreviewLine,
+		ReplaceJobPreviewText: replaceJobPreviewText,
+		ConvertToWav:          intutil.ConvertToWav,
+		HasGeminiConfigured:   hasGeminiConfigured,
+		RefineTranscript:      refineTranscript,
+		UniqueStrings:         intutil.UniqueStringsKeepOrder,
+		GetTagDescriptions:    store.GetTagDescriptionsByNames,
+		Logf:                  procLogf,
+		Errf:                  procErrf,
+		IncInProgress:         jobsInProgress.Inc,
+		DecInProgress:         jobsInProgress.Dec,
+		SetQueueLength:        queueLength.Set,
 		IncJobsTotal: func(status string) {
 			jobsTotal.WithLabelValues(status).Inc()
 		},
@@ -146,6 +148,9 @@ func Run() {
 	e.GET("/api/files", apiFilesHandler)
 	e.GET("/api/storage", apiStorageJSONHandler)
 	e.GET("/api/jobs/:job_id", apiJobDetailHandler)
+	e.GET("/api/jobs/:job_id/audio", apiJobAudioHandler)
+	e.POST("/api/jobs/:job_id/retry", apiRetryJobJSONHandler)
+	e.POST("/api/jobs/:job_id/refine", apiRefineJobJSONHandler)
 	e.GET("/api/tags", apiTagsHandler)
 	e.POST("/api/tags", apiCreateTagHandler)
 	e.DELETE("/api/tags/:name", apiDeleteTagHandler)

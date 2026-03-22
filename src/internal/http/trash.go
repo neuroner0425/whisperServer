@@ -18,7 +18,7 @@ type TrashDeps struct {
 	CancelJob              func(string)
 	EnqueueTranscribe      func(string)
 	EnqueueRefine          func(string)
-	TempWavExists          func(string) bool
+	HasAudioBlob           func(string) bool
 	HasJobBlob             func(string, string) bool
 	StatusPending          string
 	StatusRunning          string
@@ -80,7 +80,7 @@ func requeueRestoredJob(jobID string, deps TrashDeps) {
 	if job == nil || deps.HasJobBlob == nil {
 		return
 	}
-	if deps.TempWavExists != nil && deps.TempWavExists(jobID) {
+	if deps.HasAudioBlob != nil && deps.HasAudioBlob(jobID) && !deps.HasJobBlob(jobID, store.BlobKindTranscript) {
 		deps.SetJobFields(jobID, map[string]any{
 			"status":           deps.StatusPending,
 			"phase":            "",

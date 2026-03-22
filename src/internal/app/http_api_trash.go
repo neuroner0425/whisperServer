@@ -2,7 +2,6 @@ package app
 
 import (
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -54,7 +53,7 @@ func apiRestoreJobJSONHandler(c echo.Context) error {
 	setJobFields(jobID, updates)
 	job = getJob(jobID)
 	if job != nil {
-		if _, err := os.Stat(tempWavPath(jobID)); err == nil {
+		if store.HasJobBlob(jobID, store.BlobKindAudioAAC) && !store.HasJobBlob(jobID, store.BlobKindTranscript) {
 			setJobFields(jobID, map[string]any{
 				"status":           statusPending,
 				"phase":            "",

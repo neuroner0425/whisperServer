@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import type { ChangeEvent, DragEvent as ReactDragEvent, FormEvent, MouseEvent as ReactMouseEvent } from 'react'
 
-import { batchDownloadJobs, createFolder, downloadFolder, fetchFiles, moveEntries, renameFolder, renameJob, trashFolder, trashJob, uploadFileWithProgress } from './api'
+import { batchDownloadJobs, createFolder, downloadFolder, fetchFiles, moveEntries, renameFolder, renameJob, trashFolder, trashJob } from './api'
 import type { FilesResponse, FolderNode, JobItem } from './types'
 import {
   DATE_OPTIONS,
@@ -15,7 +15,6 @@ import {
   type FilterMenu,
   type MenuState,
   type MoveState,
-  type PendingUpload,
   type SelectionBox,
   type SortDirection,
   type SortKey,
@@ -51,6 +50,7 @@ import {
   updateQuery,
 } from './filesPageUtils'
 import { dateFilterLabel, extractDate } from './filesPageDateUtils'
+import { prunePendingUploads, startPendingUpload, usePendingUploads } from './uploadStore'
 
 export function FilesPage({ viewMode }: FilesPageProps) {
   const navigate = useNavigate()
@@ -76,7 +76,6 @@ export function FilesPage({ viewMode }: FilesPageProps) {
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null)
   const [dragState, setDragState] = useState<DragState | null>(null)
   const [dropTargetFolderId, setDropTargetFolderId] = useState('')
-  const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([])
   const [textDialog, setTextDialog] = useState<TextDialogState | null>(null)
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -86,6 +85,7 @@ export function FilesPage({ viewMode }: FilesPageProps) {
   const folderId = viewMode === 'explore' ? params.folderId ?? '' : ''
   const query = searchParams.get('q') ?? ''
   const page = normalizePage(searchParams.get('page'))
+  const pendingUploads = usePendingUploads()
 
   useEffect(() => {
     const openPicker = () => {
@@ -116,19 +116,12 @@ export function FilesPage({ viewMode }: FilesPageProps) {
         if (!closed && payload) {
           setData(payload)
           const serverJobIDs = new Set(payload.job_items.map((job) => job.ID))
-          setPendingUploads((current) =>
-            current.filter((item) => {
-              if (!item.jobId) {
-                return true
-              }
-              return !serverJobIDs.has(item.jobId)
-            }),
-          )
+          prunePendingUploads(serverJobIDs)
           setError('')
         }
       } catch (loadError) {
         if (!closed && !controller.signal.aborted) {
-          setError(loadError instanceof Error ? loadError.message : '목록을 불러오지 못했습니다.')
+          setError(normalizeLoadError(loadError, '목록을 불러오지 못했습니다.'))
         }
       }
     }
@@ -165,7 +158,7 @@ export function FilesPage({ viewMode }: FilesPageProps) {
         }
       } catch (loadError) {
         if (!closed && !controller.signal.aborted) {
-          setError(loadError instanceof Error ? loadError.message : '이동 위치를 불러오지 못했습니다.')
+          setError(normalizeLoadError(loadError, '이동 위치를 불러오지 못했습니다.'))
         }
       }
     }
@@ -218,6 +211,9 @@ export function FilesPage({ viewMode }: FilesPageProps) {
 
   useEffect(() => {
     if (!message && !error) {
+      return
+    }
+    if (isPersistentNetworkError(error)) {
       return
     }
     const timer = window.setTimeout(() => {
@@ -415,46 +411,12 @@ export function FilesPage({ viewMode }: FilesPageProps) {
     if (!uploadState) {
       return
     }
-    let localId = ''
-    const formData = new FormData()
-    formData.append('file', uploadState.file)
-    formData.append('display_name', uploadState.displayName)
-    formData.append('folder_id', uploadState.folderId)
-    formData.append('description', uploadState.description)
-    formData.append('refine', String(uploadState.refineEnabled))
     try {
-      localId = `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-      const pendingItem: PendingUpload = {
-        localId,
-        folderId: uploadState.folderId,
-        filename: uploadState.displayName,
-        stage: 'uploading',
-        progress: 0,
-      }
-      setPendingUploads((current) => [pendingItem, ...current])
       setUploadState(null)
       setMessage('업로드를 시작했습니다.')
-
-      const response = await uploadFileWithProgress(formData, (percent) => {
-        setPendingUploads((current) =>
-          current.map((item) => (item.localId === localId ? { ...item, progress: percent, stage: 'uploading' } : item)),
-        )
-      })
-
-      setPendingUploads((current) =>
-        current.map((item) =>
-          item.localId === localId
-            ? { ...item, jobId: response.job_id, stage: 'queued', progress: 0 }
-            : item,
-        ),
-      )
+      await startPendingUpload(uploadState)
       setReloadToken((value) => value + 1)
     } catch (submitError) {
-      if (localId) {
-        setPendingUploads((current) =>
-          current.map((item) => (item.localId === localId ? { ...item, stage: 'failed', progress: 0 } : item)),
-        )
-      }
       setError(submitError instanceof Error ? submitError.message : '업로드에 실패했습니다.')
     }
   }
@@ -930,10 +892,11 @@ export function FilesPage({ viewMode }: FilesPageProps) {
                 <h2>최근 수정 파일</h2>
               </div>
               <div className="drive-table">
-                <div className="drive-table-header">
+                <div className="drive-table-header home">
                   <button className="column-sort-button" onClick={() => toggleSort('name')} type="button">
                     이름{renderSortMark(sortKey, sortDirection, 'name')}
                   </button>
+                  <span>종류</span>
                   <button className="column-sort-button" onClick={() => toggleSort('updated')} type="button">
                     수정 날짜{renderSortMark(sortKey, sortDirection, 'updated')}
                   </button>
@@ -948,7 +911,7 @@ export function FilesPage({ viewMode }: FilesPageProps) {
                   const canOpen = !isPending || Boolean((job as FileListJob).__jobId)
                   return (
                   <div
-                    className={`drive-table-row${selectedKeys.includes(key) ? ' selected' : ''}`}
+                    className={`drive-table-row home${selectedKeys.includes(key) ? ' selected' : ''}`}
                     key={job.ID}
                     onContextMenu={canOpen ? (event) => openFileMenu(job, event) : undefined}
                     onClick={() => handleHomeSelect(key)}
@@ -961,6 +924,7 @@ export function FilesPage({ viewMode }: FilesPageProps) {
                         <span className="drive-item-sub">{formatJobSub(job)}</span>
                       </span>
                     </div>
+                    <span className="drive-table-meta">{fileTypeLabel(job.FileType)}</span>
                     <span className="drive-table-meta">{extractDate(job.UpdatedAt)}</span>
                     <button
                       className="drive-link-button"
@@ -1567,4 +1531,15 @@ export function FilesPage({ viewMode }: FilesPageProps) {
       ) : null}
     </div>
   )
+}
+
+function normalizeLoadError(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message === 'Failed to fetch') {
+    return '서버와 연결할 수 없습니다.'
+  }
+  return error instanceof Error ? error.message : fallback
+}
+
+function isPersistentNetworkError(error: string) {
+  return error === 'Failed to fetch' || error.includes('서버와 연결할 수 없습니다.')
 }

@@ -2,8 +2,6 @@ package worker
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"regexp"
 	"sync"
 
@@ -27,20 +25,22 @@ type Config struct {
 }
 
 type Deps struct {
-	GetJob               func(string) *model.Job
-	SetJobFields         func(string, map[string]any)
-	AppendJobPreviewLine func(string, string)
-	HasGeminiConfigured  func() bool
-	RefineTranscript     func(string, string) (string, error)
-	UniqueStrings        func([]string) []string
-	GetTagDescriptions   func(string, []string) (map[string]string, error)
-	Logf                 func(string, ...any)
-	Errf                 func(string, error, string, ...any)
-	IncInProgress        func()
-	DecInProgress        func()
-	SetQueueLength       func(float64)
-	IncJobsTotal         func(string)
-	ObserveJobDuration   func(float64)
+	GetJob                func(string) *model.Job
+	SetJobFields          func(string, map[string]any)
+	AppendJobPreviewLine  func(string, string)
+	ReplaceJobPreviewText func(string, string)
+	ConvertToWav          func(string, string) error
+	HasGeminiConfigured   func() bool
+	RefineTranscript      func(string, string) (string, error)
+	UniqueStrings         func([]string) []string
+	GetTagDescriptions    func(string, []string) (map[string]string, error)
+	Logf                  func(string, ...any)
+	Errf                  func(string, error, string, ...any)
+	IncInProgress         func()
+	DecInProgress         func()
+	SetQueueLength        func(float64)
+	IncJobsTotal          func(string)
+	ObserveJobDuration    func(float64)
 }
 
 type taskType string
@@ -128,7 +128,7 @@ func (w *Worker) RequeuePending(jobs map[string]*model.Job) {
 		}
 		switch job.Status {
 		case w.cfg.StatusPending, w.cfg.StatusRunning:
-			if _, err := os.Stat(filepath.Join(w.cfg.TmpFolder, id+".wav")); err == nil {
+			if store.HasJobBlob(id, store.BlobKindAudioAAC) {
 				w.EnqueueTranscribe(id)
 			}
 		case w.cfg.StatusRefiningPending, w.cfg.StatusRefining:
