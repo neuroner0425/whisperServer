@@ -89,14 +89,38 @@ func (w *Worker) taskTranscribe(jobID string) error {
 
 	job := w.deps.GetJob(jobID)
 	totalSec := job.MediaDurationSeconds
-	wavBytes, err := os.ReadFile(filepath.Join(w.cfg.TmpFolder, jobID+".wav"))
+	audioBytes, err := store.LoadJobBlob(jobID, store.BlobKindAudioAAC)
 	if err != nil {
-		w.deps.Errf("transcribe.loadWavFile", err, "job_id=%s", jobID)
+		w.deps.Errf("transcribe.loadAudioBlob", err, "job_id=%s", jobID)
 		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
 		w.deps.IncJobsTotal("failure")
 		return err
 	}
-	timelineText, err := w.runWhisperFromBlob(ctx, jobID, wavBytes, totalSec)
+	aacPath := filepath.Join(w.cfg.TmpFolder, jobID+".m4a")
+	wavPath := filepath.Join(w.cfg.TmpFolder, jobID+".wav")
+	if err := os.WriteFile(aacPath, audioBytes, 0o644); err != nil {
+		w.deps.Errf("transcribe.writeTempAac", err, "job_id=%s", jobID)
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+		w.deps.IncJobsTotal("failure")
+		return err
+	}
+	if err := w.deps.ConvertToWav(aacPath, wavPath); err != nil {
+		_ = os.Remove(aacPath)
+		w.deps.Errf("transcribe.convertToWav", err, "job_id=%s", jobID)
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+		w.deps.IncJobsTotal("failure")
+		return err
+	}
+	_ = os.Remove(aacPath)
+	wavBytes, err := os.ReadFile(wavPath)
+	if err != nil {
+		_ = os.Remove(wavPath)
+		w.deps.Errf("transcribe.readTempWav", err, "job_id=%s", jobID)
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+		w.deps.IncJobsTotal("failure")
+		return err
+	}
+	timelineText, transcriptJSON, err := w.runWhisperFromBlob(ctx, jobID, wavBytes, totalSec)
 	if err != nil {
 		statusLabel := "failure"
 		fields := map[string]any{"status": w.cfg.StatusFailed}
@@ -107,7 +131,7 @@ func (w *Worker) taskTranscribe(jobID string) error {
 		w.deps.SetJobFields(jobID, fields)
 		w.deps.IncJobsTotal(statusLabel)
 		w.deps.Errf("transcribe.runWhisper", err, "job_id=%s", jobID)
-		_ = os.Remove(filepath.Join(w.cfg.TmpFolder, jobID+".wav"))
+		_ = os.Remove(wavPath)
 		return err
 	}
 	if updated := w.deps.GetJob(jobID); updated == nil || updated.IsTrashed {
@@ -120,6 +144,15 @@ func (w *Worker) taskTranscribe(jobID string) error {
 		w.deps.Errf("transcribe.saveTranscriptBlob", err, "job_id=%s", jobID)
 		return err
 	}
+	if len(transcriptJSON) > 0 {
+		if err := store.SaveJobBlob(jobID, store.BlobKindTranscriptJSON, transcriptJSON); err != nil {
+			w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+			w.deps.IncJobsTotal("failure")
+			w.deps.Errf("transcribe.saveTranscriptJSONBlob", err, "job_id=%s", jobID)
+			return err
+		}
+	}
+	store.DeleteJobBlob(jobID, store.BlobKindPreview)
 
 	completed := time.Now()
 	w.deps.IncJobsTotal("success")
@@ -133,11 +166,12 @@ func (w *Worker) taskTranscribe(jobID string) error {
 	w.deps.SetJobFields(jobID, map[string]any{
 		"status":       nextStatus,
 		"result":       "db://transcript",
+		"preview_text": "",
 		"completed_at": completed.Format("2006-01-02 15:04:05"),
 		"completed_ts": float64(completed.Unix()),
 		"duration":     intutil.FormatSeconds(int(completed.Sub(started).Seconds())),
 	})
-	_ = os.Remove(filepath.Join(w.cfg.TmpFolder, jobID+".wav"))
+	_ = os.Remove(wavPath)
 	w.deps.Logf("[TRANSCRIBE] cleaned input file job_id=%s", jobID)
 	w.deps.Logf("[TRANSCRIBE] done job_id=%s output=db://transcript status=%s duration_sec=%d", jobID, nextStatus, int(completed.Sub(started).Seconds()))
 	return nil

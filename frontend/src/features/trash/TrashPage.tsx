@@ -3,6 +3,7 @@ import type { MouseEvent as ReactMouseEvent } from 'react'
 
 import { clearTrash, deleteTrashJobs, fetchTrash, restoreJob } from './api'
 import type { TrashJobItem } from './api'
+import { formatBytes } from '../files/filesPageUtils'
 import {
   DATE_OPTIONS,
   dateFilterLabel,
@@ -35,7 +36,7 @@ export function TrashPage() {
       setJobs(data.job_items)
       setError('')
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : '휴지통을 불러오지 못했습니다.')
+      setError(normalizeLoadError(loadError, '휴지통을 불러오지 못했습니다.'))
     }
   }
 
@@ -48,6 +49,9 @@ export function TrashPage() {
 
   useEffect(() => {
     if (!message && !error) {
+      return
+    }
+    if (isPersistentNetworkError(error)) {
       return
     }
     const timer = window.setTimeout(() => {
@@ -250,15 +254,14 @@ export function TrashPage() {
               <button className="column-sort-button" onClick={() => toggleSort('name')} type="button">
                 파일 명{renderSortMark(sortKey, sortDirection, 'name')}
               </button>
+              <span>종류</span>
               <button className="column-sort-button" onClick={() => toggleSort('deleted')} type="button">
                 삭제 날짜{renderSortMark(sortKey, sortDirection, 'deleted')}
               </button>
               <button className="column-sort-button" onClick={() => toggleSort('location')} type="button">
                 위치{renderSortMark(sortKey, sortDirection, 'location')}
               </button>
-              <button className="column-sort-button" onClick={() => toggleSort('updated')} type="button">
-                최근 수정 일자{renderSortMark(sortKey, sortDirection, 'updated')}
-              </button>
+              <span>파일 크기</span>
             </div>
             {filteredJobs.map((job) => (
               <div
@@ -270,11 +273,13 @@ export function TrashPage() {
                     <span className="drive-item-icon">🎧</span>
                     <span className="drive-item-copy">
                     <span className="drive-item-title">{displayFilename(job.Filename)}</span>
+                    <span className="drive-item-sub">휴지통</span>
                     </span>
                   </div>
+                <span className="drive-table-meta">{job.FileType ? job.FileType.toUpperCase() : 'FILE'}</span>
                 <span className="drive-table-meta">{formatTableDate(job.DeletedAt)}</span>
                 <span className="drive-table-meta">{job.FolderName || '내 파일'}</span>
-                <span className="drive-table-meta">{formatTableDate(job.UpdatedAt)}</span>
+                <span className="drive-table-meta">{formatBytes(job.SizeBytes)}</span>
               </div>
             ))}
             {filteredJobs.length === 0 ? <div className="empty-panel">삭제된 파일이 없습니다.</div> : null}
@@ -290,4 +295,15 @@ export function TrashPage() {
       </section>
     </section>
   )
+}
+
+function normalizeLoadError(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message === 'Failed to fetch') {
+    return '서버와 연결할 수 없습니다.'
+  }
+  return error instanceof Error ? error.message : fallback
+}
+
+function isPersistentNetworkError(error: string) {
+  return error === 'Failed to fetch' || error.includes('서버와 연결할 수 없습니다.')
 }

@@ -30,7 +30,9 @@ export type JobDetailResponse = {
   original_text?: string
   text?: string
   has_refined?: boolean
+  can_refine?: boolean
   variant?: 'original' | 'refined'
+  audio_url?: string
   download_text_url?: string
   download_refined_url?: string
   available_tags?: AvailableTag[]

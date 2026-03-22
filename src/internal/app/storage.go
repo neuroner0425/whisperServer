@@ -231,7 +231,7 @@ func removeTagFromOwnerJobs(ownerID, tagName string) {
 }
 
 func appendJobPreviewLine(id, line string) {
-	line = sanitizePreviewLine(line)
+	line = strings.TrimSpace(line)
 	if line == "" {
 		return
 	}
@@ -244,7 +244,7 @@ func appendJobPreviewLine(id, line string) {
 		return
 	}
 
-	prev := sanitizePreviewText(job.PreviewText)
+	prev := strings.TrimSpace(job.PreviewText)
 	if prev == "" {
 		prev = line
 	} else {
@@ -257,6 +257,22 @@ func appendJobPreviewLine(id, line string) {
 
 	job.PreviewText = prev
 	if err := store.SaveJobBlob(id, store.BlobKindPreview, []byte(prev)); err != nil {
+		procErrf("storage.savePreviewBlob", err, "job_id=%s", id)
+	}
+}
+
+func replaceJobPreviewText(id, text string) {
+	text = strings.TrimSpace(text)
+
+	runtimeState.jobsMu.Lock()
+	defer runtimeState.jobsMu.Unlock()
+	job := runtimeState.jobs[id]
+	if job == nil {
+		return
+	}
+
+	job.PreviewText = text
+	if err := store.SaveJobBlob(id, store.BlobKindPreview, []byte(text)); err != nil {
 		procErrf("storage.savePreviewBlob", err, "job_id=%s", id)
 	}
 }
@@ -366,7 +382,7 @@ func toJobView(job *model.Job) JobView {
 		Phase:           intutil.Fallback(job.Phase, "대기 중"),
 		ProgressLabel:   intutil.Fallback(job.ProgressLabel, ""),
 		ProgressPercent: job.ProgressPercent,
-		PreviewText:     sanitizePreviewText(job.PreviewText),
+		PreviewText:     job.PreviewText,
 	}
 }
 

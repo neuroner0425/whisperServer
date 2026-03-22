@@ -752,6 +752,11 @@ textarea.dark-input:focus {
   grid-template-columns: minmax(0, 2.2fr) minmax(96px, 0.78fr) minmax(120px, 1fr) minmax(92px, 0.72fr) minmax(96px, 0.72fr) 44px;
 }
 
+.drive-table-header.home,
+.drive-table-row.home {
+  grid-template-columns: minmax(0, 2.2fr) minmax(96px, 0.78fr) minmax(120px, 1fr) minmax(120px, 1fr) 44px;
+}
+
 .drive-table-header {
   padding: 0 16px 8px;
   color: var(--text-muted);
@@ -829,6 +834,14 @@ textarea.dark-input:focus {
   background: linear-gradient(90deg, #3b82f6 0%, #60a5fa 100%);
 }
 
+.audio-player-shell {
+  padding: 4px 0 8px;
+}
+
+.audio-player-shell audio {
+  width: 100%;
+}
+
 .drive-table-primary {
   min-width: 0;
   display: flex;
@@ -900,7 +913,7 @@ textarea.dark-input:focus {
 
 .drive-table-header.trash,
 .drive-table-row.trash {
-  grid-template-columns: minmax(0, 2.5fr) minmax(120px, 1fr) minmax(120px, 1fr) minmax(120px, 1fr);
+  grid-template-columns: minmax(0, 2.1fr) minmax(96px, 0.8fr) minmax(120px, 1fr) minmax(120px, 1fr) minmax(96px, 0.8fr);
 }
 
 .trash-primary {
@@ -924,13 +937,13 @@ textarea.dark-input:focus {
 .storage-table .drive-table-header,
 .storage-table .drive-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(120px, 0.22fr);
+  grid-template-columns: minmax(0, 1fr) minmax(132px, 0.24fr);
   gap: 16px;
   align-items: center;
 }
 
 .storage-table .drive-table-header {
-  padding-inline: 16px;
+  padding-inline: 16px 28px;
 }
 
 .drive-table-body {
@@ -940,6 +953,7 @@ textarea.dark-input:focus {
 
 .drive-row {
   min-height: 40px;
+  padding-right: 28px;
   padding: 0 16px;
   border-bottom: 1px solid var(--border);
 }

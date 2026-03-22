@@ -87,7 +87,7 @@ func createUploadedJob(c echo.Context, ownerID string, fileHeader *multipart.Fil
 
 	jobID := uuid.NewString()
 	tempPath := filepath.Join(tmpFolder, fmt.Sprintf("%s_temp%s", jobID, ext))
-	wavPath := tempWavPath(jobID)
+	aacPath := filepath.Join(tmpFolder, jobID+".m4a")
 
 	totalBytes, err := uploadDeps().SaveUploadWithLimit(fileHeader, tempPath, int64(maxUploadSizeMB)*1024*1024, int64(uploadRateLimitKB)*1024)
 	if err != nil {
@@ -99,13 +99,19 @@ func createUploadedJob(c echo.Context, ownerID string, fileHeader *multipart.Fil
 	}
 	uploadBytes.Add(float64(totalBytes))
 
-	if err := uploadDeps().ConvertToWav(tempPath, wavPath); err != nil {
+	if err := uploadDeps().ConvertToAac(tempPath, aacPath); err != nil {
 		_ = os.Remove(tempPath)
 		return "", "", echo.NewHTTPError(http.StatusInternalServerError, "ffmpeg 변환 실패")
 	}
 	_ = os.Remove(tempPath)
 
-	duration := uploadDeps().GetMediaDuration(wavPath)
+	aacBytes, err := os.ReadFile(aacPath)
+	if err != nil {
+		_ = os.Remove(aacPath)
+		return "", "", echo.NewHTTPError(http.StatusInternalServerError, "업로드 파일 처리 실패")
+	}
+
+	duration := uploadDeps().GetMediaDuration(aacPath)
 	now := time.Now()
 	job := &model.Job{
 		Status:               statusPending,
@@ -129,6 +135,12 @@ func createUploadedJob(c echo.Context, ownerID string, fileHeader *multipart.Fil
 	if err := store.TouchFolderAndAncestors(ownerID, folderID); err != nil {
 		procErrf("api.upload.touchFolder", err, "owner_id=%s folder_id=%s job_id=%s", ownerID, folderID, jobID)
 	}
+	if err := store.SaveJobBlob(jobID, store.BlobKindAudioAAC, aacBytes); err != nil {
+		_ = os.Remove(aacPath)
+		deleteJobs([]string{jobID})
+		return "", "", echo.NewHTTPError(http.StatusInternalServerError, "오디오 파일 저장 실패")
+	}
+	_ = os.Remove(aacPath)
 	enqueueTranscribe(jobID)
 	return jobID, inputName, nil
 }

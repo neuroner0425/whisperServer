@@ -2,6 +2,7 @@ export type TrashJobItem = {
   ID: string
   Filename: string
   FileType?: string
+  SizeBytes?: number
   UpdatedAt: string
   DeletedAt: string
   FolderName: string

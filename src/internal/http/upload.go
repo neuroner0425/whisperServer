@@ -28,7 +28,7 @@ type UploadDeps struct {
 	SecureFilename      func(string) string
 	SaveUploadWithLimit func(*multipart.FileHeader, string, int64, int64) (int64, error)
 	IsUploadTooLarge    func(error) bool
-	ConvertToWav        func(string, string) error
+	ConvertToAac        func(string, string) error
 	GetMediaDuration    func(string) *int
 	FormatSecondsPtr    func(*int) string
 	AddJob              func(string, *model.Job)
@@ -125,7 +125,7 @@ func UploadPostHandler(c echo.Context, deps UploadDeps) error {
 
 	jobID := uuid.NewString()
 	tempPath := filepath.Join(deps.TmpFolder, fmt.Sprintf("%s_temp%s", jobID, ext))
-	wavPath := filepath.Join(deps.TmpFolder, jobID+".wav")
+	aacPath := filepath.Join(deps.TmpFolder, jobID+".m4a")
 
 	totalBytes, err := deps.SaveUploadWithLimit(fileHeader, tempPath, int64(deps.MaxUploadSizeMB)*1024*1024, int64(deps.UploadRateLimitKBPS)*1024)
 	if err != nil {
@@ -139,14 +139,21 @@ func UploadPostHandler(c echo.Context, deps UploadDeps) error {
 	}
 	deps.UploadBytesAdd(float64(totalBytes))
 
-	if err := deps.ConvertToWav(tempPath, wavPath); err != nil {
+	if err := deps.ConvertToAac(tempPath, aacPath); err != nil {
 		_ = os.Remove(tempPath)
-		deps.Errf("upload.convertToWav", err, "job_id=%s src=%s dst=%s", jobID, tempPath, wavPath)
+		deps.Errf("upload.convertToAac", err, "job_id=%s src=%s dst=%s", jobID, tempPath, aacPath)
 		return echo.NewHTTPError(http.StatusInternalServerError, "ffmpeg 변환 실패")
 	}
 	_ = os.Remove(tempPath)
 
-	duration := deps.GetMediaDuration(wavPath)
+	aacBytes, err := os.ReadFile(aacPath)
+	if err != nil {
+		_ = os.Remove(aacPath)
+		deps.Errf("upload.readAac", err, "job_id=%s path=%s", jobID, aacPath)
+		return echo.NewHTTPError(http.StatusInternalServerError, "업로드 파일 처리 실패")
+	}
+
+	duration := deps.GetMediaDuration(aacPath)
 	now := time.Now()
 	job := &model.Job{
 		Status:               deps.StatusPending,
@@ -170,6 +177,13 @@ func UploadPostHandler(c echo.Context, deps UploadDeps) error {
 	if err := store.TouchFolderAndAncestors(u.ID, folderID); err != nil {
 		deps.Errf("upload.touchFolder", err, "owner_id=%s folder_id=%s job_id=%s", u.ID, folderID, jobID)
 	}
+	if err := store.SaveJobBlob(jobID, store.BlobKindAudioAAC, aacBytes); err != nil {
+		_ = os.Remove(aacPath)
+		deps.Errf("upload.saveAudioBlob", err, "job_id=%s", jobID)
+		deps.DeleteJobs([]string{jobID})
+		return echo.NewHTTPError(http.StatusInternalServerError, "오디오 파일 저장 실패")
+	}
+	_ = os.Remove(aacPath)
 
 	deps.EnqueueTranscribe(jobID)
 	deps.Logf("[UPLOAD] queued job_id=%s filename=%s bytes=%d", jobID, inputName, totalBytes)

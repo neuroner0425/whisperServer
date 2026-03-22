@@ -92,7 +92,32 @@ func SaveUploadWithLimit(h *multipart.FileHeader, dst string, maxBytes int64, ch
 }
 
 func ConvertToWav(src, dst string) error {
-	cmd := exec.Command("ffmpeg", "-y", "-i", src, dst)
+	cmd := exec.Command(
+		"ffmpeg",
+		"-y",
+		"-i", src,
+		"-ac", "1",
+		"-ar", "16000",
+		dst,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("ffmpeg failed: %s", string(out))
+	}
+	return nil
+}
+
+func ConvertToAac(src, dst string) error {
+	cmd := exec.Command(
+		"ffmpeg",
+		"-y",
+		"-i", src,
+		"-vn",
+		"-c:a", "aac",
+		"-b:a", "192k",
+		"-ar", "48000",
+		dst,
+	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("ffmpeg failed: %s", string(out))

@@ -10,10 +10,12 @@ import (
 )
 
 const (
-	BlobKindWav        = "wav"
-	BlobKindPreview    = "preview"
-	BlobKindTranscript = "transcript"
-	BlobKindRefined    = "refined"
+	BlobKindAudioAAC       = "audio_aac"
+	BlobKindWav            = "wav"
+	BlobKindPreview        = "preview"
+	BlobKindTranscript     = "transcript"
+	BlobKindTranscriptJSON = "transcript_json"
+	BlobKindRefined        = "refined"
 )
 
 var (

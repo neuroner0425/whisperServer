@@ -176,7 +176,7 @@ func StatusHandler(c echo.Context, deps JobsDeps) error {
 		"progress_percent": job.ProgressPercent,
 		"phase":            deps.Fallback(job.Phase, "대기 중"),
 		"progress_label":   job.ProgressLabel,
-		"preview_text":     deps.SanitizePreviewText(job.PreviewText),
+		"preview_text":     job.PreviewText,
 	})
 }
 

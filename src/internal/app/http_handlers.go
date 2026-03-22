@@ -3,7 +3,6 @@ package app
 import (
 	"errors"
 	"mime/multipart"
-	"os"
 
 	"github.com/labstack/echo/v4"
 	httpx "whisperserver/src/internal/http"
@@ -102,7 +101,7 @@ func uploadDeps() httpx.UploadDeps {
 			return intutil.SaveUploadWithLimit(h, dst, maxBytes, chunkSize, bytesPerSec)
 		},
 		IsUploadTooLarge:    func(err error) bool { return errors.Is(err, intutil.ErrUploadTooLarge) },
-		ConvertToWav:        intutil.ConvertToWav,
+		ConvertToAac:        intutil.ConvertToAac,
 		GetMediaDuration:    intutil.GetMediaDuration,
 		FormatSecondsPtr:    intutil.FormatSecondsPtr,
 		AddJob:              addJob,
@@ -167,7 +166,7 @@ func trashDeps() httpx.TrashDeps {
 		CancelJob:              cancelJob,
 		EnqueueTranscribe:      enqueueTranscribe,
 		EnqueueRefine:          enqueueRefine,
-		TempWavExists:          func(jobID string) bool { _, err := os.Stat(tempWavPath(jobID)); return err == nil },
+		HasAudioBlob:           func(jobID string) bool { return store.HasJobBlob(jobID, store.BlobKindAudioAAC) },
 		HasJobBlob:             store.HasJobBlob,
 		StatusPending:          statusPending,
 		StatusRunning:          statusRunning,

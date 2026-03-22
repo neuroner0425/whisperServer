@@ -3,6 +3,7 @@ package worker
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,23 +15,24 @@ import (
 	"sync"
 )
 
-func (w *Worker) runWhisperFromBlob(ctx context.Context, jobID string, wavBytes []byte, totalSec *int) (string, error) {
+func (w *Worker) runWhisperFromBlob(ctx context.Context, jobID string, wavBytes []byte, totalSec *int) (string, []byte, error) {
 	tmpDir, err := os.MkdirTemp("", "whisper-job-*")
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	defer os.RemoveAll(tmpDir)
 
 	wavPath := filepath.Join(tmpDir, jobID+".wav")
 	if err := os.WriteFile(wavPath, wavBytes, 0o644); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	return w.runWhisper(ctx, jobID, wavPath, totalSec)
 }
 
-func (w *Worker) runWhisper(ctx context.Context, jobID, wavPath string, totalSec *int) (string, error) {
+func (w *Worker) runWhisper(ctx context.Context, jobID, wavPath string, totalSec *int) (string, []byte, error) {
 	w.deps.Logf("[WHISPER] start job_id=%s wav=%s total_sec=%v", jobID, wavPath, totalSec)
 	outputPath := wavPath + ".txt"
+	outputJSONPath := wavPath + ".json"
 	modelBin := filepath.Join(w.cfg.ModelDir, "ggml-large-v3.bin")
 	vadModel := filepath.Join(w.cfg.ModelDir, "ggml-silero-v6.2.0.bin")
 
@@ -43,22 +45,24 @@ func (w *Worker) runWhisper(ctx context.Context, jobID, wavPath string, totalSec
 		"--vad",
 		"--vad-model", vadModel,
 		"--vad-threshold", "0.01",
-		"--output-txt", wavPath,
+		"--output-txt",
+		"--output-json",
+		wavPath,
 	)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		w.deps.Errf("whisper.stdoutPipe", err, "job_id=%s", jobID)
-		return "", err
+		return "", nil, err
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		w.deps.Errf("whisper.stderrPipe", err, "job_id=%s", jobID)
-		return "", err
+		return "", nil, err
 	}
 	if err := cmd.Start(); err != nil {
 		w.deps.Errf("whisper.start", err, "job_id=%s", jobID)
-		return "", err
+		return "", nil, err
 	}
 
 	w.deps.SetJobFields(jobID, map[string]any{"phase": "전처리 중", "progress_percent": 0, "progress_label": "전처리 중..."})
@@ -76,7 +80,6 @@ func (w *Worker) runWhisper(ctx context.Context, jobID, wavPath string, totalSec
 	lastPercent := -1
 	maxPercent := -1
 	lastProgressLog := -5
-	lastPreviewLine := ""
 	sawTimeline := false
 
 	for line := range lines {
@@ -98,7 +101,13 @@ func (w *Worker) runWhisper(ctx context.Context, jobID, wavPath string, totalSec
 		if percent < maxPercent {
 			percent = maxPercent
 		}
+		if previewBytes, readErr := os.ReadFile(outputPath); readErr == nil && len(previewBytes) > 0 {
+			w.deps.ReplaceJobPreviewText(jobID, string(previewBytes))
+		} else {
+			w.deps.AppendJobPreviewLine(jobID, line)
+		}
 		if percent == lastPercent {
+			sawTimeline = true
 			continue
 		}
 		w.deps.SetJobFields(jobID, map[string]any{
@@ -110,10 +119,6 @@ func (w *Worker) runWhisper(ctx context.Context, jobID, wavPath string, totalSec
 		if percent > maxPercent {
 			maxPercent = percent
 		}
-		if line != lastPreviewLine {
-			w.deps.AppendJobPreviewLine(jobID, line)
-			lastPreviewLine = line
-		}
 		if percent >= lastProgressLog+5 || percent == 100 {
 			w.deps.Logf("[WHISPER] progress job_id=%s percent=%d", jobID, percent)
 			lastProgressLog = percent
@@ -124,10 +129,10 @@ func (w *Worker) runWhisper(ctx context.Context, jobID, wavPath string, totalSec
 	if err := cmd.Wait(); err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			w.deps.Errf("whisper.wait", context.DeadlineExceeded, "job_id=%s timeout_sec=%d", jobID, w.cfg.JobTimeoutSec)
-			return "", context.DeadlineExceeded
+			return "", nil, context.DeadlineExceeded
 		}
 		w.deps.Errf("whisper.wait", err, "job_id=%s", jobID)
-		return "", err
+		return "", nil, err
 	}
 	if sawTimeline {
 		w.deps.SetJobFields(jobID, map[string]any{"phase": "전사 완료", "progress_percent": 100, "progress_label": "전사 완료"})
@@ -136,11 +141,18 @@ func (w *Worker) runWhisper(ctx context.Context, jobID, wavPath string, totalSec
 	b, err := os.ReadFile(outputPath)
 	if err != nil {
 		w.deps.Errf("whisper.readOutput", err, "job_id=%s path=%s", jobID, outputPath)
-		return "", err
+		return "", nil, err
 	}
+	slimJSON, err := buildSlimTranscriptJSON(outputJSONPath)
+	if err != nil {
+		w.deps.Errf("whisper.readOutputJSON", err, "job_id=%s path=%s", jobID, outputJSONPath)
+		return "", nil, err
+	}
+	w.deps.ReplaceJobPreviewText(jobID, string(b))
 	_ = os.Remove(outputPath)
+	_ = os.Remove(outputJSONPath)
 	w.deps.Logf("[WHISPER] done job_id=%s", jobID)
-	return string(b), nil
+	return string(b), slimJSON, nil
 }
 
 func scanPipe(wg *sync.WaitGroup, r io.Reader, out chan<- string) {
@@ -165,4 +177,50 @@ func splitOnCRLF(data []byte, atEOF bool) (advance int, token []byte, err error)
 		return len(data), data, nil
 	}
 	return 0, nil, nil
+}
+
+type whisperJSONOutput struct {
+	Transcription []struct {
+		Timestamps struct {
+			From string `json:"from"`
+			To   string `json:"to"`
+		} `json:"timestamps"`
+		Offsets struct {
+			From int `json:"from"`
+			To   int `json:"to"`
+		} `json:"offsets"`
+		Text string `json:"text"`
+	} `json:"transcription"`
+}
+
+type slimTranscriptJSON struct {
+	Segments []slimTranscriptSegment `json:"segments"`
+}
+
+type slimTranscriptSegment struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+	Text string `json:"text"`
+}
+
+func buildSlimTranscriptJSON(path string) ([]byte, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var source whisperJSONOutput
+	if err := json.Unmarshal(raw, &source); err != nil {
+		return nil, err
+	}
+	out := slimTranscriptJSON{
+		Segments: make([]slimTranscriptSegment, 0, len(source.Transcription)),
+	}
+	for _, item := range source.Transcription {
+		out.Segments = append(out.Segments, slimTranscriptSegment{
+			From: item.Timestamps.From,
+			To:   item.Timestamps.To,
+			Text: strings.TrimSpace(item.Text),
+		})
+	}
+	return json.Marshal(out)
 }

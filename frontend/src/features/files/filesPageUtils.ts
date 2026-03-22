@@ -77,7 +77,7 @@ export function formatJobSub(job: FileListJob) {
   if (job.Status === '정제 중') {
     return `정제 중 ${Math.max(0, job.ProgressPercent ?? 0)}%`
   }
-  return job.MediaDuration || job.Status
+  return job.Status || '-'
 }
 
 export function normalizePage(value: string | null): number {
