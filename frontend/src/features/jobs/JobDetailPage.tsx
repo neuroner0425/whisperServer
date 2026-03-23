@@ -1,8 +1,36 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 
 import { fetchJobDetail, refineJob, retryJob } from './api'
 import type { JobDetailResponse } from './types'
+import { usePageTitle } from '../../usePageTitle'
+
+type TimelineSegment = {
+  key: string
+  startMs: number
+  endMs: number
+  timeLabel: string
+  content: string
+}
+
+type RefinedParagraph = {
+  key: string
+  summary: string
+  sentences: RefinedSentence[]
+}
+
+type RefinedSentence = {
+  key: string
+  startMs: number
+  timeLabel: string
+  content: string
+}
+
+type ActiveItem = {
+  key: string
+  startMs: number
+  endMs: number
+}
 
 export function JobDetailPage() {
   const { jobId = '' } = useParams()
@@ -14,10 +42,15 @@ export function JobDetailPage() {
   const [isRetrying, setIsRetrying] = useState(false)
   const [isRefining, setIsRefining] = useState(false)
   const [showMeta, setShowMeta] = useState(false)
+  const [activeKey, setActiveKey] = useState('')
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const itemRefs = useRef<Record<string, HTMLElement | null>>({})
 
   const showOriginal = searchParams.get('original') === 'true'
   const currentFileName = displayFilename(data?.job.Filename || '파일')
   const progressText = `${data?.job.Phase || ''} ${data?.job.ProgressPercent ?? 0}%`.trim()
+
+  usePageTitle(currentFileName)
 
   useEffect(() => {
     let closed = false
@@ -77,18 +110,33 @@ export function JobDetailPage() {
     }
     return data.has_refined && data.variant !== 'original' ? data.download_refined_url || data.download_text_url || '' : data.download_text_url || ''
   }, [data])
-  const displayText = useMemo(() => {
+
+  const sourceText = useMemo(() => {
     if (!data) {
       return ''
     }
-    const rawText =
-      data.view === 'result'
-        ? data.text || ''
-        : data.view === 'preview'
-          ? data.original_text || ''
-          : data.preview_text || ''
-    return normalizeTranscriptText(rawText)
+    if (data.view === 'result') {
+      return data.text || ''
+    }
+    if (data.view === 'preview') {
+      return data.original_text || data.preview_text || ''
+    }
+    return data.preview_text || ''
   }, [data])
+
+  const transcriptSegments = useMemo(() => parseTimelineTranscriptText(sourceText), [sourceText])
+  const refinedParagraphs = useMemo(() => parseRefinedParagraphs(data?.view === 'result' ? data?.text || '' : ''), [data?.text, data?.view])
+  const activeItems = useMemo(() => {
+    if (refinedParagraphs.length > 0 && !(data?.variant === 'original')) {
+      return buildActiveItemsFromParagraphs(refinedParagraphs)
+    }
+    return transcriptSegments.map((segment) => ({
+      key: segment.key,
+      startMs: segment.startMs,
+      endMs: segment.endMs,
+    }))
+  }, [data?.variant, refinedParagraphs, transcriptSegments])
+  const fallbackText = useMemo(() => normalizePlainText(sourceText), [sourceText])
 
   useEffect(() => {
     if (!message && !error) {
@@ -103,6 +151,55 @@ export function JobDetailPage() {
     }, 2800)
     return () => window.clearTimeout(timer)
   }, [error, message])
+
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio || activeItems.length === 0) {
+      setActiveKey('')
+      return
+    }
+
+    const updateActive = () => {
+      const currentMs = audio.currentTime * 1000
+      const currentItem =
+        activeItems.find((item) => currentMs >= item.startMs && currentMs < item.endMs) || activeItems[activeItems.length - 1] || null
+      if (currentItem && currentMs >= currentItem.startMs) {
+        setActiveKey(currentItem.key)
+      } else {
+        setActiveKey('')
+      }
+    }
+
+    updateActive()
+    audio.addEventListener('timeupdate', updateActive)
+    audio.addEventListener('seeked', updateActive)
+    audio.addEventListener('loadedmetadata', updateActive)
+    return () => {
+      audio.removeEventListener('timeupdate', updateActive)
+      audio.removeEventListener('seeked', updateActive)
+      audio.removeEventListener('loadedmetadata', updateActive)
+    }
+  }, [activeItems])
+
+  useEffect(() => {
+    if (!activeKey) {
+      return
+    }
+    const node = itemRefs.current[activeKey]
+    if (!node) {
+      return
+    }
+    node.scrollIntoView({ block: 'nearest' })
+  }, [activeKey])
+
+  const seekTo = (startMs: number) => {
+    const audio = audioRef.current
+    if (!audio) {
+      return
+    }
+    audio.currentTime = startMs / 1000
+    void audio.play().catch(() => {})
+  }
 
   const handleRetry = async () => {
     if (!jobId || isRetrying) {
@@ -215,7 +312,7 @@ export function JobDetailPage() {
 
             {data.audio_url ? (
               <div className="audio-player-shell">
-                <audio controls preload="metadata" src={data.audio_url} />
+                <audio controls preload="metadata" ref={audioRef} src={data.audio_url} />
               </div>
             ) : null}
 
@@ -228,9 +325,64 @@ export function JobDetailPage() {
               </div>
             ) : null}
 
-            <pre className="result-panel dark">
-              {displayText}
-            </pre>
+            {refinedParagraphs.length > 0 && !(data.variant === 'original') ? (
+              <section className="result-panel dark structured-panel">
+                {refinedParagraphs.map((paragraph) => (
+                  <article className="transcript-paragraph" key={paragraph.key}>
+                    <p className="transcript-paragraph-summary">{paragraph.summary}</p>
+                    <div className="transcript-prose">
+                      {paragraph.sentences.map((sentence) => (
+                        <span
+                          className={`transcript-inline${activeKey === sentence.key ? ' active' : ''}`}
+                          key={sentence.key}
+                          onClick={() => seekTo(sentence.startMs)}
+                          ref={(node) => {
+                            itemRefs.current[sentence.key] = node
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault()
+                              seekTo(sentence.startMs)
+                            }
+                          }}
+                          role="button"
+                          tabIndex={0}
+                        >
+                          {sentence.content}
+                        </span>
+                      ))}
+                    </div>
+                  </article>
+                ))}
+              </section>
+            ) : transcriptSegments.length > 0 ? (
+              <section className="result-panel dark structured-panel">
+                <div className="transcript-prose">
+                  {transcriptSegments.map((segment) => (
+                    <span
+                      className={`transcript-inline${activeKey === segment.key ? ' active' : ''}`}
+                      key={segment.key}
+                      onClick={() => seekTo(segment.startMs)}
+                      ref={(node) => {
+                        itemRefs.current[segment.key] = node
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault()
+                          seekTo(segment.startMs)
+                        }
+                      }}
+                      role="button"
+                      tabIndex={0}
+                    >
+                      {segment.content}
+                    </span>
+                  ))}
+                </div>
+              </section>
+            ) : (
+              <pre className="result-panel dark">{fallbackText}</pre>
+            )}
           </section>
         </>
       ) : null}
@@ -247,18 +399,119 @@ function displayFilename(filename: string) {
   return filename
 }
 
-function normalizeTranscriptText(text: string) {
+function parseTimelineTranscriptText(text: string): TimelineSegment[] {
+  if (!text.trim()) {
+    return []
+  }
+  const lines = text.replace(/\r\n/g, '\n').split('\n')
+  const segments: TimelineSegment[] = []
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index].trim()
+    if (!line) {
+      continue
+    }
+    const normalized = parseTimelineLine(line)
+    if (!normalized) {
+      continue
+    }
+    const { startLabel, endLabel, content } = normalized
+    segments.push({
+      key: `segment-${index}`,
+      startMs: parseTimelineMs(startLabel),
+      endMs: parseTimelineMs(endLabel),
+      timeLabel: `[${startLabel}]`,
+      content,
+    })
+  }
+  return segments
+}
+
+function parseTimelineLine(line: string) {
+  const tempStyle = line.match(/^(\d{2}:\d{2}:\d{2},\d{3})\s*~\s*(\d{2}:\d{2}:\d{2},\d{3})\s*"([\s\S]*)"$/)
+  if (tempStyle) {
+    return {
+      startLabel: tempStyle[1],
+      endLabel: tempStyle[2],
+      content: tempStyle[3].trim(),
+    }
+  }
+  const legacyStyle = line.match(/^\[(\d{2}:\d{2}:\d{2})\.(\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2})\.(\d{3})\]\s*(.*)$/)
+  if (!legacyStyle) {
+    return null
+  }
+  return {
+    startLabel: `${legacyStyle[1]},${legacyStyle[2]}`,
+    endLabel: `${legacyStyle[3]},${legacyStyle[4]}`,
+    content: legacyStyle[5].trim(),
+  }
+}
+
+function parseRefinedParagraphs(text: string): RefinedParagraph[] {
+  if (!text.trim()) {
+    return []
+  }
+  try {
+    const parsed = JSON.parse(text) as {
+      paragraph?: Array<{
+        paragraph_summary?: string
+        sentence?: Array<{ start_time?: string; content?: string }>
+      }>
+    }
+    const paragraphs = parsed.paragraph || []
+    return paragraphs.map((paragraph, paragraphIndex) => ({
+      key: `paragraph-${paragraphIndex}`,
+      summary: (paragraph.paragraph_summary || '').trim(),
+      sentences: (paragraph.sentence || [])
+        .map((sentence, sentenceIndex) => {
+          const timeLabel = normalizeBracketTimestamp(sentence.start_time || '')
+          return {
+            key: `paragraph-${paragraphIndex}-sentence-${sentenceIndex}`,
+            startMs: parseTimelineMs(timeLabel),
+            timeLabel: `[${timeLabel}]`,
+            content: (sentence.content || '').trim(),
+          }
+        })
+        .filter((sentence) => sentence.timeLabel !== '[]' && sentence.content.length > 0),
+    }))
+  } catch {
+    return []
+  }
+}
+
+function buildActiveItemsFromParagraphs(paragraphs: RefinedParagraph[]): ActiveItem[] {
+  const flat = paragraphs.flatMap((paragraph) => paragraph.sentences)
+  return flat.map((sentence, index) => ({
+    key: sentence.key,
+    startMs: sentence.startMs,
+    endMs: flat[index + 1]?.startMs ?? Number.POSITIVE_INFINITY,
+  }))
+}
+
+function parseTimelineMs(label: string) {
+  const normalized = label.replace(/^\[|\]$/g, '')
+  const match = normalized.match(/^(\d{2}):(\d{2}):(\d{2}),(\d{3})$/)
+  if (!match) {
+    return 0
+  }
+  const hours = Number(match[1])
+  const minutes = Number(match[2])
+  const seconds = Number(match[3])
+  const milliseconds = Number(match[4])
+  return ((hours * 60 * 60 + minutes * 60 + seconds) * 1000) + milliseconds
+}
+
+function normalizeBracketTimestamp(value: string) {
+  return value.trim().replace(/^\[/, '').replace(/\]$/, '')
+}
+
+function normalizePlainText(text: string) {
   if (!text.trim()) {
     return ''
   }
   return text
     .replace(/\r\n/g, '\n')
     .split('\n')
-    .map((line) =>
-      line
-        .replace(/^\s*\[[^\]]*-->\s*[^\]]*\]\s*/g, '')
-        .trim(),
-    )
+    .map((line) => line.trim())
     .filter((line) => line.length > 0)
     .join('\n')
 }

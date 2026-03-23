@@ -143,6 +143,11 @@ func (w *Worker) runWhisper(ctx context.Context, jobID, wavPath string, totalSec
 		w.deps.Errf("whisper.readOutput", err, "job_id=%s path=%s", jobID, outputPath)
 		return "", nil, err
 	}
+	timelineText, err := buildTimelineTranscriptText(outputJSONPath)
+	if err != nil {
+		w.deps.Errf("whisper.buildTimelineTranscript", err, "job_id=%s path=%s", jobID, outputJSONPath)
+		return "", nil, err
+	}
 	slimJSON, err := buildSlimTranscriptJSON(outputJSONPath)
 	if err != nil {
 		w.deps.Errf("whisper.readOutputJSON", err, "job_id=%s path=%s", jobID, outputJSONPath)
@@ -152,7 +157,7 @@ func (w *Worker) runWhisper(ctx context.Context, jobID, wavPath string, totalSec
 	_ = os.Remove(outputPath)
 	_ = os.Remove(outputJSONPath)
 	w.deps.Logf("[WHISPER] done job_id=%s", jobID)
-	return string(b), slimJSON, nil
+	return timelineText, slimJSON, nil
 }
 
 func scanPipe(wg *sync.WaitGroup, r io.Reader, out chan<- string) {
@@ -204,6 +209,50 @@ type slimTranscriptSegment struct {
 }
 
 func buildSlimTranscriptJSON(path string) ([]byte, error) {
+	segments, err := loadTranscriptSegments(path)
+	if err != nil {
+		return nil, err
+	}
+	out := slimTranscriptJSON{
+		Segments: make([]slimTranscriptSegment, 0, len(segments)),
+	}
+	for _, item := range segments {
+		out.Segments = append(out.Segments, slimTranscriptSegment{
+			From: item.Timestamps.From,
+			To:   item.Timestamps.To,
+			Text: strings.TrimSpace(item.Text),
+		})
+	}
+	return json.Marshal(out)
+}
+
+func buildTimelineTranscriptText(path string) (string, error) {
+	segments, err := loadTranscriptSegments(path)
+	if err != nil {
+		return "", err
+	}
+	lines := make([]string, 0, len(segments))
+	for _, item := range segments {
+		text := strings.TrimSpace(item.Text)
+		if text == "" {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf(`%s ~ %s "%s"`, item.Timestamps.From, item.Timestamps.To, text))
+	}
+	return strings.Join(lines, "\n"), nil
+}
+
+func loadTranscriptSegments(path string) ([]struct {
+	Timestamps struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+	} `json:"timestamps"`
+	Offsets struct {
+		From int `json:"from"`
+		To   int `json:"to"`
+	} `json:"offsets"`
+	Text string `json:"text"`
+}, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -212,15 +261,5 @@ func buildSlimTranscriptJSON(path string) ([]byte, error) {
 	if err := json.Unmarshal(raw, &source); err != nil {
 		return nil, err
 	}
-	out := slimTranscriptJSON{
-		Segments: make([]slimTranscriptSegment, 0, len(source.Transcription)),
-	}
-	for _, item := range source.Transcription {
-		out.Segments = append(out.Segments, slimTranscriptSegment{
-			From: item.Timestamps.From,
-			To:   item.Timestamps.To,
-			Text: strings.TrimSpace(item.Text),
-		})
-	}
-	return json.Marshal(out)
+	return source.Transcription, nil
 }

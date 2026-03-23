@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +27,7 @@ type geminiKeyClient struct {
 }
 
 var gClient geminiClient
+var legacyTimelineLineRe = regexp.MustCompile(`^\[(\d{2}:\d{2}:\d{2})\.(\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2})\.(\d{3})\]\s*(.*)$`)
 
 func (g *geminiClient) loadKeys() {
 	g.load.Do(func() {
@@ -71,11 +74,10 @@ func refineTranscript(rawText, description string) (string, error) {
 		return "", errors.New("Gemini API is not configured")
 	}
 
-	prompt := "[원본 전사문]\n\"\"\"\n" + rawText + "\n\"\"\"\n\n"
+	prompt := "[Original]\n\"\"\"\n" + normalizeRefineInputText(rawText) + "\n\"\"\"\n\n"
 	if strings.TrimSpace(description) != "" {
-		prompt += "[설명]\n\"\"\"\n" + description + "\n\"\"\"\n\n"
+		prompt += "[Reference Context]\n\"\"\"\n" + strings.TrimSpace(description) + "\n\"\"\"\n\n"
 	}
-	fullPrompt := baseInstructions + "\n\n" + prompt
 
 	var lastErr error = errors.New("gemini request failed")
 	maxAttempts := clientCount * 3
@@ -91,7 +93,7 @@ func refineTranscript(rawText, description string) (string, error) {
 			continue
 		}
 
-		text, err := gClient.generate(idx, fullPrompt)
+		text, err := gClient.generate(idx, prompt)
 		if err == nil && strings.TrimSpace(text) != "" {
 			return strings.TrimSpace(text), nil
 		}
@@ -142,12 +144,34 @@ func (g *geminiClient) generate(idx int, prompt string) (string, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
+	responseSchema, err := parseRefineResponseSchema()
+	if err != nil {
+		g.onFailure(idx, err)
+		return "", err
+	}
 	result, err := c.Models.GenerateContent(
 		ctx,
 		geminiModel,
-		genai.Text(prompt),
+		[]*genai.Content{
+			{
+				Role: "user",
+				Parts: []*genai.Part{
+					{Text: prompt},
+				},
+			},
+		},
 		&genai.GenerateContentConfig{
-			Temperature: ptrFloat32(0.8),
+			Temperature: genai.Ptr[float32](0.5),
+			SystemInstruction: &genai.Content{
+				Parts: []*genai.Part{
+					{Text: refineSystemPrompt},
+				},
+			},
+			ThinkingConfig: &genai.ThinkingConfig{
+				ThinkingLevel: genai.ThinkingLevelHigh,
+			},
+			ResponseMIMEType: "application/json",
+			ResponseSchema:   responseSchema,
 		},
 	)
 	if err != nil {
@@ -165,9 +189,166 @@ func (g *geminiClient) generate(idx int, prompt string) (string, error) {
 		g.onFailure(idx, err)
 		return "", err
 	}
+	text, err = normalizeRefineResponseJSON(text)
+	if err != nil {
+		g.onFailure(idx, err)
+		return "", err
+	}
 	g.onSuccess(idx)
 	procLogf("[GEMINI] success api_key_suffix=%s", keySuffix)
 	return text, nil
+}
+
+const refineResponseSchemaJSON = `{
+  "type": "object",
+  "properties": {
+    "paragraph": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "paragraph_summary": {
+            "type": "string"
+          },
+          "sentence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "start_time": {
+                  "type": "string"
+                },
+                "content": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "start_time",
+                "content"
+              ],
+              "propertyOrdering": [
+                "start_time",
+                "content"
+              ]
+            }
+          }
+        },
+        "required": [
+          "paragraph_summary",
+          "sentence"
+        ],
+        "propertyOrdering": [
+          "paragraph_summary",
+          "sentence"
+        ]
+      }
+    }
+  },
+  "required": [
+    "paragraph"
+  ],
+  "propertyOrdering": [
+    "paragraph"
+  ]
+}`
+
+const refineSystemPrompt = `# Role
+You are a professional 'Speech-to-Text (STT) Correction Editor.' You possess an exceptional ability to grasp the context of fragmented transcription data and refine incomplete sentences into natural, accurate spoken scripts-not formal written text. Your highest priority is to preserve every detail of the original speech without omitting any content.
+
+# Task
+The provided [Original] text is a result of transcribing lectures or speeches using an STT engine. It contains typos, spacing errors, grammatical mistakes, and fragmented sentences. Refine this text according to the [Guidelines] below, ensuring **Zero Omission**.
+
+# Guidelines
+1. **Contextual Correction:**
+   - Correct mis-transcribed words that sound similar based on the context. (e.g., '정보의미' -> '정보 은닉', '이네이턴스' -> '상속(Inheritance)')
+   - Ensure technical terms use accurate notation (include English if necessary). Format code variables or operators according to programming syntax. (e.g., '데이터 스트럭처' -> '자료구조(Data Structure)', 'M 퍼센트' -> '&')
+
+2. **No Omission:**
+   - **Never summarize the content or shorten sentences.** Be vigilant against the tendency to merge or condense sentences toward the end of the text.
+   - Do not arbitrarily delete any part of the original speech, including the speaker's intent, small talk, additional explanations, or exclamations.
+   - Every spoken element must be included in the output. (Meaningless repetitive stammers or filler sounds may be cleaned up naturally.)
+   - Do not change the original meaning or distort facts during the refining process.
+   - The volume of the output text must be nearly identical to the volume of the original text.
+
+3. **Complete Sentence Construction:**
+   - Transform lists of fragmented words into grammatically correct sentences. Use commas (,) and periods (.) appropriately to enhance readability.
+
+4. **Contextual Paragraphing:**
+   - Group sentences that discuss a single topic into a paragraph.
+   - This means creating a paragraph that contains the refined sentences, not merging them into one long sentence. All sentences within a paragraph must be output as refined.
+   - Start a new paragraph when the topic shifts or the flow of conversation changes.
+
+# Output Format
+{
+  "paragraph": [
+    {
+      "paragraph_summary": "문단 요약 정리",
+      "sentence": [
+        {
+          "start_time": "[00:00:00,000]",
+          "content": "문장 정제 내용1"
+        }
+      ]
+    }
+  ]
+}`
+
+type refineResponse struct {
+	Paragraph []refineParagraph `json:"paragraph"`
+}
+
+type refineParagraph struct {
+	ParagraphSummary string           `json:"paragraph_summary"`
+	Sentence         []refineSentence `json:"sentence"`
+}
+
+type refineSentence struct {
+	StartTime string `json:"start_time"`
+	Content   string `json:"content"`
+}
+
+func parseRefineResponseSchema() (*genai.Schema, error) {
+	var schema genai.Schema
+	if err := json.Unmarshal([]byte(refineResponseSchemaJSON), &schema); err != nil {
+		return nil, err
+	}
+	return &schema, nil
+}
+
+func normalizeRefineResponseJSON(raw string) (string, error) {
+	var parsed refineResponse
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		return "", err
+	}
+	for i := range parsed.Paragraph {
+		parsed.Paragraph[i].ParagraphSummary = strings.TrimSpace(parsed.Paragraph[i].ParagraphSummary)
+		for j := range parsed.Paragraph[i].Sentence {
+			parsed.Paragraph[i].Sentence[j].StartTime = strings.TrimSpace(parsed.Paragraph[i].Sentence[j].StartTime)
+			parsed.Paragraph[i].Sentence[j].Content = strings.TrimSpace(parsed.Paragraph[i].Sentence[j].Content)
+		}
+	}
+	normalized, err := json.MarshalIndent(parsed, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(normalized), nil
+}
+
+func normalizeRefineInputText(raw string) string {
+	lines := strings.Split(strings.ReplaceAll(strings.TrimSpace(raw), "\r\n", "\n"), "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if legacy := legacyTimelineLineRe.FindStringSubmatch(line); len(legacy) == 6 {
+			out = append(out, legacy[1]+","+legacy[2]+" ~ "+legacy[3]+","+legacy[4]+` "`+strings.TrimSpace(legacy[5])+`"`)
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
 }
 
 func (g *geminiClient) onSuccess(idx int) {
@@ -219,10 +400,6 @@ func isRetryableGeminiError(err error) bool {
 		return true
 	}
 	return false
-}
-
-func ptrFloat32(v float32) *float32 {
-	return &v
 }
 
 func maskedKeySuffix(k string) string {

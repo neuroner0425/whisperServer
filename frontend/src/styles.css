@@ -1231,6 +1231,10 @@ textarea.dark-input:focus {
 .job-detail-view {
   padding: 10px 14px 18px;
   gap: 18px;
+  height: calc(100vh - 92px);
+  min-height: 0;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .job-detail-view .view-header {
@@ -1299,8 +1303,10 @@ textarea.dark-input:focus {
 .detail-content-section {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 0;
   padding: 6px 2px 0;
+  flex: 1;
+  min-height: 0;
 }
 
 .detail-content-header {
@@ -1308,6 +1314,10 @@ textarea.dark-input:focus {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.detail-content-header h2 {
+  margin: 0;
 }
 
 .progress-shell {
@@ -1336,9 +1346,12 @@ textarea.dark-input:focus {
 }
 
 .result-panel {
-  margin: 0;
+  margin: 0 0 15px;
   padding: 20px;
-  min-height: 360px;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  max-height: none;
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.65;
@@ -1350,6 +1363,52 @@ textarea.dark-input:focus {
   border: 1px solid var(--border);
   border-radius: 8px;
   color: #dce6f2;
+}
+
+.structured-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 14px;
+  box-sizing: border-box;
+}
+
+.transcript-paragraph {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.transcript-paragraph-summary {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.transcript-prose {
+  line-height: 1.72;
+  color: #dce6f2;
+  white-space: normal;
+}
+
+.transcript-inline {
+  display: inline;
+  border-radius: 4px;
+  padding: 0 1px;
+  cursor: pointer;
+}
+
+.transcript-inline + .transcript-inline::before {
+  content: " ";
+}
+
+.transcript-inline:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.transcript-inline.active {
+  background: rgba(59, 130, 246, 0.2);
+  color: #f8fbff;
 }
 
 .result-panel.plain {

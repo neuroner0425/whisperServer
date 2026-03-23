@@ -4,6 +4,7 @@ import type { MouseEvent as ReactMouseEvent } from 'react'
 import { clearTrash, deleteTrashJobs, fetchTrash, restoreJob } from './api'
 import type { TrashJobItem } from './api'
 import { formatBytes } from '../files/filesPageUtils'
+import { usePageTitle } from '../../usePageTitle'
 import {
   DATE_OPTIONS,
   dateFilterLabel,
@@ -20,6 +21,7 @@ import {
 type FilterMenu = 'date' | null
 
 export function TrashPage() {
+  usePageTitle('Trash')
   const [jobs, setJobs] = useState<TrashJobItem[]>([])
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
