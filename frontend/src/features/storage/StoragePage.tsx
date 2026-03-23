@@ -6,6 +6,7 @@ import { displayFilename, fileTypeLabel } from '../files/filesPageUtils'
 import { DATE_OPTIONS, TYPE_OPTIONS, type DateFilter, type TypeFilter } from '../files/filesPageTypes'
 import { batchDownloadJobs, trashJob } from '../files/api'
 import { fetchStorage, type StorageItem } from './api'
+import { usePageTitle } from '../../usePageTitle'
 
 type SortKey = 'name' | 'size'
 type SortDirection = 'asc' | 'desc'
@@ -27,6 +28,7 @@ function formatBytes(bytes: number) {
 }
 
 export function StoragePage() {
+  usePageTitle('Storage')
   const [data, setData] = useState<{ capacity_bytes: number; used_bytes: number; used_ratio: number; items: StorageItem[] } | null>(null)
   const [error, setError] = useState('')
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')

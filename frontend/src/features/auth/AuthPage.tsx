@@ -2,12 +2,14 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
 import { login, signup } from './api'
+import { usePageTitle } from '../../usePageTitle'
 
 type AuthPageProps = {
   mode: 'login' | 'signup'
 }
 
 export function AuthPage({ mode }: AuthPageProps) {
+  usePageTitle(mode === 'login' ? 'Login' : 'Join')
   const navigate = useNavigate()
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
