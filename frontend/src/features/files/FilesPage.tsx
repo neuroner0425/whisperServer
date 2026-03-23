@@ -51,6 +51,7 @@ import {
 } from './filesPageUtils'
 import { dateFilterLabel, extractDate } from './filesPageDateUtils'
 import { prunePendingUploads, startPendingUpload, usePendingUploads } from './uploadStore'
+import { usePageTitle } from '../../usePageTitle'
 
 export function FilesPage({ viewMode }: FilesPageProps) {
   const navigate = useNavigate()
@@ -86,6 +87,9 @@ export function FilesPage({ viewMode }: FilesPageProps) {
   const query = searchParams.get('q') ?? ''
   const page = normalizePage(searchParams.get('page'))
   const pendingUploads = usePendingUploads()
+  const folderTitle = data?.folder_path?.[data.folder_path.length - 1]?.Name || ''
+
+  usePageTitle(viewMode === 'home' ? 'Home' : viewMode === 'search' ? 'Search' : folderId ? folderTitle || 'Folder' : 'My Files')
 
   useEffect(() => {
     const openPicker = () => {

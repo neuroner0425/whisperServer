@@ -19,7 +19,7 @@ func DownloadHandler(c echo.Context, deps JobsDeps) error {
 }
 
 func DownloadRefinedHandler(c echo.Context, deps JobsDeps) error {
-	return downloadBlobHandler(c, deps, store.BlobKindRefined, "_refined.txt", "정제본이 없습니다.")
+	return downloadBlobHandler(c, deps, store.BlobKindRefined, "_refined.json", "정제본이 없습니다.")
 }
 
 func downloadBlobHandler(c echo.Context, deps JobsDeps, kind, suffix, notFoundMessage string) error {
@@ -41,7 +41,11 @@ func downloadBlobHandler(c echo.Context, deps JobsDeps, kind, suffix, notFoundMe
 	}
 	base := strings.TrimSuffix(job.Filename, filepath.Ext(job.Filename))
 	c.Response().Header().Set(echo.HeaderContentDisposition, fmt.Sprintf(`attachment; filename="%s"`, base+suffix))
-	return c.Blob(http.StatusOK, "text/plain; charset=utf-8", b)
+	contentType := "text/plain; charset=utf-8"
+	if kind == store.BlobKindRefined && strings.HasSuffix(suffix, ".json") {
+		contentType = "application/json; charset=utf-8"
+	}
+	return c.Blob(http.StatusOK, contentType, b)
 }
 
 func BatchDownloadHandler(c echo.Context, deps JobsDeps) error {
@@ -71,7 +75,7 @@ func BatchDownloadHandler(c echo.Context, deps JobsDeps) error {
 		ext := ".txt"
 		if store.HasJobBlob(id, store.BlobKindRefined) {
 			blobKind = store.BlobKindRefined
-			ext = "_refined.txt"
+			ext = "_refined.json"
 		}
 		b, err := store.LoadJobBlob(id, blobKind)
 		if err != nil {
