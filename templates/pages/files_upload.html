@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>새 업로드 - 파일 탐색기</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        /* 메인 영역 통합 스타일 */
+        .upload-form-container {
+            padding: 24px 32px;
+            max-width: 900px; /* 너무 퍼지지 않게 적절한 상한선만 유지 */
+        }
+        
+        .upload-section {
+            margin-bottom: 32px;
+        }
+        
+        .section-label {
+            display: block;
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #202124;
+            margin-bottom: 16px;
+        }
+
+        /* 드롭존: 메인 영역 너비에 맞춤 */
+        .drop-zone-wide {
+            width: 100%;
+            height: 240px;
+            border: 2px dashed #dadce0;
+            border-radius: 12px;
+            background: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+        }
+        .drop-zone-wide:hover, .drop-zone-wide.drag-over {
+            border-color: #1a73e8;
+            background: #f8faff;
+        }
+        .drop-zone-wide .icon { font-size: 48px; margin-bottom: 16px; }
+        .drop-zone-wide .text { font-size: 1.1rem; color: #5f6368; line-height: 1.6; }
+        .drop-zone-wide .text b { color: #1a73e8; }
+
+        .file-status-bar {
+            margin-top: 16px;
+            padding: 12px 16px;
+            background: #e8f0fe;
+            border-radius: 8px;
+            color: #174ea6;
+            font-weight: 600;
+            display: none;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* 설정 그리드 */
+        .config-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 24px;
+            padding-top: 24px;
+            border-top: 1px solid #e5e7eb;
+        }
+        
+        .config-field {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .config-field label {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: #5f6368;
+        }
+        .config-input {
+            height: 44px;
+            border: 1px solid #dadce0;
+            border-radius: 8px;
+            padding: 0 12px;
+            font-size: 1rem;
+            background: #fff;
+        }
+        .config-input:focus {
+            border-color: #1a73e8;
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(26,115,232,0.1);
+        }
+
+        /* 액션 버튼 */
+        .upload-actions {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-top: 40px;
+        }
+        .btn-main {
+            height: 48px;
+            padding: 0 32px;
+            border-radius: 24px; /* 둥근 버튼 스타일 */
+            font-weight: 700;
+            font-size: 1rem;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            text-decoration: none;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+        .btn-upload-start {
+            background: #1a73e8;
+            color: #fff;
+            border: none;
+            box-shadow: 0 1px 2px rgba(60,64,67,0.3), 0 1px 3px 1px rgba(60,64,67,0.15);
+        }
+        .btn-upload-start:hover {
+            background: #185abc;
+            box-shadow: 0 1px 3px rgba(60,64,67,0.3), 0 4px 8px 3px rgba(60,64,67,0.15);
+        }
+        .btn-upload-start:disabled {
+            background: #9ca3af;
+            box-shadow: none;
+            cursor: not-allowed;
+        }
+        .btn-upload-cancel {
+            background: transparent;
+            color: #5f6368;
+            border: 1px solid #dadce0;
+        }
+        .btn-upload-cancel:hover {
+            background: #f1f3f4;
+            color: #3c4043;
+        }
+        
+        #hidden-input { display: none; }
+    </style>
+</head>
+<body>
+<div class="page-shell">
+<div class="container">
+    <div class="drive-shell">
+        <header class="drive-topbar">
+            <div class="drive-brand">파일 탐색기</div>
+            <div class="drive-top-filler"></div>
+            <div class="profile-menu">
+                <button type="button" class="profile-button">{{.CurrentUserName}}</button>
+                <div class="profile-dropdown">
+                    <form method="post" action="/logout"><button type="submit">로그아웃</button></form>
+                </div>
+            </div>
+        </header>
+
+        <div class="drive-body">
+            <aside class="drive-sidebar">
+                <div class="drive-cta">
+                    <a href="/upload" class="action-link active">+ 새 업로드</a>
+                    <a href="/tags" class="action-link">태그 관리</a>
+                </div>
+
+                <div class="sidebar-nav">
+                    <a class="sidebar-link" href="/?view=home">홈</a>
+                    <a class="sidebar-link" href="/?view=explore">내 파일</a>
+                    <a class="sidebar-link" href="/trash">휴지통</a>
+                </div>
+            </aside>
+
+            <main class="drive-main">
+                <div class="drive-main-inner">
+                    <div class="content-header">
+                        <h2 class="content-title">새 파일 업로드</h2>
+                        <div class="content-sub">서버에 새로운 미디어 파일을 전송하여 작업을 시작합니다.</div>
+                    </div>
+
+                    <div class="upload-form-container">
+                        <form id="uploadForm" action="/upload" method="post" enctype="multipart/form-data">
+                            <!-- 1. 파일 선택 섹션 -->
+                            <div class="upload-section">
+                                <span class="section-label">1. 파일 선택</span>
+                                <div id="drop-zone" class="drop-zone-wide">
+                                    <div class="icon">📁</div>
+                                    <div class="text">
+                                        여기에 파일을 끌어다 놓거나<br>
+                                        <b>내 컴퓨터에서 선택</b>하세요
+                                    </div>
+                                    <input type="file" id="hidden-input" name="file" required>
+                                </div>
+                                <div id="file-info-bar" class="file-status-bar">
+                                    <span>📄</span>
+                                    <span id="file-name-text">선택된 파일 없음</span>
+                                </div>
+                            </div>
+
+                            <!-- 2. 상세 설정 섹션 -->
+                            <div class="upload-section">
+                                <span class="section-label">2. 상세 설정</span>
+                                <div class="config-grid">
+                                    <div class="config-field">
+                                        <label for="folder_id">저장 위치</label>
+                                        <select id="folder_id" name="folder_id" class="config-input">
+                                            <option value="">내 파일 (루트)</option>
+                                            {{range .Folders}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+                                        </select>
+                                    </div>
+
+                                    <div class="config-field">
+                                        <label for="tag">태그 지정 (선택)</label>
+                                        <select id="tag" name="tag" class="config-input">
+                                            <option value="">태그 없음</option>
+                                            {{range .Tags}}<option value="{{.Name}}">{{.Name}}</option>{{end}}
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 3. 작업 버튼 -->
+                            <div class="upload-actions">
+                                <button type="submit" id="btn-submit" class="btn-main btn-upload-start">업로드 시작</button>
+                                <a href="/" class="btn-main btn-upload-cancel">취소</a>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+</div>
+</div>
+
+<script>
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('hidden-input');
+    const fileInfoBar = document.getElementById('file-info-bar');
+    const fileNameText = document.getElementById('file-name-text');
+    const uploadForm = document.getElementById('uploadForm');
+    const submitBtn = document.getElementById('btn-submit');
+
+    // 드롭존 클릭 이벤트
+    dropZone.onclick = () => fileInput.click();
+
+    // 파일 선택 시 UI 업데이트
+    fileInput.onchange = () => {
+        if (fileInput.files.length > 0) {
+            fileNameText.textContent = fileInput.files[0].name;
+            fileInfoBar.style.display = 'flex';
+        }
+    };
+
+    // 드래그 앤 드롭 효과
+    ['dragenter', 'dragover'].forEach(name => {
+        dropZone.addEventListener(name, (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drag-over');
+        });
+    });
+
+    ['dragleave', 'drop'].forEach(name => {
+        dropZone.addEventListener(name, (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+        });
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+        if (e.dataTransfer.files.length > 0) {
+            fileInput.files = e.dataTransfer.files;
+            fileInput.dispatchEvent(new Event('change'));
+        }
+    });
+
+    // 중복 제출 방지
+    uploadForm.onsubmit = () => {
+        submitBtn.disabled = true;
+        submitBtn.textContent = '서버로 전송 중...';
+    };
+</script>
+</body>
+</html>
