@@ -1,0 +1,16 @@
+{{define "base"}}
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{template "page_title" .}}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    {{template "page_head_extra" .}}
+</head>
+<body{{template "page_body_attrs" .}}>
+{{template "page_body" .}}
+{{template "page_scripts" .}}
+</body>
+</html>
+{{end}}

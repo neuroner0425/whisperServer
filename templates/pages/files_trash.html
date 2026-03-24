@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>휴지통 - 파일 탐색기</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<div class="page-shell">
+<div class="container">
+    <div class="drive-shell">
+        <header class="drive-topbar">
+            <div class="drive-brand">파일 탐색기</div>
+            <div class="drive-top-filler"></div>
+            <div class="profile-menu">
+                <button type="button" class="profile-button">{{.CurrentUserName}}</button>
+                <div class="profile-dropdown">
+                    <form method="post" action="/logout"><button type="submit">로그아웃</button></form>
+                </div>
+            </div>
+        </header>
+
+        <div class="drive-body">
+            <aside class="drive-sidebar">
+                <div class="drive-cta">
+                    <a href="/upload" class="action-link">+ 새 업로드</a>
+                    <a href="/tags" class="action-link">태그 관리</a>
+                </div>
+
+                <div class="sidebar-nav">
+                    <a class="sidebar-link" href="/?view=home">홈</a>
+                    <a class="sidebar-link" href="/?view=explore">내 파일</a>
+                    <a class="sidebar-link active" href="/trash">휴지통</a>
+                </div>
+            </aside>
+
+            <main class="drive-main">
+                <div class="drive-main-inner">
+                    <div class="content-header">
+                        <h2 class="content-title">휴지통</h2>
+                        <div class="content-sub">삭제된 항목은 여기서 복구하거나 영구 삭제할 수 있습니다.</div>
+                    </div>
+
+                    <div id="home-files-stack" class="home-files-stack" style="padding: 0 18px;">
+                        <div class="file-list-header file-list-header-trash">
+                            <span class="col-name">이름</span>
+                            <span class="col-date">최근 변경</span>
+                            <span class="col-deleted">삭제 날짜</span>
+                            <span class="col-location">위치</span>
+                            <span class="col-action"></span>
+                        </div>
+                        {{range .JobItems}}
+                        <article class="home-file-row trash-file-row">
+                            <div class="col-name"><span class="file-icon">📄</span> <span class="entry-title">{{.Filename}}</span></div>
+                            <div class="col-date">{{if .UpdatedAt}}{{.UpdatedAt}}{{else}}-{{end}}</div>
+                            <div class="col-deleted">{{if .DeletedAt}}{{.DeletedAt}}{{else}}-{{end}}</div>
+                            <div class="col-location"><span class="loc-icon">📁</span> {{.FolderName}}</div>
+                            <div class="col-action">
+                                <form method="post" action="/job/{{.ID}}/restore">
+                                    <button type="submit" style="background:#f3f4f6; color:#374151; border:1px solid #d1d5db; height: 32px; padding: 0 12px; border-radius: 16px; font-size: 0.85em;">복구</button>
+                                </form>
+                            </div>
+                        </article>
+                        {{else}}
+                        <div style="text-align:center; color:#9ca3af; margin-top:40px;">휴지통이 비어 있습니다.</div>
+                        {{end}}
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+</div>
+</div>
+</body>
+</html>
