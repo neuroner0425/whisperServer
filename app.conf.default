@@ -1,0 +1,21 @@
+# WhisperServer runtime configuration
+# If app.conf exists, it is used instead of this default file.
+
+PORT=8000
+MAX_UPLOAD_SIZE_MB=512
+UPLOAD_RATE_LIMIT_KBPS=0
+JOB_TIMEOUT_SEC=3600
+GEMINI_MODEL=gemini-3-flash
+SPLIT_TRANSCRIBE_REFINE_QUEUE=false
+
+# Keep empty to use ephemeral secret on each process start.
+# For production, set a long random value.
+JWT_SECRET=
+JWT_ISSUER=whisperserver
+JWT_EXP_HOURS=24
+AUTH_COOKIE_SECURE=false
+
+# JSON array format for Gemini API keys.
+# Example:
+# GEMINI_API_KEYS=["key1","key2"]
+GEMINI_API_KEYS=[]
