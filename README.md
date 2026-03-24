@@ -17,8 +17,45 @@
 - `ffmpeg`, `ffprobe`
 - whisper runtime 파일
   - `whisper/bin/whisper-cli`
-  - `whisper/models/ggml-large-v3.bin`
+  - `whisper/models/ggml-model.bin` (선택한 모델을 가리키는 심볼릭 링크)
+  - `whisper/models/ggml-model-encoder.mlmodelc` (선택한 CoreML encoder를 가리키는 심볼릭 링크)
   - `whisper/models/ggml-silero-v6.2.0.bin`
+
+## macOS 설치
+
+기본 실행 시 먼저 설치 환경(macOS, Python, git, cmake, Xcode/CoreML 도구)을 검사한 뒤, 설치 가능한 Whisper 모델 목록을 번호로 보여주고 키보드로 선택하게 합니다. 아무 값도 입력하지 않으면 `large-v3`를 사용합니다.
+설치 스크립트는 선택한 실제 모델 파일을 복사한 뒤, 서버가 항상 `ggml-model.bin` 링크만 사용하도록 설정합니다. `large-v3-q5_0` 같은 양자화 모델을 선택하면, CoreML encoder는 대응하는 원본 모델(`large-v3`) 기준으로 생성해 링크합니다.
+설치 중 `whisper/` 런타임 디렉터리는 통째로 다시 생성되므로, 기존에 설치된 모델과 링크는 새 선택값으로 교체됩니다.
+
+```bash
+bash install_macos.sh
+```
+
+모델명을 바로 지정할 수도 있습니다.
+
+```bash
+bash install_macos.sh --model medium
+```
+
+양자화 모델도 직접 지정할 수 있습니다.
+
+```bash
+bash install_macos.sh --model large-v3-q5_0
+```
+
+위치는 옵션 없이 위치 인자로도 줄 수 있습니다.
+
+```bash
+bash install_macos.sh large-v3-turbo
+```
+
+환경 변수로 기본 모델과 CA 번들을 지정할 수도 있습니다.
+
+```bash
+WHISPER_MODEL=small WHISPER_CA_BUNDLE=/path/to/company-ca.pem bash install_macos.sh
+```
+
+`bash install_macos.sh --help` 를 실행하면 현재 스크립트 기준 사용법이 출력됩니다.
 
 ## 실행
 
