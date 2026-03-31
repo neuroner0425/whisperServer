@@ -9,6 +9,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"whisperserver/src/internal/model"
 	"whisperserver/src/internal/routes"
+	"whisperserver/src/internal/store"
 )
 
 func DisableCache(c echo.Context) {
@@ -67,6 +68,14 @@ func CurrentUserName(c echo.Context, currentUser func(echo.Context) (*User, erro
 	return u.Email
 }
 
+func CurrentUserOrUnauthorizedJSON(c echo.Context, currentUser func(echo.Context) (*User, error)) (*User, error) {
+	u, err := currentUser(c)
+	if err == nil {
+		return u, nil
+	}
+	return nil, c.JSON(http.StatusUnauthorized, map[string]string{"detail": "인증이 필요합니다."})
+}
+
 func RequireOwnedJob(c echo.Context, currentUser func(echo.Context) (*User, error), getJob func(string) *model.Job, jobID string, allowTrashed bool) (*model.Job, *User, error) {
 	u, err := currentUser(c)
 	if err != nil {
@@ -79,12 +88,39 @@ func RequireOwnedJob(c echo.Context, currentUser func(echo.Context) (*User, erro
 	return job, u, nil
 }
 
+func RequireFolderForOwner(ownerID, folderID string, allowTrashed bool, statusCode int, message string) (*model.Folder, error) {
+	folderID = NormalizeFolderID(folderID)
+	if folderID == "" {
+		return nil, nil
+	}
+	folder, err := store.GetFolderByID(ownerID, folderID)
+	if err != nil || (!allowTrashed && folder.IsTrashed) {
+		return nil, echo.NewHTTPError(statusCode, message)
+	}
+	return folder, nil
+}
+
 func SelectedTagMap(tags []string) map[string]bool {
 	out := map[string]bool{}
 	for _, t := range tags {
 		out[t] = true
 	}
 	return out
+}
+
+func ValidateOwnedTags(ownerID string, tags []string) ([]string, error) {
+	allowed, err := store.ListTagNamesByOwner(ownerID)
+	if err != nil {
+		return nil, err
+	}
+	validated := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		tag = strings.TrimSpace(tag)
+		if _, ok := allowed[tag]; ok {
+			validated = append(validated, tag)
+		}
+	}
+	return validated, nil
 }
 
 func ParseSelectedTags(c echo.Context, uniqueStrings func([]string) []string) []string {
@@ -100,6 +136,76 @@ func ParseSelectedTags(c echo.Context, uniqueStrings func([]string) []string) []
 
 func NormalizeFolderID(v string) string {
 	return strings.TrimSpace(v)
+}
+
+func TouchFolderAncestors(ownerID, folderID string, errf func(string, error, string, ...any), scope, details string, args ...any) {
+	if err := store.TouchFolderAndAncestors(ownerID, folderID); err != nil && errf != nil {
+		errf(scope, err, details, args...)
+	}
+}
+
+func EnsureRestoredFolder(ownerID, folderID string, logf func(string, ...any), errf func(string, error, string, ...any), scopePrefix string) string {
+	folderID = NormalizeFolderID(folderID)
+	if folderID == "" {
+		return ""
+	}
+	folder, err := store.GetFolderByID(ownerID, folderID)
+	if err == nil {
+		if folder.IsTrashed {
+			if err := store.SetFolderTrashed(ownerID, folderID, false); err != nil && errf != nil {
+				errf(scopePrefix+".restoreFolder", err, "owner_id=%s folder_id=%s", ownerID, folderID)
+			}
+		}
+		return folderID
+	}
+	newID, err := store.CreateFolder(ownerID, "복구된 폴더", "")
+	if err != nil {
+		if errf != nil {
+			errf(scopePrefix+".createFolder", err, "owner_id=%s missing_folder_id=%s", ownerID, folderID)
+		}
+		return ""
+	}
+	if logf != nil {
+		logf("[RESTORE] created_folder owner_id=%s missing_folder_id=%s new_folder_id=%s", ownerID, folderID, newID)
+	}
+	return newID
+}
+
+func ResumeRestoredJob(jobID string, job *model.Job, hasAudio func(string) bool, hasBlob func(string, string) bool, setJobFields func(string, map[string]any), enqueueTranscribe func(string), enqueueRefine func(string), statusPending, statusRefiningPending string) {
+	if job == nil || hasBlob == nil || setJobFields == nil {
+		return
+	}
+	if hasAudio != nil && hasAudio(jobID) && !hasBlob(jobID, store.BlobKindTranscript) {
+		setJobFields(jobID, map[string]any{
+			"status":           statusPending,
+			"phase":            "",
+			"progress_percent": 0,
+			"progress_label":   "",
+			"started_at":       "",
+			"started_ts":       0,
+			"completed_at":     "",
+			"completed_ts":     0,
+			"duration":         "",
+			"status_detail":    "",
+		})
+		if enqueueTranscribe != nil {
+			enqueueTranscribe(jobID)
+		}
+		return
+	}
+	if hasBlob(jobID, store.BlobKindTranscript) && !hasBlob(jobID, store.BlobKindRefined) && job.RefineEnabled {
+		setJobFields(jobID, map[string]any{
+			"status":         statusRefiningPending,
+			"progress_label": "",
+			"completed_at":   "",
+			"completed_ts":   0,
+			"duration":       "",
+			"status_detail":  "",
+		})
+		if enqueueRefine != nil {
+			enqueueRefine(jobID)
+		}
+	}
 }
 
 func IsJobTrashed(job *model.Job) bool {

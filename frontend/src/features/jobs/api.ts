@@ -47,6 +47,30 @@ export async function retryJob(jobId: string) {
   return (await response.json()) as { job_id: string; status: string }
 }
 
+export async function retranscribeJob(jobId: string) {
+  const response = await fetch(`/api/jobs/${jobId}/retranscribe`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+    },
+  })
+  if (response.status === 401) {
+    window.location.href = '/auth/login'
+    throw new Error('인증이 필요합니다.')
+  }
+  if (!response.ok) {
+    let message = `Failed to retranscribe job (${response.status})`
+    try {
+      const payload = (await response.json()) as { detail?: string; message?: string }
+      message = payload.detail || payload.message || message
+    } catch {
+      // ignore parse failure
+    }
+    throw new Error(message)
+  }
+  return (await response.json()) as { job_id: string; status: string; will_refine?: boolean }
+}
+
 export async function refineJob(jobId: string) {
   const response = await fetch(`/api/jobs/${jobId}/refine`, {
     method: 'POST',

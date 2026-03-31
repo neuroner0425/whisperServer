@@ -15,8 +15,6 @@ import (
 	"sync"
 )
 
-const modelSymlinkFileName = "ggml-model.bin"
-
 func (w *Worker) runWhisperFromBlob(ctx context.Context, jobID string, wavBytes []byte, totalSec *int) (string, []byte, error) {
 	tmpDir, err := os.MkdirTemp("", "whisper-job-*")
 	if err != nil {
@@ -32,27 +30,21 @@ func (w *Worker) runWhisperFromBlob(ctx context.Context, jobID string, wavBytes 
 }
 
 func (w *Worker) runWhisper(ctx context.Context, jobID, wavPath string, totalSec *int) (string, []byte, error) {
+	w.deps.Logf("[WHISPER] start job_id=%s wav=%s total_sec=%v", jobID, wavPath, totalSec)
 	outputPath := wavPath + ".txt"
 	outputJSONPath := wavPath + ".json"
-	modelBin := filepath.Join(w.cfg.ModelDir, modelSymlinkFileName)
-	w.deps.Logf("[WHISPER] start job_id=%s wav=%s model=%s total_sec=%v", jobID, wavPath, modelBin, totalSec)
+	modelBin := filepath.Join(w.cfg.ModelDir, "ggml-large-v3.bin")
 	vadModel := filepath.Join(w.cfg.ModelDir, "ggml-silero-v6.2.0.bin")
 
 	cmd := exec.CommandContext(ctx, w.cfg.WhisperCLI,
 		"-m", modelBin,
 		"-l", "ko",
 		"--max-context", "0",
-		"--no-speech-thold", "0.1",
+		"--no-speech-thold", "0.01",
 		"--suppress-nst",
 		"--vad",
 		"--vad-model", vadModel,
-		"--vad-threshold", "0.1",
-		"--vad-min-speech-duration-ms", "500",
-		"--vad-min-silence-duration-ms", "500",
-		"--vad-max-speech-duration-s", "20",
-		"--vad-speech-pad-ms", "150",
-		"--vad-samples-overlap", "0.05",
-		"--logprob-thold", "-0.8",
+		"--vad-threshold", "0.01",
 		"--output-txt",
 		"--output-json",
 		wavPath,
