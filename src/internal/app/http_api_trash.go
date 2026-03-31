@@ -5,13 +5,14 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v4"
+	httpx "whisperserver/src/internal/http"
 	"whisperserver/src/internal/store"
 )
 
 func apiTrashListJSONHandler(c echo.Context) error {
-	u, err := currentUser(c)
+	u, err := currentUserOrUnauthorized(c)
 	if err != nil {
-		return c.JSON(http.StatusUnauthorized, map[string]string{"detail": "인증이 필요합니다."})
+		return nil
 	}
 	rows := buildJobRowsForUser(u.ID, strings.TrimSpace(c.QueryParam("q")), "", "", true)
 	folders, _ := store.ListAllFoldersByOwner(u.ID, true)
@@ -22,87 +23,43 @@ func apiTrashListJSONHandler(c echo.Context) error {
 }
 
 func apiRestoreJobJSONHandler(c echo.Context) error {
-	u, err := currentUser(c)
+	u, job, err := requireOwnedJobOrNotFound(c, true)
 	if err != nil {
-		return c.JSON(http.StatusUnauthorized, map[string]string{"detail": "인증이 필요합니다."})
+		return err
 	}
 	jobID := c.Param("job_id")
-	job := getJob(jobID)
-	if job == nil || job.OwnerID != u.ID {
-		return echo.NewHTTPError(http.StatusNotFound, "작업을 찾을 수 없습니다.")
-	}
-	folderID := normalizeFolderID(job.FolderID)
+	folderID := httpx.EnsureRestoredFolder(u.ID, job.FolderID, procLogf, procErrf, "api.job.restore")
 	updates := map[string]any{"is_trashed": false, "deleted_at": ""}
-	if folderID != "" {
-		f, ferr := store.GetFolderByID(u.ID, folderID)
-		if ferr == nil {
-			if f.IsTrashed {
-				_ = store.SetFolderTrashed(u.ID, folderID, false)
-			}
-		} else {
-			newID, err := store.CreateFolder(u.ID, "복구된 폴더", "")
-			if err == nil {
-				updates["folder_id"] = newID
-				folderID = newID
-			} else {
-				updates["folder_id"] = ""
-				folderID = ""
-			}
-		}
-	}
+	updates["folder_id"] = folderID
 	setJobFields(jobID, updates)
 	job = getJob(jobID)
-	if job != nil {
-		if store.HasJobBlob(jobID, store.BlobKindAudioAAC) && !store.HasJobBlob(jobID, store.BlobKindTranscript) {
-			setJobFields(jobID, map[string]any{
-				"status":           statusPending,
-				"phase":            "",
-				"progress_percent": 0,
-				"progress_label":   "",
-				"started_at":       "",
-				"started_ts":       0,
-				"completed_at":     "",
-				"completed_ts":     0,
-				"duration":         "",
-				"status_detail":    "",
-			})
-			enqueueTranscribe(jobID)
-		} else if store.HasJobBlob(jobID, store.BlobKindTranscript) && !store.HasJobBlob(jobID, store.BlobKindRefined) && job.RefineEnabled {
-			setJobFields(jobID, map[string]any{
-				"status":         statusRefiningPending,
-				"progress_label": "",
-				"completed_at":   "",
-				"completed_ts":   0,
-				"duration":       "",
-				"status_detail":  "",
-			})
-			enqueueRefine(jobID)
-		}
-	}
-	_ = store.TouchFolderAndAncestors(u.ID, folderID)
+	httpx.ResumeRestoredJob(jobID, job, func(jobID string) bool {
+		return store.HasJobBlob(jobID, store.BlobKindAudioAAC)
+	}, store.HasJobBlob, setJobFields, enqueueTranscribe, enqueueRefine, statusPending, statusRefiningPending)
+	httpx.TouchFolderAncestors(u.ID, folderID, procErrf, "api.job.restoreTouchFolder", "owner_id=%s job_id=%s folder_id=%s", u.ID, jobID, folderID)
 	return c.JSON(http.StatusOK, map[string]string{"job_id": jobID, "status": "restored"})
 }
 
 func apiRestoreFolderJSONHandler(c echo.Context) error {
-	u, err := currentUser(c)
+	u, err := currentUserOrUnauthorized(c)
 	if err != nil {
-		return c.JSON(http.StatusUnauthorized, map[string]string{"detail": "인증이 필요합니다."})
+		return nil
 	}
 	folderID := c.Param("folder_id")
 	if err := store.SetFolderTrashed(u.ID, folderID, false); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "폴더 복구 실패")
 	}
 	if f, err := store.GetFolderByID(u.ID, folderID); err == nil {
-		_ = store.TouchFolderAndAncestors(u.ID, f.ParentID)
+		httpx.TouchFolderAncestors(u.ID, f.ParentID, procErrf, "api.folder.restoreTouchParent", "owner_id=%s folder_id=%s parent_id=%s", u.ID, folderID, f.ParentID)
 	}
-	eventBroker.Notify(u.ID, "files.changed", nil)
+	notifyFilesChanged(u.ID)
 	return c.JSON(http.StatusOK, map[string]string{"folder_id": folderID, "status": "restored"})
 }
 
 func clearTrashJSONHandler(c echo.Context) error {
-	u, err := currentUser(c)
+	u, err := currentUserOrUnauthorized(c)
 	if err != nil {
-		return c.JSON(http.StatusUnauthorized, map[string]string{"detail": "인증이 필요합니다."})
+		return nil
 	}
 
 	snapshot := jobsSnapshot()
@@ -116,7 +73,7 @@ func clearTrashJSONHandler(c echo.Context) error {
 	if err := store.DeleteTrashedFoldersByOwner(u.ID); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "휴지통 비우기 실패")
 	}
-	eventBroker.Notify(u.ID, "files.changed", nil)
+	notifyFilesChanged(u.ID)
 	return c.JSON(http.StatusOK, map[string]any{
 		"deleted_jobs": len(toDelete),
 		"status":       "cleared",
@@ -124,9 +81,9 @@ func clearTrashJSONHandler(c echo.Context) error {
 }
 
 func deleteTrashJobsJSONHandler(c echo.Context) error {
-	u, err := currentUser(c)
+	u, err := currentUserOrUnauthorized(c)
 	if err != nil {
-		return c.JSON(http.StatusUnauthorized, map[string]string{"detail": "인증이 필요합니다."})
+		return nil
 	}
 
 	var body struct {
@@ -148,7 +105,7 @@ func deleteTrashJobsJSONHandler(c echo.Context) error {
 	}
 
 	deleteJobs(toDelete)
-	eventBroker.Notify(u.ID, "files.changed", nil)
+	notifyFilesChanged(u.ID)
 	return c.JSON(http.StatusOK, map[string]any{
 		"deleted_jobs": len(toDelete),
 		"job_ids":      toDelete,

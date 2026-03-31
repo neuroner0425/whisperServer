@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 
-import { fetchJobDetail, refineJob, retryJob } from './api'
+import { fetchJobDetail, refineJob, retranscribeJob, retryJob } from './api'
 import type { JobDetailResponse } from './types'
 import { usePageTitle } from '../../usePageTitle'
 
@@ -40,6 +40,7 @@ export function JobDetailPage() {
   const [message, setMessage] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [isRetrying, setIsRetrying] = useState(false)
+  const [isRetranscribing, setIsRetranscribing] = useState(false)
   const [isRefining, setIsRefining] = useState(false)
   const [showMeta, setShowMeta] = useState(false)
   const [activeKey, setActiveKey] = useState('')
@@ -235,6 +236,26 @@ export function JobDetailPage() {
     }
   }
 
+  const handleRetranscribe = async () => {
+    if (!jobId || isRetranscribing) {
+      return
+    }
+    try {
+      setIsRetranscribing(true)
+      const payload = await retranscribeJob(jobId)
+      setMessage(payload.will_refine ? '전사를 다시 시작했고, 완료 후 정제도 다시 진행합니다.' : '전사를 다시 시작했습니다.')
+      const next = new URLSearchParams(searchParams)
+      next.delete('original')
+      setSearchParams(next)
+      const refreshed = await fetchJobDetail(jobId, false)
+      setData(refreshed)
+    } catch (retranscribeError) {
+      setError(normalizeLoadError(retranscribeError, '전사를 다시 시작하지 못했습니다.'))
+    } finally {
+      setIsRetranscribing(false)
+    }
+  }
+
   return (
     <section className="view-shell job-detail-view">
       <header className="view-header">
@@ -243,6 +264,11 @@ export function JobDetailPage() {
           <h1 className="view-title">{currentFileName}</h1>
         </div>
         <div className="view-actions">
+          {data?.status === '완료' ? (
+            <button className="ghost-button" disabled={isRetranscribing} onClick={() => void handleRetranscribe()} type="button">
+              {isRetranscribing ? '전사 다시 시작 중...' : '전사 다시하기'}
+            </button>
+          ) : null}
           {data?.status === '완료' && !data?.has_refined && data?.can_refine ? (
             <button className="ghost-button" disabled={isRefining} onClick={() => void handleRefine()} type="button">
               {isRefining ? '정제 시작 중...' : '정제하기'}
