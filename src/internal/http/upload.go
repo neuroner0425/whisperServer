@@ -74,17 +74,45 @@ func UploadPostHandler(c echo.Context, deps UploadDeps) error {
 		deps.Errf("upload.formFile", err, "missing file")
 		return echo.NewHTTPError(http.StatusBadRequest, "파일이 없습니다.")
 	}
+	jobID, _, err := createUploadedJob(c, u.ID, fileHeader, deps)
+	if err != nil {
+		return err
+	}
+	return c.Redirect(http.StatusSeeOther, routes.Job(jobID))
+}
+
+func UploadJSONHandler(c echo.Context, deps UploadDeps) error {
+	u, err := CurrentUserOrUnauthorizedJSON(c, deps.CurrentUser)
+	if err != nil {
+		return nil
+	}
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "파일이 없습니다.")
+	}
+	jobID, filename, err := createUploadedJob(c, u.ID, fileHeader, deps)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, map[string]string{
+		"job_id":   jobID,
+		"filename": filename,
+		"job_url":  routes.Job(jobID),
+	})
+}
+
+func createUploadedJob(c echo.Context, ownerID string, fileHeader *multipart.FileHeader, deps UploadDeps) (string, string, error) {
 	if fileHeader.Filename == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "파일을 선택하세요.")
+		return "", "", echo.NewHTTPError(http.StatusBadRequest, "파일을 선택하세요.")
 	}
 	if !deps.AllowedFile(fileHeader.Filename) {
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("허용되지 않는 파일 형식입니다. 허용: %s", strings.Join(deps.SortedExts(), ", ")))
+		return "", "", echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("허용되지 않는 파일 형식입니다. 허용: %s", strings.Join(deps.SortedExts(), ", ")))
 	}
 	if ct := fileHeader.Header.Get("Content-Type"); ct != "" && !strings.HasPrefix(ct, "audio/") {
-		return echo.NewHTTPError(http.StatusBadRequest, "현재는 오디오 파일만 업로드할 수 있습니다.")
+		return "", "", echo.NewHTTPError(http.StatusBadRequest, "현재는 오디오 파일만 업로드할 수 있습니다.")
 	}
 	if deps.DetectFileType(fileHeader.Filename) != "audio" {
-		return echo.NewHTTPError(http.StatusBadRequest, "현재는 오디오 파일만 업로드할 수 있습니다.")
+		return "", "", echo.NewHTTPError(http.StatusBadRequest, "현재는 오디오 파일만 업로드할 수 있습니다.")
 	}
 
 	inputName := c.FormValue("display_name")
@@ -94,23 +122,15 @@ func UploadPostHandler(c echo.Context, deps UploadDeps) error {
 		selectedTags = append(selectedTags, singleTag)
 	}
 	folderID := deps.NormalizeFolderID(c.FormValue("folder_id"))
-	allowedTags, err := store.ListTagNamesByOwner(u.ID)
+	validatedTags, err := ValidateOwnedTags(ownerID, selectedTags)
 	if err != nil {
-		deps.Errf("upload.listTagNames", err, "owner_id=%s", u.ID)
-		return echo.NewHTTPError(http.StatusInternalServerError, "태그 조회 실패")
-	}
-
-	validatedTags := make([]string, 0, len(selectedTags))
-	for _, t := range selectedTags {
-		if _, ok := allowedTags[t]; ok {
-			validatedTags = append(validatedTags, t)
-		}
+		deps.Errf("upload.listTagNames", err, "owner_id=%s", ownerID)
+		return "", "", echo.NewHTTPError(http.StatusInternalServerError, "태그 조회 실패")
 	}
 	refineEnabled := deps.Truthy(c.FormValue("refine"))
 	if folderID != "" {
-		f, err := store.GetFolderByID(u.ID, folderID)
-		if err != nil || f.IsTrashed {
-			return echo.NewHTTPError(http.StatusBadRequest, "유효하지 않은 폴더입니다.")
+		if _, err := RequireFolderForOwner(ownerID, folderID, false, http.StatusBadRequest, "유효하지 않은 폴더입니다."); err != nil {
+			return "", "", err
 		}
 	}
 
@@ -132,17 +152,17 @@ func UploadPostHandler(c echo.Context, deps UploadDeps) error {
 		_ = os.Remove(tempPath)
 		if deps.IsUploadTooLarge(err) {
 			deps.Errf("upload.save", err, "file=%s too large", originalFilename)
-			return echo.NewHTTPError(http.StatusRequestEntityTooLarge, fmt.Sprintf("업로드 용량 초과(%dMB)", deps.MaxUploadSizeMB))
+			return "", "", echo.NewHTTPError(http.StatusRequestEntityTooLarge, fmt.Sprintf("업로드 용량 초과(%dMB)", deps.MaxUploadSizeMB))
 		}
 		deps.Errf("upload.save", err, "file=%s", originalFilename)
-		return echo.NewHTTPError(http.StatusInternalServerError, "파일 저장 실패")
+		return "", "", echo.NewHTTPError(http.StatusInternalServerError, "파일 저장 실패")
 	}
 	deps.UploadBytesAdd(float64(totalBytes))
 
 	if err := deps.ConvertToAac(tempPath, aacPath); err != nil {
 		_ = os.Remove(tempPath)
 		deps.Errf("upload.convertToAac", err, "job_id=%s src=%s dst=%s", jobID, tempPath, aacPath)
-		return echo.NewHTTPError(http.StatusInternalServerError, "ffmpeg 변환 실패")
+		return "", "", echo.NewHTTPError(http.StatusInternalServerError, "ffmpeg 변환 실패")
 	}
 	_ = os.Remove(tempPath)
 
@@ -150,7 +170,7 @@ func UploadPostHandler(c echo.Context, deps UploadDeps) error {
 	if err != nil {
 		_ = os.Remove(aacPath)
 		deps.Errf("upload.readAac", err, "job_id=%s path=%s", jobID, aacPath)
-		return echo.NewHTTPError(http.StatusInternalServerError, "업로드 파일 처리 실패")
+		return "", "", echo.NewHTTPError(http.StatusInternalServerError, "업로드 파일 처리 실패")
 	}
 
 	duration := deps.GetMediaDuration(aacPath)
@@ -164,7 +184,7 @@ func UploadPostHandler(c echo.Context, deps UploadDeps) error {
 		MediaDuration:        deps.FormatSecondsPtr(duration),
 		MediaDurationSeconds: duration,
 		RefineEnabled:        refineEnabled,
-		OwnerID:              u.ID,
+		OwnerID:              ownerID,
 		Tags:                 validatedTags,
 		FolderID:             folderID,
 		IsTrashed:            false,
@@ -174,18 +194,16 @@ func UploadPostHandler(c echo.Context, deps UploadDeps) error {
 	}
 
 	deps.AddJob(jobID, job)
-	if err := store.TouchFolderAndAncestors(u.ID, folderID); err != nil {
-		deps.Errf("upload.touchFolder", err, "owner_id=%s folder_id=%s job_id=%s", u.ID, folderID, jobID)
-	}
+	TouchFolderAncestors(ownerID, folderID, deps.Errf, "upload.touchFolder", "owner_id=%s folder_id=%s job_id=%s", ownerID, folderID, jobID)
 	if err := store.SaveJobBlob(jobID, store.BlobKindAudioAAC, aacBytes); err != nil {
 		_ = os.Remove(aacPath)
 		deps.Errf("upload.saveAudioBlob", err, "job_id=%s", jobID)
 		deps.DeleteJobs([]string{jobID})
-		return echo.NewHTTPError(http.StatusInternalServerError, "오디오 파일 저장 실패")
+		return "", "", echo.NewHTTPError(http.StatusInternalServerError, "오디오 파일 저장 실패")
 	}
 	_ = os.Remove(aacPath)
 
 	deps.EnqueueTranscribe(jobID)
 	deps.Logf("[UPLOAD] queued job_id=%s filename=%s bytes=%d", jobID, inputName, totalBytes)
-	return c.Redirect(http.StatusSeeOther, routes.Job(jobID))
+	return jobID, inputName, nil
 }
