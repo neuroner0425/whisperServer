@@ -137,7 +137,7 @@ func ConvertToAac(src, dst string) error {
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("ffmpeg failed: %s", string(out))
+		return fmt.Errorf("ffmpeg failed: %w | output=%s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
@@ -146,7 +146,8 @@ func runFFmpeg(args ...string) (string, error) {
 	cmd := exec.Command("ffmpeg", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return strings.TrimSpace(string(out)), err
+		trimmed := strings.TrimSpace(string(out))
+		return trimmed, fmt.Errorf("%w | output=%s", err, trimmed)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
