@@ -8,7 +8,7 @@ import (
 )
 
 var (
-	processingLogPath = filepath.Join(projectRoot, ".run", "processing.log")
+	processingLogPath = filepath.Join(projectRoot, "log", "processing.log")
 	processingLogFile *os.File
 	processingLogger  = log.New(os.Stdout, "", log.LstdFlags|log.Lmicroseconds)
 )
