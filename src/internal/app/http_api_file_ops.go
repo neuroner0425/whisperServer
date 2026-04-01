@@ -10,13 +10,14 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	httpx "whisperserver/src/internal/http"
 	"whisperserver/src/internal/store"
 )
 
 func apiBatchMoveJSONHandler(c echo.Context) error {
-	u, err := currentUser(c)
+	u, err := currentUserOrUnauthorized(c)
 	if err != nil {
-		return c.JSON(http.StatusUnauthorized, map[string]string{"detail": "인증이 필요합니다."})
+		return nil
 	}
 	var body struct {
 		JobIDs         []string `json:"job_ids"`
@@ -26,17 +27,16 @@ func apiBatchMoveJSONHandler(c echo.Context) error {
 	if err := c.Bind(&body); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "잘못된 요청입니다.")
 	}
-	targetFolder := normalizeFolderID(body.TargetFolderID)
+	targetFolder := httpx.NormalizeFolderID(body.TargetFolderID)
 	if targetFolder != "" {
-		f, err := store.GetFolderByID(u.ID, targetFolder)
-		if err != nil || f.IsTrashed {
-			return echo.NewHTTPError(http.StatusBadRequest, "유효하지 않은 대상 폴더입니다.")
+		if _, err := httpx.RequireFolderForOwner(u.ID, targetFolder, false, http.StatusBadRequest, "유효하지 않은 대상 폴더입니다."); err != nil {
+			return err
 		}
 	}
 	touchedFolders := map[string]struct{}{}
 	for _, id := range body.JobIDs {
 		job := getJob(id)
-		if job != nil && job.OwnerID == u.ID && !isJobTrashed(job) {
+		if job != nil && job.OwnerID == u.ID && !httpx.IsJobTrashed(job) {
 			if job.FolderID != "" {
 				touchedFolders[job.FolderID] = struct{}{}
 			}
@@ -47,12 +47,12 @@ func apiBatchMoveJSONHandler(c echo.Context) error {
 		}
 	}
 	for _, id := range body.FolderIDs {
-		id = normalizeFolderID(id)
+		id = httpx.NormalizeFolderID(id)
 		if id == "" || id == targetFolder {
 			continue
 		}
-		f, err := store.GetFolderByID(u.ID, id)
-		if err != nil || f.IsTrashed {
+		f, err := httpx.RequireFolderForOwner(u.ID, id, false, http.StatusBadRequest, "유효하지 않은 폴더입니다.")
+		if err != nil {
 			continue
 		}
 		if targetFolder != "" {
@@ -72,9 +72,9 @@ func apiBatchMoveJSONHandler(c echo.Context) error {
 		}
 	}
 	for id := range touchedFolders {
-		_ = store.TouchFolderAndAncestors(u.ID, id)
+		httpx.TouchFolderAncestors(u.ID, id, procErrf, "api.batchMove.touchFolder", "owner_id=%s folder_id=%s target_folder_id=%s", u.ID, id, targetFolder)
 	}
-	eventBroker.Notify(u.ID, "files.changed", nil)
+	notifyFilesChanged(u.ID)
 	return c.JSON(http.StatusOK, map[string]any{
 		"target_folder_id": targetFolder,
 		"job_ids":          body.JobIDs,
@@ -83,11 +83,11 @@ func apiBatchMoveJSONHandler(c echo.Context) error {
 }
 
 func downloadFolderJSONHandler(c echo.Context) error {
-	u, err := currentUser(c)
+	u, err := currentUserOrUnauthorized(c)
 	if err != nil {
-		return c.JSON(http.StatusUnauthorized, map[string]string{"detail": "인증이 필요합니다."})
+		return nil
 	}
-	folderID := normalizeFolderID(c.Param("folder_id"))
+	folderID := httpx.NormalizeFolderID(c.Param("folder_id"))
 	if folderID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "폴더를 찾을 수 없습니다.")
 	}
@@ -106,7 +106,7 @@ func downloadFolderJSONHandler(c echo.Context) error {
 		if job.OwnerID != u.ID || job.IsTrashed || job.Status != statusCompleted {
 			continue
 		}
-		if _, ok := subtree[normalizeFolderID(job.FolderID)]; !ok {
+		if _, ok := subtree[httpx.NormalizeFolderID(job.FolderID)]; !ok {
 			continue
 		}
 		blobKind := store.BlobKindTranscript

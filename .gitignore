@@ -13,6 +13,7 @@ app.conf
 coverage.out
 
 bin/
+server
 whisper/
 static/app/
 frontend/node_modules/

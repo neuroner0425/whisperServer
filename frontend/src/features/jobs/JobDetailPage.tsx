@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 
-import { fetchJobDetail, refineJob, retryJob } from './api'
+import { fetchJobDetail, refineJob, rerefineJob, retranscribeJob, retryJob } from './api'
 import type { JobDetailResponse } from './types'
 import { usePageTitle } from '../../usePageTitle'
 
@@ -40,7 +40,9 @@ export function JobDetailPage() {
   const [message, setMessage] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [isRetrying, setIsRetrying] = useState(false)
+  const [isRetranscribing, setIsRetranscribing] = useState(false)
   const [isRefining, setIsRefining] = useState(false)
+  const [isRerefining, setIsRerefining] = useState(false)
   const [showMeta, setShowMeta] = useState(false)
   const [activeKey, setActiveKey] = useState('')
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -235,6 +237,46 @@ export function JobDetailPage() {
     }
   }
 
+  const handleRetranscribe = async () => {
+    if (!jobId || isRetranscribing) {
+      return
+    }
+    try {
+      setIsRetranscribing(true)
+      const payload = await retranscribeJob(jobId)
+      setMessage(payload.will_refine ? '전사를 다시 시작했고, 완료 후 정제도 다시 진행합니다.' : '전사를 다시 시작했습니다.')
+      const next = new URLSearchParams(searchParams)
+      next.delete('original')
+      setSearchParams(next)
+      const refreshed = await fetchJobDetail(jobId, false)
+      setData(refreshed)
+    } catch (retranscribeError) {
+      setError(normalizeLoadError(retranscribeError, '전사를 다시 시작하지 못했습니다.'))
+    } finally {
+      setIsRetranscribing(false)
+    }
+  }
+
+  const handleRerefine = async () => {
+    if (!jobId || isRerefining) {
+      return
+    }
+    try {
+      setIsRerefining(true)
+      await rerefineJob(jobId)
+      setMessage('정제를 다시 시작했습니다.')
+      const next = new URLSearchParams(searchParams)
+      next.delete('original')
+      setSearchParams(next)
+      const refreshed = await fetchJobDetail(jobId, false)
+      setData(refreshed)
+    } catch (rerefineError) {
+      setError(normalizeLoadError(rerefineError, '정제를 다시 시작하지 못했습니다.'))
+    } finally {
+      setIsRerefining(false)
+    }
+  }
+
   return (
     <section className="view-shell job-detail-view">
       <header className="view-header">
@@ -243,11 +285,6 @@ export function JobDetailPage() {
           <h1 className="view-title">{currentFileName}</h1>
         </div>
         <div className="view-actions">
-          {data?.status === '완료' && !data?.has_refined && data?.can_refine ? (
-            <button className="ghost-button" disabled={isRefining} onClick={() => void handleRefine()} type="button">
-              {isRefining ? '정제 시작 중...' : '정제하기'}
-            </button>
-          ) : null}
           {data?.status === '실패' ? (
             <button className="ghost-button" disabled={isRetrying} onClick={() => void handleRetry()} type="button">
               {isRetrying ? '재시도 중...' : '재시도'}
@@ -288,6 +325,23 @@ export function JobDetailPage() {
                 <div className="detail-row compact">
                   <span className="detail-label">계정</span>
                   <span className="detail-value">{data.current_user_name || '-'}</span>
+                </div>
+                <div className="detail-meta-actions">
+                  {data.status === '완료' ? (
+                    <button className="ghost-button small" disabled={isRetranscribing} onClick={() => void handleRetranscribe()} type="button">
+                      {isRetranscribing ? '전사 다시 시작 중...' : '전사 다시하기'}
+                    </button>
+                  ) : null}
+                  {data.status === '완료' && data.has_refined && data.can_refine ? (
+                    <button className="ghost-button small" disabled={isRerefining} onClick={() => void handleRerefine()} type="button">
+                      {isRerefining ? '정제 다시 시작 중...' : '정제 다시하기'}
+                    </button>
+                  ) : null}
+                  {data.status === '완료' && !data.has_refined && data.can_refine ? (
+                    <button className="ghost-button small" disabled={isRefining} onClick={() => void handleRefine()} type="button">
+                      {isRefining ? '정제 시작 중...' : '정제하기'}
+                    </button>
+                  ) : null}
                 </div>
               </section>
             ) : null}

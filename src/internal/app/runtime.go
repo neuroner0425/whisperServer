@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	httpx "whisperserver/src/internal/http"
 	"whisperserver/src/internal/model"
 	"whisperserver/src/internal/store"
 	"whisperserver/src/internal/worker"
@@ -73,7 +74,7 @@ func collectFolderSubtree(userID string, folderIDs []string, trashFolders bool) 
 	allFolders, _ := store.ListAllFoldersByOwner(userID, false)
 	selectedFolders := make(map[string]struct{}, len(folderIDs))
 	for _, id := range folderIDs {
-		id = normalizeFolderID(id)
+		id = httpx.NormalizeFolderID(id)
 		if id == "" {
 			continue
 		}
@@ -116,7 +117,7 @@ func markSubtreeJobsTrashed(userID string, subtree map[string]struct{}) {
 		if job.OwnerID != userID {
 			continue
 		}
-		if _, ok := subtree[normalizeFolderID(job.FolderID)]; ok {
+		if _, ok := subtree[httpx.NormalizeFolderID(job.FolderID)]; ok {
 			job.IsTrashed = true
 			job.DeletedTS = deletedTS
 			hydrateJobDerivedFields(job)

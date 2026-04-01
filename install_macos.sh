@@ -529,8 +529,6 @@ check_build_environment() {
     return
   fi
 
-  echo "======Checking build environment...======"
-
   if [[ "${BUILD_FRONTEND}" -eq 1 ]]; then
     require_command "npm" "npm not found, but frontend build is required."
   fi
@@ -539,6 +537,22 @@ check_build_environment() {
   fi
 
   echo "[OK] Build environment validated."
+}
+
+validate_selected_actions() {
+  echo "======Validating selected requirements...======"
+
+  if [[ "${INSTALL_WHISPER}" -eq 1 ]]; then
+    check_whisper_environment
+  else
+    echo "[OK] Whisper installation not selected. Whisper toolchain validation skipped."
+  fi
+
+  if [[ "${BUILD_FRONTEND}" -eq 1 || "${BUILD_BACKEND}" -eq 1 ]]; then
+    check_build_environment
+  else
+    echo "[OK] Frontend/backend build not selected. Build tool validation skipped."
+  fi
 }
 
 setup_install_env() {
@@ -678,40 +692,42 @@ test_whisper_runtime() {
 install_whisper_runtime() {
   local coreml_model_name=""
 
-  trap cleanup_install_env EXIT
-  setup_install_env
-  configure_ssl_environment
+  (
+    trap cleanup_install_env EXIT
 
-  echo "======Installing Python requirements for macOS/CoreML build...======"
-  python -m pip install "${WHISPER_PYTHON_PACKAGES[@]}"
+    setup_install_env
+    configure_ssl_environment
 
-  echo "======Cloning whisper.cpp repository...======"
-  remove_path "${WHISPER_BUILD_DIR}"
-  git clone --depth 1 https://github.com/ggerganov/whisper.cpp.git "${WHISPER_BUILD_DIR}"
+    echo "======Installing Python requirements for macOS/CoreML build...======"
+    python -m pip install "${WHISPER_PYTHON_PACKAGES[@]}"
 
-  cd "${WHISPER_BUILD_DIR}"
+    echo "======Cloning whisper.cpp repository...======"
+    remove_path "${WHISPER_BUILD_DIR}"
+    git clone --depth 1 https://github.com/ggerganov/whisper.cpp.git "${WHISPER_BUILD_DIR}"
 
-  echo "======Configuring CMake for CoreML...======"
-  cmake -B build -DWHISPER_COREML=1
+    cd "${WHISPER_BUILD_DIR}"
 
-  echo "======Building with CMake...======"
-  cmake --build build --config Release
+    echo "======Configuring CMake for CoreML...======"
+    cmake -B build -DWHISPER_COREML=1
 
-  echo "======Downloading GGML model (${MODEL_NAME})...======"
-  bash ./models/download-ggml-model.sh "${MODEL_NAME}"
+    echo "======Building with CMake...======"
+    cmake --build build --config Release
 
-  coreml_model_name="$(resolve_coreml_model_name "${MODEL_NAME}")"
-  echo "======Generating CoreML model (${coreml_model_name})...======"
-  bash ./models/generate-coreml-model.sh "${coreml_model_name}"
+    echo "======Downloading GGML model (${MODEL_NAME})...======"
+    bash ./models/download-ggml-model.sh "${MODEL_NAME}"
 
-  echo "======Downloading VAD model (${VAD_MODEL_NAME})...======"
-  bash ./models/download-vad-model.sh "${VAD_MODEL_NAME}"
+    coreml_model_name="$(resolve_coreml_model_name "${MODEL_NAME}")"
+    echo "======Generating CoreML model (${coreml_model_name})...======"
+    bash ./models/generate-coreml-model.sh "${coreml_model_name}"
 
-  prepare_runtime_dir
-  configure_runtime_rpaths
+    echo "======Downloading VAD model (${VAD_MODEL_NAME})...======"
+    bash ./models/download-vad-model.sh "${VAD_MODEL_NAME}"
+
+    prepare_runtime_dir
+    configure_runtime_rpaths
+  )
 
   cd "${PROJECT_ROOT}"
-  remove_path "${WHISPER_BUILD_DIR}"
   test_whisper_runtime
 }
 
@@ -757,14 +773,12 @@ main() {
   check_base_environment
   decide_whisper_install
   decide_build_actions
+  validate_selected_actions
 
   if [[ "${INSTALL_WHISPER}" -eq 1 ]]; then
-    check_whisper_environment
     select_model
     install_whisper_runtime
   fi
-
-  check_build_environment
 
   if [[ "${BUILD_FRONTEND}" -eq 1 ]]; then
     build_frontend

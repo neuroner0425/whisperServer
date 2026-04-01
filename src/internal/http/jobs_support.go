@@ -71,6 +71,7 @@ func BuildJobRowsForUser(userID, q, tag, folderID string, trashed bool, deps Job
 			IsRefined:       job.IsRefined(),
 			TagText:         strings.Join(tags, ", "),
 			FolderID:        fID,
+			ClientUploadID:  job.ClientUploadID,
 			IsTrashed:       deps.IsJobTrashed(job),
 			UpdatedAt:       jobDisplayUpdatedAt(job),
 			DeletedAt:       job.DeletedAt,
@@ -146,6 +147,7 @@ func BuildRecentJobRowsForUser(userID, q, tag string, deps JobSupportDeps) []Job
 			IsRefined:       job.IsRefined(),
 			TagText:         strings.Join(tags, ", "),
 			FolderID:        fID,
+			ClientUploadID:  job.ClientUploadID,
 			IsTrashed:       false,
 			UpdatedAt:       jobDisplayUpdatedAt(job),
 			DeletedAt:       job.DeletedAt,
@@ -232,7 +234,7 @@ func JobsSnapshotVersion(jobItems []JobRow, folderItems []FolderRow, page, pageS
 	for _, j := range jobItems {
 		fmt.Fprintf(
 			h,
-			"J|%s|%s|%s|%s|%d|%s|%s|%d|%t|%s|%s|%t|%s|%s;",
+			"J|%s|%s|%s|%s|%d|%s|%s|%d|%t|%s|%s|%s|%t|%s|%s;",
 			j.ID,
 			j.Filename,
 			j.FileType,
@@ -244,6 +246,7 @@ func JobsSnapshotVersion(jobItems []JobRow, folderItems []FolderRow, page, pageS
 			j.IsRefined,
 			j.TagText,
 			j.FolderID,
+			j.ClientUploadID,
 			j.IsTrashed,
 			j.UpdatedAt,
 			j.DeletedAt,

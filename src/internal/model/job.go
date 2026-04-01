@@ -12,6 +12,7 @@ type Job struct {
 	MediaDuration        string   `json:"media_duration,omitempty"`
 	MediaDurationSeconds *int     `json:"media_duration_seconds,omitempty"`
 	Description          string   `json:"description,omitempty"`
+	ClientUploadID       string   `json:"client_upload_id,omitempty"`
 	RefineEnabled        bool     `json:"refine_enabled,omitempty"`
 	OwnerID              string   `json:"owner_id,omitempty"`
 	Tags                 []string `json:"tags,omitempty"`

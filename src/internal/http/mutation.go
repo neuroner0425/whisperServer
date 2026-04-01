@@ -67,9 +67,7 @@ func BatchDeleteHandler(c echo.Context, deps MutationDeps) error {
 	subtree := deps.CollectFolderSubtree(u.ID, folderIDs, true)
 	deps.MarkSubtreeJobsTrashed(u.ID, subtree)
 	for id := range touchedFolders {
-		if err := store.TouchFolderAndAncestors(u.ID, id); err != nil {
-			deps.Errf("batchDelete.touchFolder", err, "owner_id=%s folder_id=%s", u.ID, id)
-		}
+		TouchFolderAncestors(u.ID, id, deps.Errf, "batchDelete.touchFolder", "owner_id=%s folder_id=%s", u.ID, id)
 	}
 	deps.Logf("[BATCH_TRASH] success jobs=%d folders=%d subtree=%d", len(ownedJobs), len(folderIDs), len(subtree))
 	return c.Redirect(http.StatusSeeOther, routes.FilesHome)

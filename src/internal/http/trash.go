@@ -42,75 +42,13 @@ func RestoreJobHandler(c echo.Context, deps TrashDeps) error {
 	if job == nil || job.OwnerID != u.ID {
 		return c.Redirect(http.StatusSeeOther, routes.Trash)
 	}
-	folderID := deps.NormalizeFolderID(job.FolderID)
+	folderID := EnsureRestoredFolder(u.ID, deps.NormalizeFolderID(job.FolderID), deps.Logf, deps.Errf, "job.restore")
 	updates := map[string]any{"is_trashed": false, "deleted_at": ""}
-	if folderID != "" {
-		f, ferr := store.GetFolderByID(u.ID, folderID)
-		if ferr == nil {
-			if f.IsTrashed {
-				if err := store.SetFolderTrashed(u.ID, folderID, false); err != nil {
-					deps.Errf("job.restoreFolder", err, "owner_id=%s job_id=%s folder_id=%s", u.ID, jobID, folderID)
-				}
-			}
-		} else {
-			newID, err := store.CreateFolder(u.ID, "복구된 폴더", "")
-			if err != nil {
-				deps.Errf("job.restoreCreateFolder", err, "owner_id=%s job_id=%s missing_folder_id=%s", u.ID, jobID, folderID)
-				updates["folder_id"] = ""
-			} else {
-				updates["folder_id"] = newID
-				deps.Logf("[JOB] restore created_folder owner_id=%s job_id=%s new_folder_id=%s", u.ID, jobID, newID)
-			}
-		}
-	}
+	updates["folder_id"] = folderID
 	deps.SetJobFields(jobID, updates)
-	requeueRestoredJob(jobID, deps)
-	restoreFolderID := folderID
-	if nextFolderID, ok := updates["folder_id"].(string); ok {
-		restoreFolderID = nextFolderID
-	}
-	if err := store.TouchFolderAndAncestors(u.ID, restoreFolderID); err != nil {
-		deps.Errf("job.restoreTouchFolder", err, "owner_id=%s job_id=%s folder_id=%s", u.ID, jobID, restoreFolderID)
-	}
+	ResumeRestoredJob(jobID, deps.GetJob(jobID), deps.HasAudioBlob, deps.HasJobBlob, deps.SetJobFields, deps.EnqueueTranscribe, deps.EnqueueRefine, deps.StatusPending, deps.StatusRefiningPending)
+	TouchFolderAncestors(u.ID, folderID, deps.Errf, "job.restoreTouchFolder", "owner_id=%s job_id=%s folder_id=%s", u.ID, jobID, folderID)
 	return c.Redirect(http.StatusSeeOther, routes.Trash)
-}
-
-func requeueRestoredJob(jobID string, deps TrashDeps) {
-	job := deps.GetJob(jobID)
-	if job == nil || deps.HasJobBlob == nil {
-		return
-	}
-	if deps.HasAudioBlob != nil && deps.HasAudioBlob(jobID) && !deps.HasJobBlob(jobID, store.BlobKindTranscript) {
-		deps.SetJobFields(jobID, map[string]any{
-			"status":           deps.StatusPending,
-			"phase":            "",
-			"progress_percent": 0,
-			"progress_label":   "",
-			"started_at":       "",
-			"started_ts":       0,
-			"completed_at":     "",
-			"completed_ts":     0,
-			"duration":         "",
-			"status_detail":    "",
-		})
-		if deps.EnqueueTranscribe != nil {
-			deps.EnqueueTranscribe(jobID)
-		}
-		return
-	}
-	if deps.HasJobBlob(jobID, store.BlobKindTranscript) && !deps.HasJobBlob(jobID, store.BlobKindRefined) && job.RefineEnabled {
-		deps.SetJobFields(jobID, map[string]any{
-			"status":         deps.StatusRefiningPending,
-			"progress_label": "",
-			"completed_at":   "",
-			"completed_ts":   0,
-			"duration":       "",
-			"status_detail":  "",
-		})
-		if deps.EnqueueRefine != nil {
-			deps.EnqueueRefine(jobID)
-		}
-	}
 }
 
 func TrashJobHandler(c echo.Context, deps TrashDeps) error {
@@ -125,9 +63,7 @@ func TrashJobHandler(c echo.Context, deps TrashDeps) error {
 	}
 	deps.CancelJob(jobID)
 	deps.SetJobFields(jobID, map[string]any{"is_trashed": true, "deleted_at": time.Now().Format("2006-01-02 15:04:05")})
-	if err := store.TouchFolderAndAncestors(u.ID, job.FolderID); err != nil {
-		deps.Errf("job.trashTouchFolder", err, "owner_id=%s job_id=%s folder_id=%s", u.ID, jobID, job.FolderID)
-	}
+	TouchFolderAncestors(u.ID, job.FolderID, deps.Errf, "job.trashTouchFolder", "owner_id=%s job_id=%s folder_id=%s", u.ID, jobID, job.FolderID)
 	return c.Redirect(http.StatusSeeOther, routes.FilesHome)
 }
 
@@ -163,9 +99,7 @@ func RestoreFolderHandler(c echo.Context, deps TrashDeps) error {
 		deps.Errf("folder.restore", err, "owner_id=%s folder_id=%s", u.ID, folderID)
 	}
 	if f, err := store.GetFolderByID(u.ID, folderID); err == nil {
-		if err := store.TouchFolderAndAncestors(u.ID, f.ParentID); err != nil {
-			deps.Errf("folder.restoreTouchParent", err, "owner_id=%s folder_id=%s parent_id=%s", u.ID, folderID, f.ParentID)
-		}
+		TouchFolderAncestors(u.ID, f.ParentID, deps.Errf, "folder.restoreTouchParent", "owner_id=%s folder_id=%s parent_id=%s", u.ID, folderID, f.ParentID)
 	}
 	return c.Redirect(http.StatusSeeOther, routes.Trash)
 }
@@ -183,9 +117,7 @@ func TrashFolderHandler(c echo.Context, deps TrashDeps) error {
 	}
 	deps.MarkSubtreeJobsTrashed(u.ID, subtree)
 	if f != nil {
-		if err := store.TouchFolderAndAncestors(u.ID, f.ParentID); err != nil {
-			deps.Errf("folder.trashTouchParent", err, "owner_id=%s folder_id=%s parent_id=%s", u.ID, folderID, f.ParentID)
-		}
+		TouchFolderAncestors(u.ID, f.ParentID, deps.Errf, "folder.trashTouchParent", "owner_id=%s folder_id=%s parent_id=%s", u.ID, folderID, f.ParentID)
 	}
 	return c.Redirect(http.StatusSeeOther, routes.FilesHome)
 }

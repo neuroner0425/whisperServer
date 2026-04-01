@@ -15,8 +15,6 @@ import (
 	"sync"
 )
 
-const modelSymlinkFileName = "ggml-model.bin"
-
 func (w *Worker) runWhisperFromBlob(ctx context.Context, jobID string, wavBytes []byte, totalSec *int) (string, []byte, error) {
 	tmpDir, err := os.MkdirTemp("", "whisper-job-*")
 	if err != nil {
@@ -32,27 +30,29 @@ func (w *Worker) runWhisperFromBlob(ctx context.Context, jobID string, wavBytes 
 }
 
 func (w *Worker) runWhisper(ctx context.Context, jobID, wavPath string, totalSec *int) (string, []byte, error) {
+	w.deps.Logf("[WHISPER] start job_id=%s wav=%s total_sec=%s", jobID, wavPath, formatTotalSec(totalSec))
 	outputPath := wavPath + ".txt"
 	outputJSONPath := wavPath + ".json"
-	modelBin := filepath.Join(w.cfg.ModelDir, modelSymlinkFileName)
-	w.deps.Logf("[WHISPER] start job_id=%s wav=%s model=%s total_sec=%v", jobID, wavPath, modelBin, totalSec)
+	modelBin := filepath.Join(w.cfg.ModelDir, "ggml-model.bin")
+	if _, err := os.Stat(modelBin); err != nil {
+		w.deps.Errf("whisper.modelPath", err, "job_id=%s model_dir=%s", jobID, w.cfg.ModelDir)
+		return "", nil, err
+	}
 	vadModel := filepath.Join(w.cfg.ModelDir, "ggml-silero-v6.2.0.bin")
+	if _, err := os.Stat(vadModel); err != nil {
+		w.deps.Errf("whisper.vadModelPath", err, "job_id=%s path=%s", jobID, vadModel)
+		return "", nil, err
+	}
 
 	cmd := exec.CommandContext(ctx, w.cfg.WhisperCLI,
 		"-m", modelBin,
 		"-l", "ko",
 		"--max-context", "0",
-		"--no-speech-thold", "0.1",
+		"--no-speech-thold", "0.01",
 		"--suppress-nst",
 		"--vad",
 		"--vad-model", vadModel,
-		"--vad-threshold", "0.1",
-		"--vad-min-speech-duration-ms", "500",
-		"--vad-min-silence-duration-ms", "500",
-		"--vad-max-speech-duration-s", "20",
-		"--vad-speech-pad-ms", "150",
-		"--vad-samples-overlap", "0.05",
-		"--logprob-thold", "-0.8",
+		"--vad-threshold", "0.01",
 		"--output-txt",
 		"--output-json",
 		wavPath,
@@ -89,8 +89,10 @@ func (w *Worker) runWhisper(ctx context.Context, jobID, wavPath string, totalSec
 	maxPercent := -1
 	lastProgressLog := -5
 	sawTimeline := false
+	lastDiagnosticLine := ""
 
 	for line := range lines {
+		lastDiagnosticLine = line
 		if !strings.Contains(line, "-->") {
 			continue
 		}
@@ -139,7 +141,11 @@ func (w *Worker) runWhisper(ctx context.Context, jobID, wavPath string, totalSec
 			w.deps.Errf("whisper.wait", context.DeadlineExceeded, "job_id=%s timeout_sec=%d", jobID, w.cfg.JobTimeoutSec)
 			return "", nil, context.DeadlineExceeded
 		}
-		w.deps.Errf("whisper.wait", err, "job_id=%s", jobID)
+		if strings.TrimSpace(lastDiagnosticLine) != "" {
+			w.deps.Errf("whisper.wait", err, "job_id=%s stderr=%s", jobID, lastDiagnosticLine)
+		} else {
+			w.deps.Errf("whisper.wait", err, "job_id=%s", jobID)
+		}
 		return "", nil, err
 	}
 	if sawTimeline {
@@ -166,6 +172,13 @@ func (w *Worker) runWhisper(ctx context.Context, jobID, wavPath string, totalSec
 	_ = os.Remove(outputJSONPath)
 	w.deps.Logf("[WHISPER] done job_id=%s", jobID)
 	return timelineText, slimJSON, nil
+}
+
+func formatTotalSec(totalSec *int) string {
+	if totalSec == nil {
+		return "unknown"
+	}
+	return strconv.Itoa(*totalSec)
 }
 
 func scanPipe(wg *sync.WaitGroup, r io.Reader, out chan<- string) {

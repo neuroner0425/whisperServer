@@ -32,9 +32,8 @@ func CreateFolderHandler(c echo.Context, deps FolderDeps) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "폴더명을 입력하세요.")
 	}
 	if parentID != "" {
-		f, err := store.GetFolderByID(u.ID, parentID)
-		if err != nil || f.IsTrashed {
-			return echo.NewHTTPError(http.StatusBadRequest, "유효하지 않은 상위 폴더입니다.")
+		if _, err := RequireFolderForOwner(u.ID, parentID, false, http.StatusBadRequest, "유효하지 않은 상위 폴더입니다."); err != nil {
+			return err
 		}
 	}
 	id, err := store.CreateFolder(u.ID, name, parentID)
@@ -43,9 +42,7 @@ func CreateFolderHandler(c echo.Context, deps FolderDeps) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "폴더 생성 실패(중복 이름 확인)")
 	}
 	deps.Logf("[FOLDER] create owner_id=%s id=%s name=%s parent_id=%s", u.ID, id, name, parentID)
-	if err := store.TouchFolderAndAncestors(u.ID, parentID); err != nil {
-		deps.Errf("folder.createTouchParent", err, "owner_id=%s folder_id=%s parent_id=%s", u.ID, id, parentID)
-	}
+	TouchFolderAncestors(u.ID, parentID, deps.Errf, "folder.createTouchParent", "owner_id=%s folder_id=%s parent_id=%s", u.ID, id, parentID)
 	if parentID == "" {
 		return c.Redirect(http.StatusSeeOther, routes.FilesRoot)
 	}
@@ -63,8 +60,7 @@ func MoveJobsHandler(c echo.Context, deps FolderDeps) error {
 	returnTo := deps.SafeReturnPath(c.FormValue("return_to"))
 	targetFolder := deps.NormalizeFolderID(c.FormValue("target_folder_id"))
 	if targetFolder != "" {
-		f, err := store.GetFolderByID(u.ID, targetFolder)
-		if err != nil || f.IsTrashed {
+		if _, err := RequireFolderForOwner(u.ID, targetFolder, false, http.StatusBadRequest, "유효하지 않은 대상 폴더입니다."); err != nil {
 			deps.Errf("batchMove.invalidTarget", err, "owner_id=%s target_folder=%s", u.ID, targetFolder)
 			return c.Redirect(http.StatusSeeOther, returnTo)
 		}
@@ -88,8 +84,8 @@ func MoveJobsHandler(c echo.Context, deps FolderDeps) error {
 		if id == "" || targetFolder == id {
 			continue
 		}
-		f, err := store.GetFolderByID(u.ID, id)
-		if err != nil || f.IsTrashed {
+		f, err := RequireFolderForOwner(u.ID, id, false, http.StatusBadRequest, "유효하지 않은 폴더입니다.")
+		if err != nil {
 			continue
 		}
 		if targetFolder != "" {
@@ -110,9 +106,7 @@ func MoveJobsHandler(c echo.Context, deps FolderDeps) error {
 		}
 	}
 	for id := range touchedFolders {
-		if err := store.TouchFolderAndAncestors(u.ID, id); err != nil {
-			deps.Errf("batchMove.touchFolder", err, "owner_id=%s folder_id=%s", u.ID, id)
-		}
+		TouchFolderAncestors(u.ID, id, deps.Errf, "batchMove.touchFolder", "owner_id=%s folder_id=%s", u.ID, id)
 	}
 	return c.Redirect(http.StatusSeeOther, returnTo)
 }
@@ -127,9 +121,9 @@ func RenameFolderHandler(c echo.Context, deps FolderDeps) error {
 	if newName == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "새 폴더명을 입력하세요.")
 	}
-	f, err := store.GetFolderByID(u.ID, folderID)
-	if err != nil || f.IsTrashed {
-		return echo.NewHTTPError(http.StatusNotFound, "폴더를 찾을 수 없습니다.")
+	f, err := RequireFolderForOwner(u.ID, folderID, false, http.StatusNotFound, "폴더를 찾을 수 없습니다.")
+	if err != nil {
+		return err
 	}
 	if err := store.RenameFolder(u.ID, folderID, newName); err != nil {
 		deps.Errf("folder.rename", err, "owner_id=%s folder_id=%s", u.ID, folderID)
@@ -150,17 +144,16 @@ func MoveFolderHandler(c echo.Context, deps FolderDeps) error {
 	folderID := c.Param("folder_id")
 	targetParent := deps.NormalizeFolderID(c.FormValue("target_parent_id"))
 
-	f, err := store.GetFolderByID(u.ID, folderID)
-	if err != nil || f.IsTrashed {
-		return echo.NewHTTPError(http.StatusNotFound, "폴더를 찾을 수 없습니다.")
+	f, err := RequireFolderForOwner(u.ID, folderID, false, http.StatusNotFound, "폴더를 찾을 수 없습니다.")
+	if err != nil {
+		return err
 	}
 	if targetParent == folderID {
 		return echo.NewHTTPError(http.StatusBadRequest, "자기 자신으로 이동할 수 없습니다.")
 	}
 	if targetParent != "" {
-		p, err := store.GetFolderByID(u.ID, targetParent)
-		if err != nil || p.IsTrashed {
-			return echo.NewHTTPError(http.StatusBadRequest, "유효하지 않은 대상 폴더입니다.")
+		if _, err := RequireFolderForOwner(u.ID, targetParent, false, http.StatusBadRequest, "유효하지 않은 대상 폴더입니다."); err != nil {
+			return err
 		}
 		descendant, err := store.IsFolderDescendant(u.ID, folderID, targetParent)
 		if err != nil {
@@ -174,12 +167,8 @@ func MoveFolderHandler(c echo.Context, deps FolderDeps) error {
 		deps.Errf("folder.move", err, "owner_id=%s folder_id=%s target_parent=%s", u.ID, folderID, targetParent)
 		return echo.NewHTTPError(http.StatusBadRequest, "폴더 이동 실패")
 	}
-	if err := store.TouchFolderAndAncestors(u.ID, f.ParentID); err != nil {
-		deps.Errf("folder.moveTouchSourceParent", err, "owner_id=%s folder_id=%s parent_id=%s", u.ID, folderID, f.ParentID)
-	}
-	if err := store.TouchFolderAndAncestors(u.ID, targetParent); err != nil {
-		deps.Errf("folder.moveTouchTargetParent", err, "owner_id=%s folder_id=%s parent_id=%s", u.ID, folderID, targetParent)
-	}
+	TouchFolderAncestors(u.ID, f.ParentID, deps.Errf, "folder.moveTouchSourceParent", "owner_id=%s folder_id=%s parent_id=%s", u.ID, folderID, f.ParentID)
+	TouchFolderAncestors(u.ID, targetParent, deps.Errf, "folder.moveTouchTargetParent", "owner_id=%s folder_id=%s parent_id=%s", u.ID, folderID, targetParent)
 	if targetParent == "" {
 		return c.Redirect(http.StatusSeeOther, routes.FilesRoot)
 	}
