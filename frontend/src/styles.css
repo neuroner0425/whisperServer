@@ -1287,6 +1287,16 @@ textarea.dark-input:focus {
   gap: 14px;
 }
 
+.detail-meta-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  padding-top: 12px;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
 .detail-row:last-child {
   border-bottom: 0;
 }

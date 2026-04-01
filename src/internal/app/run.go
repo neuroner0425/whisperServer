@@ -163,6 +163,7 @@ func Run() {
 	e.POST("/api/jobs/:job_id/retry", apiRetryJobJSONHandler)
 	e.POST("/api/jobs/:job_id/retranscribe", apiRetranscribeJobJSONHandler)
 	e.POST("/api/jobs/:job_id/refine", apiRefineJobJSONHandler)
+	e.POST("/api/jobs/:job_id/rerefine", apiRerefineJobJSONHandler)
 	e.GET("/api/tags", func(c echo.Context) error { return httpx.TagsJSONHandler(c, tagD) })
 	e.POST("/api/tags", func(c echo.Context) error { return httpx.CreateTagJSONHandler(c, tagD) })
 	e.DELETE("/api/tags/:name", func(c echo.Context) error { return httpx.DeleteTagJSONHandler(c, tagD) })

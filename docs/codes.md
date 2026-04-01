@@ -27,7 +27,7 @@
 | `src/internal/app/globals.go` | 상태 문자열, 전역 설정, 정제 시스템 프롬프트, 공용 타입 별칭을 모은다. |
 | `src/internal/app/http_api_file_ops.go` | 파일/폴더 배치 이동과 폴더 ZIP 다운로드 API를 제공한다. |
 | `src/internal/app/http_api_files.go` | 파일 목록 조회, 폴더 생성/이름변경/삭제, 작업 이름변경/삭제 API를 담당한다. |
-| `src/internal/app/http_api_jobs.go` | 작업 상세, 오디오 스트리밍, 실패 재시도, 전사 다시하기, 정제 API를 담당한다. |
+| `src/internal/app/http_api_jobs.go` | 작업 상세, 오디오 스트리밍, 실패 재시도, 전사 다시하기, 정제/정제 다시하기 API를 담당한다. |
 | `src/internal/app/http_api_storage.go` | 저장공간 집계와 파일별 사용량 목록 API를 제공한다. |
 | `src/internal/app/http_api_trash.go` | 휴지통 조회, 복구, 비우기, 선택 삭제 API를 담당한다. |
 | `src/internal/app/http_common.go` | SPA 진입/리다이렉트와 앱 전용 인증/알림 보조 함수를 모은다. |
@@ -137,8 +137,8 @@
 
 | 파일 | 한 줄 요약 |
 |---|---|
-| `frontend/src/features/jobs/JobDetailPage.tsx` | 작업 상세, 결과 보기, 오디오 재생, 재시도/정제 UI를 담당한다. |
-| `frontend/src/features/jobs/api.ts` | 작업 상세/재시도/정제 API를 제공한다. |
+| `frontend/src/features/jobs/JobDetailPage.tsx` | 작업 상세, 결과 보기, 오디오 재생, 재시도/전사 다시하기/정제 UI를 담당한다. |
+| `frontend/src/features/jobs/api.ts` | 작업 상세/재시도/전사 다시하기/정제 API를 제공한다. |
 | `frontend/src/features/jobs/types.ts` | 작업 상세 응답 타입을 정의한다. |
 
 #### `frontend/src/features/storage`
@@ -214,7 +214,7 @@
 
 #### `src/internal/app/http_api_jobs.go`
 - 작업 상세 페이지용 JSON 응답을 상태별로 조립한다.
-- 오디오 blob 스트리밍, 실패 작업 재시도, 완료 작업 전사 다시하기, 정제 재요청을 제공한다.
+- 오디오 blob 스트리밍, 실패 작업 재시도, 완료 작업 전사 다시하기, 정제 재요청, 정제 다시하기를 제공한다.
 - 태그 갱신은 더 이상 이 파일에 없고 `internal/http/tags.go`의 공통 JSON 핸들러를 사용한다.
 
 #### `src/internal/app/http_api_storage.go`
@@ -426,10 +426,10 @@
 
 #### `frontend/src/features/jobs/JobDetailPage.tsx`
 - 단일 작업 상세 화면을 담당한다.
-- 결과 상태별 렌더링, 오디오 플레이어 동기화, 타임라인 파싱, 정제 결과 문단 해석, 재시도/전사 다시하기/정제 액션 UI를 가진다.
+- 결과 상태별 렌더링, 오디오 플레이어 동기화, 타임라인 파싱, 정제 결과 문단 해석, 재시도/전사 다시하기/정제/정제 다시하기 액션 UI를 가진다.
 
 #### `frontend/src/features/jobs/api.ts`
-- 작업 상세 조회, 실패 작업 재시도, 전사 다시하기, 정제 재요청 호출을 제공한다.
+- 작업 상세 조회, 실패 작업 재시도, 전사 다시하기, 정제 재요청, 정제 다시하기 호출을 제공한다.
 
 #### `frontend/src/features/jobs/types.ts`
 - 작업 상세 응답의 구조를 타입으로 정의한다.
