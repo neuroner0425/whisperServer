@@ -2,6 +2,7 @@ package app
 
 import (
 	"crypto/rand"
+	"net/http"
 
 	"github.com/labstack/echo/v4"
 	httpx "whisperserver/src/internal/http"
@@ -34,42 +35,21 @@ func initAuthHandlers() {
 	authHandlers = httpx.NewAuth(jwtSecret, jwtIssuer, jwtExpiryHours, authCookieSecure, procLogf, procErrf)
 }
 
-func authMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
-	return authHandlers.Middleware(next)
-}
-
 func currentUser(c echo.Context) (*AuthUser, error) {
 	return authHandlers.CurrentUser(c)
 }
 
-func loginGetHandler(c echo.Context) error {
-	return authHandlers.LoginGetHandler(c)
-}
-
-func signupGetHandler(c echo.Context) error {
-	return authHandlers.SignupGetHandler(c)
-}
-
-func signupPostHandler(c echo.Context) error {
-	return authHandlers.SignupPostHandler(c)
-}
-
-func loginPostHandler(c echo.Context) error {
-	return authHandlers.LoginPostHandler(c)
-}
-
-func logoutPostHandler(c echo.Context) error {
-	return authHandlers.LogoutPostHandler(c)
-}
-
-func signupJSONHandler(c echo.Context) error {
-	return authHandlers.SignupJSONHandler(c)
-}
-
-func loginJSONHandler(c echo.Context) error {
-	return authHandlers.LoginJSONHandler(c)
-}
-
-func logoutJSONHandler(c echo.Context) error {
-	return authHandlers.LogoutJSONHandler(c)
+func apiMeJSONHandler(c echo.Context) error {
+	u, err := currentUserOrUnauthorized(c)
+	if err != nil {
+		return nil
+	}
+	return c.JSON(http.StatusOK, map[string]any{
+		"user": map[string]string{
+			"id":          u.ID,
+			"login_id":    u.LoginID,
+			"email":       u.Email,
+			"displayName": currentUserName(c),
+		},
+	})
 }

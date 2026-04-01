@@ -159,6 +159,8 @@ func applyJobFields(job *model.Job, fields map[string]any) {
 			job.MediaDurationSeconds = intutil.AsIntPtr(v)
 		case "description":
 			job.Description = intutil.AsString(v)
+		case "client_upload_id":
+			job.ClientUploadID = intutil.AsString(v)
 		case "refine_enabled":
 			job.RefineEnabled = intutil.AsBool(v)
 		case "owner_id":

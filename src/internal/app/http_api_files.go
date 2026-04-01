@@ -3,18 +3,18 @@ package app
 import (
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/labstack/echo/v4"
+	httpx "whisperserver/src/internal/http"
 	"whisperserver/src/internal/routes"
 	"whisperserver/src/internal/store"
 )
 
 func apiFilesJSONHandler(c echo.Context) error {
-	disableCache(c)
-	u, err := currentUser(c)
+	httpx.DisableCache(c)
+	u, err := currentUserOrUnauthorized(c)
 	if err != nil {
-		return c.JSON(http.StatusUnauthorized, map[string]string{"detail": "인증이 필요합니다."})
+		return nil
 	}
 
 	q := strings.TrimSpace(c.QueryParam("q"))
@@ -24,15 +24,14 @@ func apiFilesJSONHandler(c echo.Context) error {
 	} else if view != "home" {
 		view = "explore"
 	}
-	folderID := normalizeFolderID(c.QueryParam("folder_id"))
-	sortBy, sortOrder := normalizeSortParams(c.QueryParam("sort"), c.QueryParam("order"))
-	page := parsePositiveInt(c.QueryParam("page"), 1)
-	pageSize := parsePositiveInt(c.QueryParam("page_size"), 20)
+	folderID := httpx.NormalizeFolderID(c.QueryParam("folder_id"))
+	sortBy, sortOrder := httpx.NormalizeSortParams(c.QueryParam("sort"), c.QueryParam("order"))
+	page := httpx.ParsePositiveInt(c.QueryParam("page"), 1)
+	pageSize := httpx.ParsePositiveInt(c.QueryParam("page_size"), 20)
 
 	if view == "explore" && folderID != "" {
-		f, err := store.GetFolderByID(u.ID, folderID)
-		if err != nil || f.IsTrashed {
-			return echo.NewHTTPError(http.StatusNotFound, "폴더를 찾을 수 없습니다.")
+		if _, err := httpx.RequireFolderForOwner(u.ID, folderID, false, http.StatusNotFound, "폴더를 찾을 수 없습니다."); err != nil {
+			return err
 		}
 	}
 
@@ -91,9 +90,9 @@ func apiFilesJSONHandler(c echo.Context) error {
 }
 
 func apiCreateFolderJSONHandler(c echo.Context) error {
-	u, err := currentUser(c)
+	u, err := currentUserOrUnauthorized(c)
 	if err != nil {
-		return c.JSON(http.StatusUnauthorized, map[string]string{"detail": "인증이 필요합니다."})
+		return nil
 	}
 	var body struct {
 		Name     string `json:"name"`
@@ -103,24 +102,21 @@ func apiCreateFolderJSONHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "잘못된 요청입니다.")
 	}
 	name := strings.TrimSpace(body.Name)
-	parentID := normalizeFolderID(body.ParentID)
+	parentID := httpx.NormalizeFolderID(body.ParentID)
 	if name == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "폴더명을 입력하세요.")
 	}
 	if parentID != "" {
-		f, err := store.GetFolderByID(u.ID, parentID)
-		if err != nil || f.IsTrashed {
-			return echo.NewHTTPError(http.StatusBadRequest, "유효하지 않은 상위 폴더입니다.")
+		if _, err := httpx.RequireFolderForOwner(u.ID, parentID, false, http.StatusBadRequest, "유효하지 않은 상위 폴더입니다."); err != nil {
+			return err
 		}
 	}
 	id, err := store.CreateFolder(u.ID, name, parentID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "폴더 생성 실패(중복 이름 확인)")
 	}
-	if err := store.TouchFolderAndAncestors(u.ID, parentID); err != nil {
-		procErrf("api.folder.createTouchParent", err, "owner_id=%s folder_id=%s parent_id=%s", u.ID, id, parentID)
-	}
-	eventBroker.Notify(u.ID, "files.changed", nil)
+	httpx.TouchFolderAncestors(u.ID, parentID, procErrf, "api.folder.createTouchParent", "owner_id=%s folder_id=%s parent_id=%s", u.ID, id, parentID)
+	notifyFilesChanged(u.ID)
 	return c.JSON(http.StatusOK, map[string]any{
 		"folder_id": id,
 		"name":      name,
@@ -129,9 +125,9 @@ func apiCreateFolderJSONHandler(c echo.Context) error {
 }
 
 func apiRenameFolderJSONHandler(c echo.Context) error {
-	u, err := currentUser(c)
+	u, err := currentUserOrUnauthorized(c)
 	if err != nil {
-		return c.JSON(http.StatusUnauthorized, map[string]string{"detail": "인증이 필요합니다."})
+		return nil
 	}
 	folderID := c.Param("folder_id")
 	var body struct {
@@ -144,51 +140,43 @@ func apiRenameFolderJSONHandler(c echo.Context) error {
 	if newName == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "새 폴더명을 입력하세요.")
 	}
-	f, err := store.GetFolderByID(u.ID, folderID)
-	if err != nil || f.IsTrashed {
-		return echo.NewHTTPError(http.StatusNotFound, "폴더를 찾을 수 없습니다.")
+	f, err := httpx.RequireFolderForOwner(u.ID, folderID, false, http.StatusNotFound, "폴더를 찾을 수 없습니다.")
+	if err != nil {
+		return err
 	}
 	if err := store.RenameFolder(u.ID, folderID, newName); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "폴더 이름 변경 실패(중복 이름 확인)")
 	}
-	if err := store.TouchFolderAndAncestors(u.ID, f.ParentID); err != nil {
-		procErrf("api.folder.renameTouchParent", err, "owner_id=%s folder_id=%s parent_id=%s", u.ID, folderID, f.ParentID)
-	}
-	eventBroker.Notify(u.ID, "files.changed", nil)
+	httpx.TouchFolderAncestors(u.ID, f.ParentID, procErrf, "api.folder.renameTouchParent", "owner_id=%s folder_id=%s parent_id=%s", u.ID, folderID, f.ParentID)
+	notifyFilesChanged(u.ID)
 	return c.JSON(http.StatusOK, map[string]string{"folder_id": folderID, "name": newName})
 }
 
 func apiTrashFolderJSONHandler(c echo.Context) error {
-	u, err := currentUser(c)
+	u, err := currentUserOrUnauthorized(c)
 	if err != nil {
-		return c.JSON(http.StatusUnauthorized, map[string]string{"detail": "인증이 필요합니다."})
+		return nil
 	}
 	folderID := c.Param("folder_id")
-	f, _ := store.GetFolderByID(u.ID, folderID)
+	f, _ := httpx.RequireFolderForOwner(u.ID, folderID, true, http.StatusBadRequest, "폴더 삭제 실패")
 	subtree := collectFolderSubtree(u.ID, []string{folderID}, false)
 	if err := store.SetFolderTrashed(u.ID, folderID, true); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "폴더 삭제 실패")
 	}
 	markSubtreeJobsTrashed(u.ID, subtree)
 	if f != nil {
-		if err := store.TouchFolderAndAncestors(u.ID, f.ParentID); err != nil {
-			procErrf("api.folder.trashTouchParent", err, "owner_id=%s folder_id=%s parent_id=%s", u.ID, folderID, f.ParentID)
-		}
+		httpx.TouchFolderAncestors(u.ID, f.ParentID, procErrf, "api.folder.trashTouchParent", "owner_id=%s folder_id=%s parent_id=%s", u.ID, folderID, f.ParentID)
 	}
-	eventBroker.Notify(u.ID, "files.changed", nil)
+	notifyFilesChanged(u.ID)
 	return c.JSON(http.StatusOK, map[string]string{"folder_id": folderID, "status": "trashed"})
 }
 
 func apiRenameJobJSONHandler(c echo.Context) error {
-	u, err := currentUser(c)
+	_, _, err := requireOwnedJobOrNotFound(c, false)
 	if err != nil {
-		return c.JSON(http.StatusUnauthorized, map[string]string{"detail": "인증이 필요합니다."})
+		return err
 	}
 	jobID := c.Param("job_id")
-	job := getJob(jobID)
-	if job == nil || job.OwnerID != u.ID || isJobTrashed(job) {
-		return echo.NewHTTPError(http.StatusNotFound, "작업을 찾을 수 없습니다.")
-	}
 	var body struct {
 		Name string `json:"name"`
 	}
@@ -207,20 +195,12 @@ func apiRenameJobJSONHandler(c echo.Context) error {
 }
 
 func apiTrashJobJSONHandler(c echo.Context) error {
-	u, err := currentUser(c)
+	u, job, err := requireOwnedJobOrNotFound(c, true)
 	if err != nil {
-		return c.JSON(http.StatusUnauthorized, map[string]string{"detail": "인증이 필요합니다."})
+		return err
 	}
 	jobID := c.Param("job_id")
-	job := getJob(jobID)
-	if job == nil || job.OwnerID != u.ID {
-		return echo.NewHTTPError(http.StatusNotFound, "작업을 찾을 수 없습니다.")
-	}
-	cancelJob(jobID)
-	removeTempWav(jobID)
-	setJobFields(jobID, map[string]any{"is_trashed": true, "deleted_at": time.Now().Format("2006-01-02 15:04:05")})
-	if err := store.TouchFolderAndAncestors(u.ID, job.FolderID); err != nil {
-		procErrf("api.job.trashTouchFolder", err, "owner_id=%s job_id=%s folder_id=%s", u.ID, jobID, job.FolderID)
-	}
+	markJobTrashed(jobID)
+	httpx.TouchFolderAncestors(u.ID, job.FolderID, procErrf, "api.job.trashTouchFolder", "owner_id=%s job_id=%s folder_id=%s", u.ID, jobID, job.FolderID)
 	return c.JSON(http.StatusOK, map[string]string{"job_id": jobID, "status": "trashed"})
 }

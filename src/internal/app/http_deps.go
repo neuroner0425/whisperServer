@@ -11,47 +11,6 @@ import (
 	intutil "whisperserver/src/internal/util"
 )
 
-func jobsHandler(c echo.Context) error               { return httpx.JobsHandler(c, jobsDeps()) }
-func jobsUpdatesHandler(c echo.Context) error        { return httpx.JobsUpdatesHandler(c, jobsDeps()) }
-func apiMeHandler(c echo.Context) error              { return apiMeJSONHandler(c) }
-func apiFilesHandler(c echo.Context) error           { return apiFilesJSONHandler(c) }
-func apiEventsStreamHandler(c echo.Context) error    { return apiEventsHandler(c) }
-func apiJobDetailHandler(c echo.Context) error       { return apiJobDetailJSONHandler(c) }
-func apiTagsHandler(c echo.Context) error            { return apiTagsJSONHandler(c) }
-func apiCreateTagHandler(c echo.Context) error       { return apiCreateTagJSONHandler(c) }
-func apiDeleteTagHandler(c echo.Context) error       { return apiDeleteTagJSONHandler(c) }
-func apiUpdateJobTagsHandler(c echo.Context) error   { return apiUpdateJobTagsJSONHandler(c) }
-func apiTrashListHandler(c echo.Context) error       { return apiTrashListJSONHandler(c) }
-func apiRestoreJobHandler(c echo.Context) error      { return apiRestoreJobJSONHandler(c) }
-func apiRestoreFolderHandler(c echo.Context) error   { return apiRestoreFolderJSONHandler(c) }
-func apiBatchMoveHandler(c echo.Context) error       { return apiBatchMoveJSONHandler(c) }
-func apiClearTrashHandler(c echo.Context) error      { return clearTrashJSONHandler(c) }
-func apiDeleteTrashJobsHandler(c echo.Context) error { return deleteTrashJobsJSONHandler(c) }
-func apiDownloadFolderHandler(c echo.Context) error  { return downloadFolderJSONHandler(c) }
-func trashHandler(c echo.Context) error              { return httpx.TrashPageHandler(c, jobsDeps()) }
-func statusHandler(c echo.Context) error             { return httpx.StatusHandler(c, jobsDeps()) }
-func jobHandler(c echo.Context) error                { return httpx.JobHandler(c, jobsDeps()) }
-func downloadHandler(c echo.Context) error           { return httpx.DownloadHandler(c, jobsDeps()) }
-func downloadRefinedHandler(c echo.Context) error    { return httpx.DownloadRefinedHandler(c, jobsDeps()) }
-func batchDownloadHandler(c echo.Context) error      { return httpx.BatchDownloadHandler(c, jobsDeps()) }
-func refineRetryHandler(c echo.Context) error        { return httpx.RefineRetryHandler(c, jobsDeps()) }
-func uploadGetHandler(c echo.Context) error          { return httpx.UploadGetHandler(c, uploadDeps()) }
-func uploadPostHandler(c echo.Context) error         { return httpx.UploadPostHandler(c, uploadDeps()) }
-func createTagHandler(c echo.Context) error          { return httpx.CreateTagHandler(c, tagDeps()) }
-func tagsPageHandler(c echo.Context) error           { return httpx.TagsPageHandler(c, tagDeps()) }
-func deleteTagHandler(c echo.Context) error          { return httpx.DeleteTagHandler(c, tagDeps()) }
-func updateJobTagsHandler(c echo.Context) error      { return httpx.UpdateJobTagsHandler(c, tagDeps()) }
-func createFolderHandler(c echo.Context) error       { return httpx.CreateFolderHandler(c, folderDeps()) }
-func moveJobsHandler(c echo.Context) error           { return httpx.MoveJobsHandler(c, folderDeps()) }
-func batchDeleteHandler(c echo.Context) error        { return httpx.BatchDeleteHandler(c, mutationDeps()) }
-func restoreJobHandler(c echo.Context) error         { return httpx.RestoreJobHandler(c, trashDeps()) }
-func trashJobHandler(c echo.Context) error           { return httpx.TrashJobHandler(c, trashDeps()) }
-func renameJobHandler(c echo.Context) error          { return httpx.RenameJobHandler(c, trashDeps()) }
-func restoreFolderHandler(c echo.Context) error      { return httpx.RestoreFolderHandler(c, trashDeps()) }
-func trashFolderHandler(c echo.Context) error        { return httpx.TrashFolderHandler(c, trashDeps()) }
-func renameFolderHandler(c echo.Context) error       { return httpx.RenameFolderHandler(c, folderDeps()) }
-func moveFolderHandler(c echo.Context) error         { return httpx.MoveFolderHandler(c, folderDeps()) }
-
 func jobsDeps() httpx.JobsDeps {
 	return httpx.JobsDeps{
 		CurrentUser:     func(c echo.Context) (*httpx.User, error) { return currentUser(c) },
@@ -59,10 +18,10 @@ func jobsDeps() httpx.JobsDeps {
 		RequireOwnedJob: func(c echo.Context, id string, allow bool) (*model.Job, *httpx.User, error) {
 			return requireOwnedJob(c, id, allow)
 		},
-		DisableCache:        disableCache,
-		NormalizeSortParams: normalizeSortParams,
-		NormalizeFolderID:   normalizeFolderID,
-		ParsePositiveInt:    parsePositiveInt,
+		DisableCache:        httpx.DisableCache,
+		NormalizeSortParams: httpx.NormalizeSortParams,
+		NormalizeFolderID:   httpx.NormalizeFolderID,
+		ParsePositiveInt:    httpx.ParsePositiveInt,
 		PaginateRows:        paginateRows,
 		BuildRecentJobRows:  buildRecentJobRowsForUser,
 		BuildJobRows:        buildJobRowsForUser,
@@ -71,7 +30,7 @@ func jobsDeps() httpx.JobsDeps {
 		SortFolderRows:      sortFolderRows,
 		SortJobRows:         sortJobRows,
 		JobsSnapshotVersion: jobsSnapshotVersion,
-		SelectedTagMap:      selectedTagMap,
+		SelectedTagMap:      httpx.SelectedTagMap,
 		ToJobView:           toJobView,
 		RenderResultText:    renderResultText,
 		Fallback:            intutil.Fallback,
@@ -80,7 +39,7 @@ func jobsDeps() httpx.JobsDeps {
 		SetJobFields:        setJobFields,
 		EnqueueRefine:       enqueueRefine,
 		GetJob:              getJob,
-		IsJobTrashed:        isJobTrashed,
+		IsJobTrashed:        httpx.IsJobTrashed,
 		Logf:                procLogf,
 		Errf:                procErrf,
 	}
@@ -90,8 +49,8 @@ func uploadDeps() httpx.UploadDeps {
 	return httpx.UploadDeps{
 		CurrentUser:       func(c echo.Context) (*httpx.User, error) { return currentUser(c) },
 		CurrentUserName:   currentUserName,
-		ParseSelectedTags: parseSelectedTags,
-		NormalizeFolderID: normalizeFolderID,
+		ParseSelectedTags: func(c echo.Context) []string { return httpx.ParseSelectedTags(c, intutil.UniqueStringsKeepOrder) },
+		NormalizeFolderID: httpx.NormalizeFolderID,
 		Truthy:            intutil.Truthy,
 		DetectFileType:    intutil.DetectFileType,
 		AllowedFile:       func(name string) bool { return intutil.AllowedFile(name, allowedExtensions) },
@@ -123,7 +82,7 @@ func tagDeps() httpx.TagDeps {
 		CurrentUserName:        currentUserName,
 		GetJob:                 getJob,
 		SetJobFields:           setJobFields,
-		ParseSelectedTags:      parseSelectedTags,
+		ParseSelectedTags:      func(c echo.Context) []string { return httpx.ParseSelectedTags(c, intutil.UniqueStringsKeepOrder) },
 		IsValidTagName:         intutil.IsValidTagName,
 		RemoveTagFromOwnerJobs: removeTagFromOwnerJobs,
 		Logf:                   procLogf,
@@ -136,9 +95,9 @@ func folderDeps() httpx.FolderDeps {
 		CurrentUser:       func(c echo.Context) (*httpx.User, error) { return currentUser(c) },
 		GetJob:            getJob,
 		SetJobFields:      setJobFields,
-		IsJobTrashed:      isJobTrashed,
-		NormalizeFolderID: normalizeFolderID,
-		SafeReturnPath:    safeReturnPath,
+		IsJobTrashed:      httpx.IsJobTrashed,
+		NormalizeFolderID: httpx.NormalizeFolderID,
+		SafeReturnPath:    httpx.SafeReturnPath,
 		Logf:              procLogf,
 		Errf:              procErrf,
 	}
@@ -150,7 +109,7 @@ func mutationDeps() httpx.MutationDeps {
 		GetJob:                 getJob,
 		SetJobFields:           setJobFields,
 		CancelJob:              cancelJob,
-		IsJobTrashed:           isJobTrashed,
+		IsJobTrashed:           httpx.IsJobTrashed,
 		CollectFolderSubtree:   collectFolderSubtree,
 		MarkSubtreeJobsTrashed: markSubtreeJobsTrashed,
 		Logf:                   procLogf,
@@ -172,11 +131,51 @@ func trashDeps() httpx.TrashDeps {
 		StatusRunning:          statusRunning,
 		StatusRefiningPending:  statusRefiningPending,
 		StatusRefining:         statusRefining,
-		IsJobTrashed:           isJobTrashed,
-		NormalizeFolderID:      normalizeFolderID,
+		IsJobTrashed:           httpx.IsJobTrashed,
+		NormalizeFolderID:      httpx.NormalizeFolderID,
 		CollectFolderSubtree:   collectFolderSubtree,
 		MarkSubtreeJobsTrashed: markSubtreeJobsTrashed,
 		Logf:                   procLogf,
 		Errf:                   procErrf,
+	}
+}
+
+func buildJobRowsForUser(userID, q, tag, folderID string, trashed bool) []JobRow {
+	return httpx.BuildJobRowsForUser(userID, q, tag, folderID, trashed, jobSupportDeps())
+}
+
+func buildFolderRowsForUser(userID, folderID, q string) []FolderRow {
+	return httpx.BuildFolderRowsForUser(userID, folderID, q, jobSupportDeps())
+}
+
+func buildRecentJobRowsForUser(userID, q, tag string) []JobRow {
+	return httpx.BuildRecentJobRowsForUser(userID, q, tag, jobSupportDeps())
+}
+
+func sortJobRows(rows []JobRow, sortBy, sortOrder string) {
+	httpx.SortJobRows(rows, sortBy, sortOrder, uploadedTS)
+}
+
+func sortFolderRows(rows []FolderRow, sortBy, sortOrder string) {
+	httpx.SortFolderRows(rows, sortBy, sortOrder)
+}
+
+func jobsSnapshotVersion(jobItems []JobRow, folderItems []FolderRow, page, pageSize, totalPages, totalItems int) string {
+	return httpx.JobsSnapshotVersion(jobItems, folderItems, page, pageSize, totalPages, totalItems)
+}
+
+func recentFolderRowsForUser(userID string) []FolderRow {
+	return httpx.RecentFolderRowsForUser(userID)
+}
+
+func jobSupportDeps() httpx.JobSupportDeps {
+	return httpx.JobSupportDeps{
+		JobsSnapshot:      jobsSnapshot,
+		UploadedTS:        uploadedTS,
+		BlobUsageByOwner:  store.JobBlobUsageMapByOwner,
+		NormalizeFolderID: httpx.NormalizeFolderID,
+		IsJobTrashed:      httpx.IsJobTrashed,
+		Fallback:          intutil.Fallback,
+		Errf:              procErrf,
 	}
 }

@@ -1,23 +1,33 @@
 package app
 
 import (
+	"errors"
 	"net/http"
+	"os"
+	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	httpx "whisperserver/src/internal/http"
 	"whisperserver/src/internal/model"
-	intutil "whisperserver/src/internal/util"
+	"whisperserver/src/internal/store"
 )
-
-func disableCache(c echo.Context) {
-	httpx.DisableCache(c)
-}
 
 func rootRedirectHandler(c echo.Context) error {
 	if _, err := currentUser(c); err == nil {
 		return c.Redirect(http.StatusSeeOther, "/files/home")
 	}
 	return c.Redirect(http.StatusSeeOther, "/auth/login")
+}
+
+func spaIndexHandler(c echo.Context) error {
+	if _, err := os.Stat(spaIndexPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return c.String(http.StatusServiceUnavailable, "SPA build not found. Run `npm install && npm run build` in ./frontend first.")
+		}
+		return c.String(http.StatusInternalServerError, "Failed to load SPA build.")
+	}
+	return c.File(spaIndexPath)
 }
 
 func spaLoginPageHandler(c echo.Context) error {
@@ -78,10 +88,6 @@ func spaJobPageHandler(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, target)
 }
 
-func safeReturnPath(raw string) string {
-	return httpx.SafeReturnPath(raw)
-}
-
 func currentUserName(c echo.Context) string {
 	return httpx.CurrentUserName(c, func(c echo.Context) (*httpx.User, error) {
 		return currentUser(c)
@@ -94,24 +100,68 @@ func requireOwnedJob(c echo.Context, jobID string, allowTrashed bool) (*model.Jo
 	}, getJob, jobID, allowTrashed)
 }
 
-func selectedTagMap(tags []string) map[string]bool {
-	return httpx.SelectedTagMap(tags)
+func currentUserOrUnauthorized(c echo.Context) (*AuthUser, error) {
+	u, err := currentUser(c)
+	if err == nil {
+		return u, nil
+	}
+	_ = c.JSON(http.StatusUnauthorized, map[string]string{"detail": "인증이 필요합니다."})
+	return nil, err
 }
 
-func parseSelectedTags(c echo.Context) []string {
-	return httpx.ParseSelectedTags(c, intutil.UniqueStringsKeepOrder)
+func requireOwnedJobOrNotFound(c echo.Context, allowTrashed bool) (*AuthUser, *model.Job, error) {
+	u, err := currentUserOrUnauthorized(c)
+	if err != nil {
+		return nil, nil, err
+	}
+	jobID := strings.TrimSpace(c.Param("job_id"))
+	job := getJob(jobID)
+	if job == nil || job.OwnerID != u.ID || (!allowTrashed && httpx.IsJobTrashed(job)) {
+		return nil, nil, echo.NewHTTPError(http.StatusNotFound, "작업을 찾을 수 없습니다.")
+	}
+	return u, job, nil
 }
 
-func normalizeFolderID(v string) string {
-	return httpx.NormalizeFolderID(v)
+func notifyFilesChanged(userID string) {
+	eventBroker.Notify(userID, "files.changed", nil)
 }
 
-func isJobTrashed(job *model.Job) bool {
-	return httpx.IsJobTrashed(job)
+func resetJobForTranscribe(jobID string, refineEnabled bool) {
+	cancelJob(jobID)
+	removeTempWav(jobID)
+	setJobFields(jobID, map[string]any{
+		"result":           "",
+		"result_refined":   "",
+		"refine_enabled":   refineEnabled,
+		"status":           statusPending,
+		"phase":            "",
+		"progress_percent": 0,
+		"progress_label":   "",
+		"preview_text":     "",
+		"started_at":       "",
+		"started_ts":       0,
+		"completed_at":     "",
+		"completed_ts":     0,
+		"duration":         "",
+		"status_detail":    "",
+	})
+	store.DeleteJobBlob(jobID, store.BlobKindPreview)
+	store.DeleteJobBlob(jobID, store.BlobKindTranscript)
+	store.DeleteJobBlob(jobID, store.BlobKindTranscriptJSON)
+	store.DeleteJobBlob(jobID, store.BlobKindRefined)
 }
 
-func parsePositiveInt(s string, def int) int {
-	return httpx.ParsePositiveInt(s, def)
+func resetJobForRetry(jobID string, refineEnabled bool) {
+	resetJobForTranscribe(jobID, refineEnabled)
+}
+
+func markJobTrashed(jobID string) {
+	cancelJob(jobID)
+	removeTempWav(jobID)
+	setJobFields(jobID, map[string]any{
+		"is_trashed": true,
+		"deleted_at": time.Now().Format("2006-01-02 15:04:05"),
+	})
 }
 
 func paginateRows(rows []JobRow, page, pageSize int) ([]JobRow, int, int) {
@@ -137,12 +187,4 @@ func paginateRows(rows []JobRow, page, pageSize int) ([]JobRow, int, int) {
 		end = len(rows)
 	}
 	return rows[start:end], page, totalPages
-}
-
-func normalizeSortParams(sortBy, sortOrder string) (string, string) {
-	return httpx.NormalizeSortParams(sortBy, sortOrder)
-}
-
-func healthzHandler(c echo.Context) error {
-	return httpx.HealthzHandler(c)
 }
