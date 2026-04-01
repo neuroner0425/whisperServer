@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v4"
+	httpx "whisperserver/src/internal/http"
 	"whisperserver/src/internal/model"
 	"whisperserver/src/internal/store"
 )
@@ -22,10 +23,10 @@ type storageItem struct {
 }
 
 func apiStorageJSONHandler(c echo.Context) error {
-	disableCache(c)
-	u, err := currentUser(c)
+	httpx.DisableCache(c)
+	u, err := currentUserOrUnauthorized(c)
 	if err != nil {
-		return c.JSON(http.StatusUnauthorized, map[string]string{"detail": "인증이 필요합니다."})
+		return nil
 	}
 
 	usages, err := store.ListJobBlobUsageByOwner(u.ID)

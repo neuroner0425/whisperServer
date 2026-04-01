@@ -60,6 +60,7 @@ export type DragState = {
 
 export type PendingUpload = {
   localId: string
+  clientUploadId: string
   jobId?: string
   folderId: string
   filename: string

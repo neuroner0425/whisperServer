@@ -22,6 +22,7 @@ export type JobItem = {
   IsRefined: boolean
   TagText: string
   FolderID: string
+  ClientUploadID?: string
   UpdatedAt: string
   FolderName: string
 }
