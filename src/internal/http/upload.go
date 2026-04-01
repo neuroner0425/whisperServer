@@ -33,6 +33,7 @@ type UploadDeps struct {
 	FormatSecondsPtr    func(*int) string
 	AddJob              func(string, *model.Job)
 	DeleteJobs          func([]string)
+	SetJobFields        func(string, map[string]any)
 	EnqueueTranscribe   func(string)
 	Logf                func(string, ...any)
 	Errf                func(string, error, string, ...any)
@@ -41,6 +42,7 @@ type UploadDeps struct {
 	MaxUploadSizeMB     int
 	UploadRateLimitKBPS int
 	StatusPending       string
+	StatusFailed        string
 }
 
 func UploadGetHandler(c echo.Context, deps UploadDeps) error {
@@ -162,21 +164,6 @@ func createUploadedJob(c echo.Context, ownerID string, fileHeader *multipart.Fil
 	}
 	deps.UploadBytesAdd(float64(totalBytes))
 
-	if err := deps.ConvertToAac(tempPath, aacPath); err != nil {
-		_ = os.Remove(tempPath)
-		deps.Errf("upload.convertToAac", err, "job_id=%s src=%s dst=%s", jobID, tempPath, aacPath)
-		return "", "", echo.NewHTTPError(http.StatusInternalServerError, "ffmpeg 변환 실패")
-	}
-	_ = os.Remove(tempPath)
-
-	aacBytes, err := os.ReadFile(aacPath)
-	if err != nil {
-		_ = os.Remove(aacPath)
-		deps.Errf("upload.readAac", err, "job_id=%s path=%s", jobID, aacPath)
-		return "", "", echo.NewHTTPError(http.StatusInternalServerError, "업로드 파일 처리 실패")
-	}
-
-	duration := deps.GetMediaDuration(aacPath)
 	now := time.Now()
 	job := &model.Job{
 		Status:               deps.StatusPending,
@@ -184,8 +171,10 @@ func createUploadedJob(c echo.Context, ownerID string, fileHeader *multipart.Fil
 		FileType:             deps.DetectFileType(originalFilename),
 		UploadedAt:           now.Format("2006-01-02 15:04:05"),
 		UploadedTS:           float64(now.Unix()),
-		MediaDuration:        deps.FormatSecondsPtr(duration),
-		MediaDurationSeconds: duration,
+		MediaDuration:        deps.FormatSecondsPtr(nil),
+		MediaDurationSeconds: nil,
+		Phase:                "업로드 처리 중",
+		ProgressLabel:        "업로드 처리 중...",
 		ClientUploadID:       clientUploadID,
 		RefineEnabled:        refineEnabled,
 		OwnerID:              ownerID,
@@ -199,15 +188,58 @@ func createUploadedJob(c echo.Context, ownerID string, fileHeader *multipart.Fil
 
 	deps.AddJob(jobID, job)
 	TouchFolderAncestors(ownerID, folderID, deps.Errf, "upload.touchFolder", "owner_id=%s folder_id=%s job_id=%s", ownerID, folderID, jobID)
-	if err := store.SaveJobBlob(jobID, store.BlobKindAudioAAC, aacBytes); err != nil {
-		_ = os.Remove(aacPath)
-		deps.Errf("upload.saveAudioBlob", err, "job_id=%s", jobID)
-		deps.DeleteJobs([]string{jobID})
-		return "", "", echo.NewHTTPError(http.StatusInternalServerError, "오디오 파일 저장 실패")
-	}
-	_ = os.Remove(aacPath)
-
-	deps.EnqueueTranscribe(jobID)
-	deps.Logf("[UPLOAD] queued job_id=%s filename=%s bytes=%d", jobID, inputName, totalBytes)
+	go finalizeUploadedAudio(jobID, tempPath, aacPath, deps)
+	deps.Logf("[UPLOAD] accepted job_id=%s filename=%s bytes=%d", jobID, inputName, totalBytes)
 	return jobID, inputName, nil
+}
+
+func finalizeUploadedAudio(jobID, tempPath, aacPath string, deps UploadDeps) {
+	defer func() {
+		_ = os.Remove(tempPath)
+		_ = os.Remove(aacPath)
+	}()
+
+	if err := deps.ConvertToAac(tempPath, aacPath); err != nil {
+		deps.Errf("upload.convertToAac", err, "job_id=%s src=%s dst=%s", jobID, tempPath, aacPath)
+		deps.SetJobFields(jobID, map[string]any{
+			"status":        deps.StatusFailed,
+			"phase":         "업로드 처리 실패",
+			"progress_label": "",
+			"status_detail": "ffmpeg 변환 실패",
+		})
+		return
+	}
+
+	aacBytes, err := os.ReadFile(aacPath)
+	if err != nil {
+		deps.Errf("upload.readAac", err, "job_id=%s path=%s", jobID, aacPath)
+		deps.SetJobFields(jobID, map[string]any{
+			"status":        deps.StatusFailed,
+			"phase":         "업로드 처리 실패",
+			"progress_label": "",
+			"status_detail": "업로드 파일 처리 실패",
+		})
+		return
+	}
+
+	if err := store.SaveJobBlob(jobID, store.BlobKindAudioAAC, aacBytes); err != nil {
+		deps.Errf("upload.saveAudioBlob", err, "job_id=%s", jobID)
+		deps.SetJobFields(jobID, map[string]any{
+			"status":        deps.StatusFailed,
+			"phase":         "업로드 처리 실패",
+			"progress_label": "",
+			"status_detail": "오디오 파일 저장 실패",
+		})
+		return
+	}
+
+	duration := deps.GetMediaDuration(aacPath)
+	deps.SetJobFields(jobID, map[string]any{
+		"media_duration_seconds": duration,
+		"phase":                  "",
+		"progress_label":         "",
+		"status_detail":          "",
+	})
+	deps.EnqueueTranscribe(jobID)
+	deps.Logf("[UPLOAD] queued job_id=%s", jobID)
 }

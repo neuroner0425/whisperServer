@@ -65,6 +65,9 @@ export function formatJobSub(job: FileListJob) {
   if (job.__pending) {
     return job.Status
   }
+  if (job.Phase && job.Status === '작업 대기 중') {
+    return job.Phase
+  }
   if (job.Status === '작업 대기 중') {
     return '작업 대기 중'
   }
