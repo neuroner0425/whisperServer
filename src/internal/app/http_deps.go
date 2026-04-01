@@ -65,6 +65,7 @@ func uploadDeps() httpx.UploadDeps {
 		FormatSecondsPtr:    intutil.FormatSecondsPtr,
 		AddJob:              addJob,
 		DeleteJobs:          deleteJobs,
+		SetJobFields:        setJobFields,
 		EnqueueTranscribe:   enqueueTranscribe,
 		Logf:                procLogf,
 		Errf:                procErrf,
@@ -73,6 +74,7 @@ func uploadDeps() httpx.UploadDeps {
 		MaxUploadSizeMB:     maxUploadSizeMB,
 		UploadRateLimitKBPS: uploadRateLimitKB,
 		StatusPending:       statusPending,
+		StatusFailed:        statusFailed,
 	}
 }
 
