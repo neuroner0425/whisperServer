@@ -18,6 +18,8 @@ import (
 
 var ErrUploadTooLarge = errors.New("upload too large")
 
+const wavTranscriptionFilter = "highpass=f=80,lowpass=f=7000,dynaudnorm=f=150:g=15:p=0.95:m=10,alimiter=limit=0.95"
+
 func DetectFileType(name string) string {
 	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), ".")
 	switch ext {
@@ -92,19 +94,34 @@ func SaveUploadWithLimit(h *multipart.FileHeader, dst string, maxBytes int64, ch
 }
 
 func ConvertToWav(src, dst string) error {
-	cmd := exec.Command(
-		"ffmpeg",
+	filteredArgs := []string{
 		"-y",
 		"-i", src,
+		"-vn",
 		"-ac", "1",
 		"-ar", "16000",
+		"-c:a", "pcm_s16le",
+		"-af", wavTranscriptionFilter,
 		dst,
-	)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("ffmpeg failed: %s", string(out))
 	}
-	return nil
+	if out, err := runFFmpeg(filteredArgs...); err == nil {
+		return nil
+	} else {
+		plainArgs := []string{
+			"-y",
+			"-i", src,
+			"-vn",
+			"-ac", "1",
+			"-ar", "16000",
+			"-c:a", "pcm_s16le",
+			dst,
+		}
+		if fallbackOut, fallbackErr := runFFmpeg(plainArgs...); fallbackErr == nil {
+			return nil
+		} else {
+			return fmt.Errorf("ffmpeg filtered conversion failed: %s; fallback failed: %s", out, fallbackOut)
+		}
+	}
 }
 
 func ConvertToAac(src, dst string) error {
@@ -123,6 +140,15 @@ func ConvertToAac(src, dst string) error {
 		return fmt.Errorf("ffmpeg failed: %s", string(out))
 	}
 	return nil
+}
+
+func runFFmpeg(args ...string) (string, error) {
+	cmd := exec.Command("ffmpeg", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return strings.TrimSpace(string(out)), err
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 func GetMediaDuration(path string) *int {
