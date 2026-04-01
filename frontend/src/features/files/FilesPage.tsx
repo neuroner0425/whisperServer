@@ -50,7 +50,7 @@ import {
   updateQuery,
 } from './filesPageUtils'
 import { dateFilterLabel, extractDate } from './filesPageDateUtils'
-import { prunePendingUploads, startPendingUpload, usePendingUploads } from './uploadStore'
+import { matchesPendingUpload, prunePendingUploads, startPendingUpload, usePendingUploads } from './uploadStore'
 import { usePageTitle } from '../../usePageTitle'
 
 export function FilesPage({ viewMode }: FilesPageProps) {
@@ -119,8 +119,7 @@ export function FilesPage({ viewMode }: FilesPageProps) {
         })
         if (!closed && payload) {
           setData(payload)
-          const serverJobIDs = new Set(payload.job_items.map((job) => job.ID))
-          prunePendingUploads(serverJobIDs)
+          prunePendingUploads(payload.job_items)
           setError('')
         }
       } catch (loadError) {
@@ -276,6 +275,7 @@ export function FilesPage({ viewMode }: FilesPageProps) {
           IsRefined: false,
           TagText: '',
           FolderID: item.folderId,
+          ClientUploadID: item.clientUploadId,
           UpdatedAt: '',
           FolderName: currentFolderName(item.folderId, allFolders),
           __pending: true,
@@ -284,7 +284,7 @@ export function FilesPage({ viewMode }: FilesPageProps) {
     [allFolders, folderId, pendingUploads, viewMode],
   )
   const actualJobItems = useMemo(
-    () => jobItems.filter((job) => !pendingUploads.some((item) => item.jobId && item.jobId === job.ID)),
+    () => jobItems.filter((job) => !pendingUploads.some((item) => matchesPendingUpload(job, item))),
     [jobItems, pendingUploads],
   )
   const sortedHomeJobs = useMemo(
@@ -298,7 +298,7 @@ export function FilesPage({ viewMode }: FilesPageProps) {
           ...(typeFilter === 'document' ? [] : filteredFolderItems.map((folder) => ({ key: entryKey('folder', folder.ID), kind: 'folder' as const, item: folder }))),
           ...(typeFilter === 'folder'
             ? []
-            : [...pendingVisibleJobs, ...filteredJobItems.filter((job) => !pendingUploads.some((item) => item.jobId && item.jobId === job.ID))].map((job) => ({
+            : [...pendingVisibleJobs, ...filteredJobItems.filter((job) => !pendingUploads.some((item) => matchesPendingUpload(job, item)))].map((job) => ({
                 key: entryKey('file', job.ID),
                 kind: 'file' as const,
                 item: job,

@@ -266,6 +266,7 @@
 | `POST` | `/api/jobs/:job_id/retry` | 필요 | 실패한 전사 재시도 |
 | `POST` | `/api/jobs/:job_id/retranscribe` | 필요 | 완료된 작업의 전사/정제 결과를 지우고 전사를 다시 시작 |
 | `POST` | `/api/jobs/:job_id/refine` | 필요 | 완료된 전사 정제 요청 |
+| `POST` | `/api/jobs/:job_id/rerefine` | 필요 | 기존 정제본을 지우고 정제를 다시 시작 |
 | `PATCH` | `/api/jobs/:job_id` | 필요 | 작업명 변경 |
 | `DELETE` | `/api/jobs/:job_id` | 필요 | 작업 휴지통 이동 |
 | `PUT` | `/api/jobs/:job_id/tags` | 필요 | 작업 태그 덮어쓰기 |
@@ -325,6 +326,11 @@
 #### `POST /api/jobs/:job_id/refine`
 - 목적: 전사 완료 결과를 정제 큐에 넣는다.
 - 조건: 완료 상태, Gemini 설정 존재, 원본 전사 존재, 아직 정제되지 않음.
+
+#### `POST /api/jobs/:job_id/rerefine`
+- 목적: 이미 정제된 완료 작업의 정제 결과를 지우고 다시 정제한다.
+- 조건: 완료 상태, Gemini 설정 존재, 원본 전사 존재, 기존 정제 blob 존재.
+- 특징: transcript는 유지하고 refined blob과 표시 상태만 지운 뒤 정제 큐에 다시 넣는다.
 
 #### `PATCH /api/jobs/:job_id`
 - 목적: 작업 표시 이름을 변경한다.

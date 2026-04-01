@@ -27,6 +27,7 @@ type JobRow struct {
 	IsRefined       bool
 	TagText         string
 	FolderID        string
+	ClientUploadID  string
 	IsTrashed       bool
 	UpdatedAt       string
 	DeletedAt       string
