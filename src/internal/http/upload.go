@@ -94,10 +94,12 @@ func UploadJSONHandler(c echo.Context, deps UploadDeps) error {
 	if err != nil {
 		return err
 	}
+	clientUploadID := strings.TrimSpace(c.FormValue("client_upload_id"))
 	return c.JSON(http.StatusOK, map[string]string{
-		"job_id":   jobID,
-		"filename": filename,
-		"job_url":  routes.Job(jobID),
+		"job_id":           jobID,
+		"filename":         filename,
+		"job_url":          routes.Job(jobID),
+		"client_upload_id": clientUploadID,
 	})
 }
 
@@ -117,6 +119,7 @@ func createUploadedJob(c echo.Context, ownerID string, fileHeader *multipart.Fil
 
 	inputName := c.FormValue("display_name")
 	description := strings.TrimSpace(c.FormValue("description"))
+	clientUploadID := strings.TrimSpace(c.FormValue("client_upload_id"))
 	selectedTags := deps.ParseSelectedTags(c)
 	if singleTag := c.FormValue("tag"); singleTag != "" {
 		selectedTags = append(selectedTags, singleTag)
@@ -183,6 +186,7 @@ func createUploadedJob(c echo.Context, ownerID string, fileHeader *multipart.Fil
 		UploadedTS:           float64(now.Unix()),
 		MediaDuration:        deps.FormatSecondsPtr(duration),
 		MediaDurationSeconds: duration,
+		ClientUploadID:       clientUploadID,
 		RefineEnabled:        refineEnabled,
 		OwnerID:              ownerID,
 		Tags:                 validatedTags,

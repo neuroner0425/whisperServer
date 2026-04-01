@@ -159,3 +159,35 @@ func apiRefineJobJSONHandler(c echo.Context) error {
 	enqueueRefine(jobID)
 	return c.JSON(http.StatusOK, map[string]string{"job_id": jobID, "status": "queued"})
 }
+
+func apiRerefineJobJSONHandler(c echo.Context) error {
+	_, job, err := requireOwnedJobOrNotFound(c, false)
+	if err != nil {
+		return err
+	}
+	jobID := strings.TrimSpace(c.Param("job_id"))
+	if job.Status != statusCompleted {
+		return echo.NewHTTPError(http.StatusBadRequest, "완료된 작업만 정제를 다시 시작할 수 있습니다.")
+	}
+	if !hasGeminiConfigured() {
+		return echo.NewHTTPError(http.StatusBadRequest, "정제 기능이 설정되어 있지 않습니다.")
+	}
+	if !store.HasJobBlob(jobID, store.BlobKindTranscript) {
+		return echo.NewHTTPError(http.StatusNotFound, "원본 전사 결과를 찾지 못했습니다.")
+	}
+	if !store.HasJobBlob(jobID, store.BlobKindRefined) {
+		return echo.NewHTTPError(http.StatusBadRequest, "정제 결과가 있는 작업만 다시 정제할 수 있습니다.")
+	}
+
+	store.DeleteJobBlob(jobID, store.BlobKindRefined)
+	setJobFields(jobID, map[string]any{
+		"result_refined":   "",
+		"refine_enabled":   true,
+		"status":           statusRefiningPending,
+		"progress_percent": 100,
+		"progress_label":   "",
+		"status_detail":    "",
+	})
+	enqueueRefine(jobID)
+	return c.JSON(http.StatusOK, map[string]string{"job_id": jobID, "status": "requeued"})
+}

@@ -147,7 +147,7 @@ export async function uploadFile(formData: FormData) {
 export function uploadFileWithProgress(
   formData: FormData,
   onProgress: (percent: number) => void,
-): Promise<{ job_id: string; filename?: string; job_url?: string }> {
+): Promise<{ job_id: string; filename?: string; job_url?: string; client_upload_id?: string }> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open('POST', '/api/upload')
@@ -162,18 +162,40 @@ export function uploadFileWithProgress(
     }
 
     xhr.onerror = () => reject(new Error('업로드에 실패했습니다.'))
+    xhr.ontimeout = () => reject(new Error('업로드 응답이 지연되었습니다.'))
     xhr.onload = () => {
       if (xhr.status === 401) {
         window.location.href = '/auth/login'
         reject(new Error('인증이 필요합니다.'))
         return
       }
-      const payload = xhr.response as { detail?: string; job_id?: string; filename?: string; job_url?: string } | null
+      let payload = xhr.response as
+        | { detail?: string; message?: string; job_id?: string; filename?: string; job_url?: string; client_upload_id?: string }
+        | null
+      if ((!payload || typeof payload !== 'object') && xhr.responseText) {
+        try {
+          payload = JSON.parse(xhr.responseText) as {
+            detail?: string
+            message?: string
+            job_id?: string
+            filename?: string
+            job_url?: string
+            client_upload_id?: string
+          }
+        } catch {
+          payload = null
+        }
+      }
       if (xhr.status < 200 || xhr.status >= 300 || !payload?.job_id) {
-        reject(new Error(payload?.detail || `Request failed (${xhr.status})`))
+        reject(new Error(payload?.detail || payload?.message || `Request failed (${xhr.status})`))
         return
       }
-      resolve({ job_id: payload.job_id, filename: payload.filename, job_url: payload.job_url })
+      resolve({
+        job_id: payload.job_id,
+        filename: payload.filename,
+        job_url: payload.job_url,
+        client_upload_id: payload.client_upload_id,
+      })
     }
 
     xhr.send(formData)
