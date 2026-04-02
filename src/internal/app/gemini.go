@@ -74,10 +74,11 @@ func refineTranscript(rawText, description string) (string, error) {
 		return "", errors.New("Gemini API is not configured")
 	}
 
-	prompt := "[Original]\n\"\"\"\n" + normalizeRefineInputText(rawText) + "\n\"\"\"\n\n"
+	prompt := ""
 	if strings.TrimSpace(description) != "" {
 		prompt += "[Reference Context]\n\"\"\"\n" + strings.TrimSpace(description) + "\n\"\"\"\n\n"
 	}
+	prompt += "[Original]\n\"\"\"\n" + normalizeRefineInputText(rawText) + "\n\"\"\"\n"
 
 	var lastErr error = errors.New("gemini request failed")
 	maxAttempts := clientCount * 3

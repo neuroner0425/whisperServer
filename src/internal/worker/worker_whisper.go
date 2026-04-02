@@ -258,7 +258,8 @@ func buildTimelineTranscriptText(path string) (string, error) {
 		if text == "" {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf(`%s ~ %s "%s"`, item.Timestamps.From, item.Timestamps.To, text))
+		// lines = append(lines, fmt.Sprintf(`%s ~ %s "%s"`, item.Timestamps.From, item.Timestamps.To, text))
+		lines = append(lines, fmt.Sprintf(`%s : "%s"`, item.Timestamps.From, text))
 	}
 	return strings.Join(lines, "\n"), nil
 }
