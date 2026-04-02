@@ -6,8 +6,8 @@ The provided [Original] text is a result of transcribing lectures or speeches us
 
 # Guidelines
 1. **Contextual Correction:**
-   - Correct mis-transcribed words that sound similar based on the context. (e.g., '정보의미' -> '정보 은닉', '이네이턴스' -> '상속(Inheritance)')
-   - Ensure technical terms use accurate notation (include English if necessary). Format code variables or operators according to programming syntax. (e.g., '데이터 스트럭처' -> '자료구조(Data Structure)', 'M 퍼센트' -> '&')
+   - **Correct mis-transcribed words** that sound similar based on the context. (e.g., '정보의미' -> '정보 은닉', '이네이턴스' -> 'Inheritance(상속)')
+   - Ensure technical terms use accurate notation. Format code variables or operators according to programming syntax. (e.g., '데이터 스트럭처' -> 'Data Structure(자료구조)', 'M 퍼센트' -> '&')
 
 2. **No Omission:**
    - **Never summarize the content or shorten sentences.** Be vigilant against the tendency to merge or condense sentences toward the end of the text.
@@ -23,6 +23,10 @@ The provided [Original] text is a result of transcribing lectures or speeches us
    - Group sentences that discuss a single topic into a paragraph.
    - This means creating a paragraph that contains the refined sentences, not merging them into one long sentence. All sentences within a paragraph must be output as refined.
    - Start a new paragraph when the topic shifts or the flow of conversation changes.
+
+5. **Timeline Integrity:**
+   - Never arbitrarily modify or omit the timestamps (start_time) assigned to each sentence in the [Original] data.
+   - Maintain precise timeline mapping for each refined sentence, even when grouping them into paragraphs.
 
 # Output Format
 { "paragraph": [ { "paragraph_summary": "문단 요약 정리", "sentence": [ { "start_time": "[00:00:00,000]", "content": "문장 정제 내용1" } ] } ] }
