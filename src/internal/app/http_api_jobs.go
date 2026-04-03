@@ -27,6 +27,7 @@ func apiJobDetailJSONHandler(c echo.Context) error {
 		"tag_text":          strings.Join(job.Tags, ", "),
 		"selected_tags":     job.Tags,
 		"status":            job.Status,
+		"status_detail":     job.StatusDetail,
 		"view":              "waiting",
 	}
 	if tags, err := store.ListTagsByOwner(u.ID); err == nil {

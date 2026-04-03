@@ -19,6 +19,7 @@ export type JobItem = {
   Status: string
   Phase?: string
   ProgressPercent?: number
+  StatusDetail?: string
   IsRefined: boolean
   TagText: string
   FolderID: string

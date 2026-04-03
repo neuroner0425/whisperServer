@@ -270,7 +270,7 @@ export function FilesPage({ viewMode }: FilesPageProps) {
               : item.stage === 'failed'
                 ? '업로드 실패'
                 : formatPendingStatus(item.stage, item.progress),
-          Phase: item.stage === 'queued' ? '대기 중' : item.stage === 'processing' ? '전사 중' : '',
+          Phase: item.stage === 'queued' ? '대기 중' : item.stage === 'processing' ? '업로드 처리 중' : '',
           ProgressPercent: item.progress,
           IsRefined: false,
           TagText: '',
