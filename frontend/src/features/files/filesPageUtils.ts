@@ -12,6 +12,9 @@ import type {
   VisibleEntry,
 } from './filesPageTypes'
 import { matchesDateFilter } from './filesPageDateUtils'
+import { buildJobStatusText } from '../jobs/jobStatusText'
+
+const naturalCompareOptions = { numeric: true } as const
 
 export function currentFolderName(folderId: string, allFolders: FolderNode[]) {
   if (!folderId) {
@@ -38,7 +41,7 @@ export function formatPendingStatus(stage: PendingUpload['stage'], progress: num
     return '작업 대기 중'
   }
   if (stage === 'processing') {
-    return `전사 중 ${Math.max(0, progress)}%`
+    return `업로드 처리 중 ${Math.max(0, progress)}%`
   }
   if (stage === 'failed') {
     return '업로드 실패'
@@ -65,22 +68,7 @@ export function formatJobSub(job: FileListJob) {
   if (job.__pending) {
     return job.Status
   }
-  if (job.Phase && job.Status === '작업 대기 중') {
-    return job.Phase
-  }
-  if (job.Status === '작업 대기 중') {
-    return '작업 대기 중'
-  }
-  if (job.Status === '작업 중') {
-    return `전사 중 ${Math.max(0, job.ProgressPercent ?? 0)}%`
-  }
-  if (job.Status === '정제 대기 중') {
-    return '정제 대기 중'
-  }
-  if (job.Status === '정제 중') {
-    return `정제 중 ${Math.max(0, job.ProgressPercent ?? 0)}%`
-  }
-  return job.Status || '-'
+  return buildJobStatusText(job)
 }
 
 export function normalizePage(value: string | null): number {
@@ -123,11 +111,11 @@ export function sortEntries(entries: VisibleEntry[], sortKey: SortKey, sortDirec
     }
     let value = 0
     if (sortKey === 'name') {
-      value = getEntryLabel(a).localeCompare(getEntryLabel(b), 'ko')
+      value = getEntryLabel(a).localeCompare(getEntryLabel(b), 'ko', naturalCompareOptions)
     } else if (sortKey === 'kind') {
       value = a.kind.localeCompare(b.kind, 'ko')
     } else if (sortKey === 'location') {
-      value = getEntryLocation(a).localeCompare(getEntryLocation(b), 'ko')
+      value = getEntryLocation(a).localeCompare(getEntryLocation(b), 'ko', naturalCompareOptions)
     } else {
       value = compareDate(getEntryUpdatedAt(a), getEntryUpdatedAt(b))
     }
@@ -253,9 +241,9 @@ function compareDate(a?: string, b?: string) {
 function compareJob(a: JobItem, b: JobItem, sortKey: SortKey | 'location', sortDirection: SortDirection) {
   let value = 0
   if (sortKey === 'name') {
-    value = a.Filename.localeCompare(b.Filename, 'ko')
+    value = a.Filename.localeCompare(b.Filename, 'ko', naturalCompareOptions)
   } else if (sortKey === 'location') {
-    value = (a.FolderName || '').localeCompare(b.FolderName || '', 'ko')
+    value = (a.FolderName || '').localeCompare(b.FolderName || '', 'ko', naturalCompareOptions)
   } else {
     value = compareDate(a.UpdatedAt, b.UpdatedAt)
   }

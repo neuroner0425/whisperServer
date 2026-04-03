@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 
 import { fetchJobDetail, refineJob, rerefineJob, retranscribeJob, retryJob } from './api'
+import { buildJobStatusText } from './jobStatusText'
 import type { JobDetailResponse } from './types'
 import { usePageTitle } from '../../usePageTitle'
 
@@ -50,7 +51,7 @@ export function JobDetailPage() {
 
   const showOriginal = searchParams.get('original') === 'true'
   const currentFileName = displayFilename(data?.job.Filename || '파일')
-  const progressText = `${data?.job.Phase || ''} ${data?.job.ProgressPercent ?? 0}%`.trim()
+  const progressText = data ? buildJobStatusText(data.job) : ''
 
   usePageTitle(currentFileName)
 
@@ -312,7 +313,7 @@ export function JobDetailPage() {
               <section className="detail-list plain">
                 <div className="detail-row compact">
                   <span className="detail-label">상태</span>
-                  <span className="detail-value">{data.job.Status}</span>
+                  <span className="detail-value">{buildJobStatusText(data.job)}</span>
                 </div>
                 <div className="detail-row compact">
                   <span className="detail-label">업로드</span>

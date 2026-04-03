@@ -11,6 +11,7 @@ export type JobView = {
   ProgressLabel: string
   ProgressPercent: number
   PreviewText: string
+  StatusDetail?: string
 }
 
 export type AvailableTag = {

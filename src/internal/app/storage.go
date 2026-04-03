@@ -385,6 +385,7 @@ func toJobView(job *model.Job) JobView {
 		ProgressLabel:   intutil.Fallback(job.ProgressLabel, ""),
 		ProgressPercent: job.ProgressPercent,
 		PreviewText:     job.PreviewText,
+		StatusDetail:    job.StatusDetail,
 	}
 }
 

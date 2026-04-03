@@ -13,6 +13,7 @@ type JobView struct {
 	ProgressLabel   string
 	ProgressPercent int
 	PreviewText     string
+	StatusDetail    string
 }
 
 type JobRow struct {
@@ -24,6 +25,7 @@ type JobRow struct {
 	Status          string
 	Phase           string
 	ProgressPercent int
+	StatusDetail    string
 	IsRefined       bool
 	TagText         string
 	FolderID        string

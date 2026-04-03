@@ -68,6 +68,7 @@ func BuildJobRowsForUser(userID, q, tag, folderID string, trashed bool, deps Job
 			Status:          job.Status,
 			Phase:           job.Phase,
 			ProgressPercent: job.ProgressPercent,
+			StatusDetail:    job.StatusDetail,
 			IsRefined:       job.IsRefined(),
 			TagText:         strings.Join(tags, ", "),
 			FolderID:        fID,
@@ -144,6 +145,7 @@ func BuildRecentJobRowsForUser(userID, q, tag string, deps JobSupportDeps) []Job
 			Status:          job.Status,
 			Phase:           job.Phase,
 			ProgressPercent: job.ProgressPercent,
+			StatusDetail:    job.StatusDetail,
 			IsRefined:       job.IsRefined(),
 			TagText:         strings.Join(tags, ", "),
 			FolderID:        fID,
@@ -234,7 +236,7 @@ func JobsSnapshotVersion(jobItems []JobRow, folderItems []FolderRow, page, pageS
 	for _, j := range jobItems {
 		fmt.Fprintf(
 			h,
-			"J|%s|%s|%s|%s|%d|%s|%s|%d|%t|%s|%s|%s|%t|%s|%s;",
+			"J|%s|%s|%s|%s|%d|%s|%s|%d|%s|%t|%s|%s|%s|%t|%s|%s;",
 			j.ID,
 			j.Filename,
 			j.FileType,
@@ -243,6 +245,7 @@ func JobsSnapshotVersion(jobItems []JobRow, folderItems []FolderRow, page, pageS
 			j.Status,
 			j.Phase,
 			j.ProgressPercent,
+			j.StatusDetail,
 			j.IsRefined,
 			j.TagText,
 			j.FolderID,
