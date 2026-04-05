@@ -1,7 +1,7 @@
 package main
 
-import "whisperserver/src/internal/app"
+import "whisperserver/src/internal/server"
 
 func main() {
-	app.Run()
+	server.Run()
 }
