@@ -38,7 +38,21 @@ Extract every page into JSON according to the schema. Preserve heading hierarchy
   - For **Conceptual/Illustrative visuals**: Describe what is shown in the image and **how it relates to the surrounding text**. (e.g., "A photograph of a busy street used to illustrate the concept of urban density," or "An illustration of a light bulb appearing above a person's head to symbolize an idea.")
   - The goal is to provide enough descriptive detail so a reader can understand the visual's role in the document without seeing it.
 
-## **3. Mathematical Expression (LaTeX)**
+## **3. Nested List Extraction**
+- Represent lists as structured hierarchy, not as a flat array of strings.
+- `list.items` contains top-level list items.
+- Each item may contain `children` for nested list items.
+- Support nesting up to 3 levels total:
+  - top-level item
+  - child item
+  - grandchild item
+- Use visual indentation, marker style, numbering pattern, and alignment together to decide parent-child relationships.
+- Do not flatten child items into the same level as their parent.
+- If a parent item has nested items beneath it, keep the parent text in the parent item and place nested entries in `children`.
+- If unsure between flat and nested structure, prefer preserving the visible nested relationship.
+- `ordered=true` only when the list is clearly numbered in sequence; otherwise use `ordered=false`.
+
+## **4. Mathematical Expression (LaTeX)**
 - All math content must be valid LaTeX.
 - Do not include surrounding `$` or `$$` in JSON values.
 - Put only math in `math_inline` and `math_block`.
@@ -46,6 +60,6 @@ Extract every page into JSON according to the schema. Preserve heading hierarchy
 - If a sentence contains both prose and math, split them into separate elements when needed instead of mixing long block expressions into `text`.
 - If a matrix or equation is visually standalone, it must be emitted as `math_block`.
 
-## **4. Heading & Text**
+## **5. Heading & Text**
 - **`header`**: Assign `level` (1: Document title, 2: Chapter or Major section, 3: Subsection or page-level section).
 - **`text`**: Use for plain prose only. If a sentence is interrupted by a block formula or table, split the prose into separate `text` elements before and after the interruption.
