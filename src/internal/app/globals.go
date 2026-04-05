@@ -28,13 +28,21 @@ var (
 	modelDir       = filepath.Join(projectRoot, "whisper", "models")
 	whisperCLI     = filepath.Join(projectRoot, "whisper", "bin", "whisper-cli")
 
-	allowedExtensions = map[string]struct{}{"mp3": {}, "wav": {}, "m4a": {}}
-	chunkSize         = 4 * 1024 * 1024
-	maxUploadSizeMB   int
-	uploadRateLimitKB int
-	jobTimeoutSec     int
-	geminiModel       string
-	splitTaskQueues   bool
+	allowedExtensions             = map[string]struct{}{"mp3": {}, "wav": {}, "m4a": {}, "pdf": {}}
+	chunkSize                     = 4 * 1024 * 1024
+	maxUploadSizeMB               int
+	uploadRateLimitKB             int
+	jobTimeoutSec                 int
+	geminiModel                   string
+	splitTaskQueues               bool
+	pdfMaxPages                   int
+	pdfMaxPagesPerRequest         int
+	pdfRenderDPI                  int
+	pdfBatchTimeoutSec            int
+	pdfMaxRenderedImageBytes      int64
+	pdfConsistencyContextMaxChars int
+	pdfToolPDFInfo                string
+	pdfToolPDFToPPM               string
 
 	secureRe   = regexp.MustCompile(`[^A-Za-z0-9_.-]+`)
 	lineRe1    = regexp.MustCompile(`\[(\d{2}):(\d{2}):(\d{2}\.\d+)`)

@@ -239,8 +239,32 @@ tr:hover {
     font-size: 1.08em;
     color: #222;
     word-break: break-all;
-    white-space: pre-wrap;
+    white-space: normal;
     overflow-y: auto;
+}
+.result-text p,
+.result-text h1,
+.result-text h2,
+.result-text h3,
+.result-text ul,
+.result-text hr {
+    margin: 0 0 12px 0;
+}
+.result-text ul {
+    padding-left: 20px;
+}
+.result-text .document-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0 0 14px 0;
+    font-size: 0.96em;
+    background: #fff;
+}
+.result-text .document-table td {
+    border: 1px solid #d1d5db;
+    padding: 8px 10px;
+    vertical-align: top;
+    word-break: break-word;
 }
 .download-btn {
     display: inline-block;

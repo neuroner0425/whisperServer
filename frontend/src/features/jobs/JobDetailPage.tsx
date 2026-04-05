@@ -1,4 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import rehypeKatex from 'rehype-katex'
+import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
 import { useParams, useSearchParams } from 'react-router-dom'
 
 import { fetchJobDetail, refineJob, rerefineJob, retranscribeJob, retryJob } from './api'
@@ -52,6 +56,7 @@ export function JobDetailPage() {
   const showOriginal = searchParams.get('original') === 'true'
   const currentFileName = displayFilename(data?.job.Filename || '파일')
   const progressText = data ? buildJobStatusText(data.job) : ''
+  const isPDF = data?.job.FileType === 'pdf'
 
   usePageTitle(currentFileName)
 
@@ -126,7 +131,6 @@ export function JobDetailPage() {
     }
     return data.preview_text || ''
   }, [data])
-
   const transcriptSegments = useMemo(() => parseTimelineTranscriptText(sourceText), [sourceText])
   const refinedParagraphs = useMemo(() => parseRefinedParagraphs(data?.view === 'result' ? data?.text || '' : ''), [data?.text, data?.view])
   const activeItems = useMemo(() => {
@@ -140,7 +144,6 @@ export function JobDetailPage() {
     }))
   }, [data?.variant, refinedParagraphs, transcriptSegments])
   const fallbackText = useMemo(() => normalizePlainText(sourceText), [sourceText])
-
   useEffect(() => {
     if (!message && !error) {
       return
@@ -211,7 +214,7 @@ export function JobDetailPage() {
     try {
       setIsRetrying(true)
       await retryJob(jobId)
-      setMessage('전사를 다시 시작했습니다.')
+      setMessage(isPDF && data?.resume_available ? '실패 배치부터 다시 처리합니다.' : isPDF ? '문서 처리를 다시 시작했습니다.' : '전사를 다시 시작했습니다.')
       const payload = await fetchJobDetail(jobId, showOriginal)
       setData(payload)
     } catch (retryError) {
@@ -286,9 +289,14 @@ export function JobDetailPage() {
           <h1 className="view-title">{currentFileName}</h1>
         </div>
         <div className="view-actions">
+          {data?.download_document_json_url ? (
+            <a className="ghost-button" href={data.download_document_json_url}>
+              JSON
+            </a>
+          ) : null}
           {data?.status === '실패' ? (
             <button className="ghost-button" disabled={isRetrying} onClick={() => void handleRetry()} type="button">
-              {isRetrying ? '재시도 중...' : '재시도'}
+              {isRetrying ? '재시도 중...' : isPDF ? '문서 다시 처리' : '재시도'}
             </button>
           ) : null}
           {downloadHref ? (
@@ -327,18 +335,40 @@ export function JobDetailPage() {
                   <span className="detail-label">계정</span>
                   <span className="detail-value">{data.current_user_name || '-'}</span>
                 </div>
+                {isPDF ? (
+                  <>
+                    <div className="detail-row compact">
+                      <span className="detail-label">총 페이지</span>
+                      <span className="detail-value">{data.job.PageCount || data.page_count || '-'}</span>
+                    </div>
+                    <div className="detail-row compact">
+                      <span className="detail-label">완료 페이지</span>
+                      <span className="detail-value">{data.job.ProcessedPageCount || data.processed_page_count || 0}</span>
+                    </div>
+                    <div className="detail-row compact">
+                      <span className="detail-label">배치</span>
+                      <span className="detail-value">
+                        {(data.job.CurrentChunk || data.current_chunk || 0)}/{data.job.TotalChunks || data.total_chunks || 0}
+                      </span>
+                    </div>
+                    <div className="detail-row compact">
+                      <span className="detail-label">재개 가능</span>
+                      <span className="detail-value">{data.job.ResumeAvailable || data.resume_available ? '예' : '아니오'}</span>
+                    </div>
+                  </>
+                ) : null}
                 <div className="detail-meta-actions">
                   {data.status === '완료' ? (
                     <button className="ghost-button small" disabled={isRetranscribing} onClick={() => void handleRetranscribe()} type="button">
-                      {isRetranscribing ? '전사 다시 시작 중...' : '전사 다시하기'}
+                      {isRetranscribing ? (isPDF ? '문서 다시 처리 중...' : '전사 다시 시작 중...') : isPDF ? '문서 다시 처리' : '전사 다시하기'}
                     </button>
                   ) : null}
-                  {data.status === '완료' && data.has_refined && data.can_refine ? (
+                  {data.status === '완료' && !isPDF && data.has_refined && data.can_refine ? (
                     <button className="ghost-button small" disabled={isRerefining} onClick={() => void handleRerefine()} type="button">
                       {isRerefining ? '정제 다시 시작 중...' : '정제 다시하기'}
                     </button>
                   ) : null}
-                  {data.status === '완료' && !data.has_refined && data.can_refine ? (
+                  {data.status === '완료' && !isPDF && !data.has_refined && data.can_refine ? (
                     <button className="ghost-button small" disabled={isRefining} onClick={() => void handleRefine()} type="button">
                       {isRefining ? '정제 시작 중...' : '정제하기'}
                     </button>
@@ -377,6 +407,18 @@ export function JobDetailPage() {
                 <div className="progress-track dark">
                   <div className="progress-bar" style={{ width: `${data.job.ProgressPercent}%` }} />
                 </div>
+                {isPDF ? (
+                  <div className="detail-row compact">
+                    <span className="detail-value">
+                      현재 {data.job.ProcessedPageCount || data.processed_page_count || 0}/{data.job.PageCount || data.page_count || 0} 페이지 처리 완료
+                    </span>
+                  </div>
+                ) : null}
+                {isPDF && (data.job.ResumeAvailable || data.resume_available) && data.status === '실패' ? (
+                  <div className="detail-row compact">
+                    <span className="detail-value">실패 배치부터 재시도할 수 있습니다.</span>
+                  </div>
+                ) : null}
               </div>
             ) : null}
 
@@ -434,6 +476,12 @@ export function JobDetailPage() {
                     </span>
                   ))}
                 </div>
+              </section>
+            ) : isPDF && data.view === 'result' ? (
+              <section className="result-panel dark markdown-panel">
+                <ReactMarkdown rehypePlugins={[rehypeKatex]} remarkPlugins={[remarkGfm, remarkMath]}>
+                  {sourceText}
+                </ReactMarkdown>
               </section>
             ) : (
               <pre className="result-panel dark">{fallbackText}</pre>

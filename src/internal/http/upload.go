@@ -35,6 +35,7 @@ type UploadDeps struct {
 	DeleteJobs          func([]string)
 	SetJobFields        func(string, map[string]any)
 	EnqueueTranscribe   func(string)
+	EnqueuePDFExtract   func(string)
 	Logf                func(string, ...any)
 	Errf                func(string, error, string, ...any)
 	UploadBytesAdd      func(float64)
@@ -112,11 +113,17 @@ func createUploadedJob(c echo.Context, ownerID string, fileHeader *multipart.Fil
 	if !deps.AllowedFile(fileHeader.Filename) {
 		return "", "", echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("허용되지 않는 파일 형식입니다. 허용: %s", strings.Join(deps.SortedExts(), ", ")))
 	}
-	if ct := fileHeader.Header.Get("Content-Type"); ct != "" && !strings.HasPrefix(ct, "audio/") {
-		return "", "", echo.NewHTTPError(http.StatusBadRequest, "현재는 오디오 파일만 업로드할 수 있습니다.")
+	fileType := deps.DetectFileType(fileHeader.Filename)
+	if ct := strings.TrimSpace(fileHeader.Header.Get("Content-Type")); ct != "" {
+		if fileType == "audio" && !strings.HasPrefix(ct, "audio/") {
+			return "", "", echo.NewHTTPError(http.StatusBadRequest, "오디오 파일 형식이 올바르지 않습니다.")
+		}
+		if fileType == "pdf" && ct != "application/pdf" {
+			return "", "", echo.NewHTTPError(http.StatusBadRequest, "PDF 파일 형식이 올바르지 않습니다.")
+		}
 	}
-	if deps.DetectFileType(fileHeader.Filename) != "audio" {
-		return "", "", echo.NewHTTPError(http.StatusBadRequest, "현재는 오디오 파일만 업로드할 수 있습니다.")
+	if fileType != "audio" && fileType != "pdf" {
+		return "", "", echo.NewHTTPError(http.StatusBadRequest, "현재는 오디오 파일과 PDF만 업로드할 수 있습니다.")
 	}
 
 	inputName := c.FormValue("display_name")
@@ -133,6 +140,9 @@ func createUploadedJob(c echo.Context, ownerID string, fileHeader *multipart.Fil
 		return "", "", echo.NewHTTPError(http.StatusInternalServerError, "태그 조회 실패")
 	}
 	refineEnabled := deps.Truthy(c.FormValue("refine"))
+	if fileType == "pdf" {
+		refineEnabled = false
+	}
 	if folderID != "" {
 		if _, err := RequireFolderForOwner(ownerID, folderID, false, http.StatusBadRequest, "유효하지 않은 폴더입니다."); err != nil {
 			return "", "", err
@@ -168,7 +178,7 @@ func createUploadedJob(c echo.Context, ownerID string, fileHeader *multipart.Fil
 	job := &model.Job{
 		Status:               deps.StatusPending,
 		Filename:             inputName,
-		FileType:             deps.DetectFileType(originalFilename),
+		FileType:             fileType,
 		UploadedAt:           now.Format("2006-01-02 15:04:05"),
 		UploadedTS:           float64(now.Unix()),
 		MediaDuration:        deps.FormatSecondsPtr(nil),
@@ -188,7 +198,11 @@ func createUploadedJob(c echo.Context, ownerID string, fileHeader *multipart.Fil
 
 	deps.AddJob(jobID, job)
 	TouchFolderAncestors(ownerID, folderID, deps.Errf, "upload.touchFolder", "owner_id=%s folder_id=%s job_id=%s", ownerID, folderID, jobID)
-	go finalizeUploadedAudio(jobID, tempPath, aacPath, deps)
+	if fileType == "pdf" {
+		go finalizeUploadedPDF(jobID, tempPath, deps)
+	} else {
+		go finalizeUploadedAudio(jobID, tempPath, aacPath, deps)
+	}
 	deps.Logf("[UPLOAD] accepted job_id=%s filename=%s bytes=%d", jobID, inputName, totalBytes)
 	return jobID, inputName, nil
 }
@@ -202,10 +216,10 @@ func finalizeUploadedAudio(jobID, tempPath, aacPath string, deps UploadDeps) {
 	if err := deps.ConvertToAac(tempPath, aacPath); err != nil {
 		deps.Errf("upload.convertToAac", err, "job_id=%s src=%s dst=%s", jobID, tempPath, aacPath)
 		deps.SetJobFields(jobID, map[string]any{
-			"status":        deps.StatusFailed,
-			"phase":         "업로드 처리 실패",
+			"status":         deps.StatusFailed,
+			"phase":          "업로드 처리 실패",
 			"progress_label": "",
-			"status_detail": "ffmpeg 변환 실패",
+			"status_detail":  "ffmpeg 변환 실패",
 		})
 		return
 	}
@@ -214,10 +228,10 @@ func finalizeUploadedAudio(jobID, tempPath, aacPath string, deps UploadDeps) {
 	if err != nil {
 		deps.Errf("upload.readAac", err, "job_id=%s path=%s", jobID, aacPath)
 		deps.SetJobFields(jobID, map[string]any{
-			"status":        deps.StatusFailed,
-			"phase":         "업로드 처리 실패",
+			"status":         deps.StatusFailed,
+			"phase":          "업로드 처리 실패",
 			"progress_label": "",
-			"status_detail": "업로드 파일 처리 실패",
+			"status_detail":  "업로드 파일 처리 실패",
 		})
 		return
 	}
@@ -225,10 +239,10 @@ func finalizeUploadedAudio(jobID, tempPath, aacPath string, deps UploadDeps) {
 	if err := store.SaveJobBlob(jobID, store.BlobKindAudioAAC, aacBytes); err != nil {
 		deps.Errf("upload.saveAudioBlob", err, "job_id=%s", jobID)
 		deps.SetJobFields(jobID, map[string]any{
-			"status":        deps.StatusFailed,
-			"phase":         "업로드 처리 실패",
+			"status":         deps.StatusFailed,
+			"phase":          "업로드 처리 실패",
 			"progress_label": "",
-			"status_detail": "오디오 파일 저장 실패",
+			"status_detail":  "오디오 파일 저장 실패",
 		})
 		return
 	}
@@ -242,4 +256,39 @@ func finalizeUploadedAudio(jobID, tempPath, aacPath string, deps UploadDeps) {
 	})
 	deps.EnqueueTranscribe(jobID)
 	deps.Logf("[UPLOAD] queued job_id=%s", jobID)
+}
+
+func finalizeUploadedPDF(jobID, tempPath string, deps UploadDeps) {
+	defer func() {
+		_ = os.Remove(tempPath)
+	}()
+
+	pdfBytes, err := os.ReadFile(tempPath)
+	if err != nil {
+		deps.Errf("upload.readPDF", err, "job_id=%s path=%s", jobID, tempPath)
+		deps.SetJobFields(jobID, map[string]any{
+			"status":         deps.StatusFailed,
+			"phase":          "업로드 처리 실패",
+			"progress_label": "",
+			"status_detail":  "PDF 파일 처리 실패",
+		})
+		return
+	}
+	if err := store.SaveJobBlob(jobID, store.BlobKindPDFOriginal, pdfBytes); err != nil {
+		deps.Errf("upload.savePDFBlob", err, "job_id=%s", jobID)
+		deps.SetJobFields(jobID, map[string]any{
+			"status":         deps.StatusFailed,
+			"phase":          "업로드 처리 실패",
+			"progress_label": "",
+			"status_detail":  "PDF 파일 저장 실패",
+		})
+		return
+	}
+	deps.SetJobFields(jobID, map[string]any{
+		"phase":          "",
+		"progress_label": "",
+		"status_detail":  "",
+	})
+	deps.EnqueuePDFExtract(jobID)
+	deps.Logf("[UPLOAD] queued pdf job_id=%s", jobID)
 }

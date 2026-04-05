@@ -17,44 +17,71 @@ import (
 )
 
 type Config struct {
-	SplitTaskQueues       bool
-	TmpFolder             string
-	ModelDir              string
-	WhisperCLI            string
-	JobTimeoutSec         int
-	ProgressRe            *regexp.Regexp
-	StatusPending         string
-	StatusRunning         string
-	StatusRefiningPending string
-	StatusRefining        string
-	StatusCompleted       string
-	StatusFailed          string
+	SplitTaskQueues          bool
+	TmpFolder                string
+	ModelDir                 string
+	WhisperCLI               string
+	JobTimeoutSec            int
+	PDFBatchTimeoutSec       int
+	PDFMaxPages              int
+	PDFMaxPagesPerRequest    int
+	PDFMaxRenderedImageBytes int64
+	ProgressRe               *regexp.Regexp
+	StatusPending            string
+	StatusRunning            string
+	StatusRefiningPending    string
+	StatusRefining           string
+	StatusCompleted          string
+	StatusFailed             string
+}
+
+type DocumentPageImage struct {
+	PageIndex int
+	MIMEType  string
+	Data      []byte
+}
+
+type DocumentChunk struct {
+	ChunkIndex  int
+	TotalChunks int
+	StartPage   int
+	EndPage     int
+	TotalPages  int
+	Images      []DocumentPageImage
 }
 
 type Deps struct {
-	GetJob                func(string) *model.Job
-	SetJobFields          func(string, map[string]any)
-	AppendJobPreviewLine  func(string, string)
-	ReplaceJobPreviewText func(string, string)
-	ConvertToWav          func(string, string) error
-	HasGeminiConfigured   func() bool
-	RefineTranscript      func(string, string) (string, error)
-	UniqueStrings         func([]string) []string
-	GetTagDescriptions    func(string, []string) (map[string]string, error)
-	Logf                  func(string, ...any)
-	Errf                  func(string, error, string, ...any)
-	IncInProgress         func()
-	DecInProgress         func()
-	SetQueueLength        func(float64)
-	IncJobsTotal          func(string)
-	ObserveJobDuration    func(float64)
+	GetJob                  func(string) *model.Job
+	SetJobFields            func(string, map[string]any)
+	AppendJobPreviewLine    func(string, string)
+	ReplaceJobPreviewText   func(string, string)
+	ConvertToWav            func(string, string) error
+	HasGeminiConfigured     func() bool
+	RefineTranscript        func(string, string) (string, error)
+	CountPDFPages           func(string) (int, error)
+	RenderPDFToJPEGs        func(string, string) ([]string, error)
+	ExtractDocumentChunk    func(context.Context, DocumentChunk, string) ([]byte, error)
+	BuildConsistencyContext func([]byte) (string, error)
+	MergeDocumentJSON       func(...[]byte) ([]byte, error)
+	RenderDocumentMarkdown  func([]byte) (string, error)
+	ListJobBlobKinds        func(string) ([]string, error)
+	UniqueStrings           func([]string) []string
+	GetTagDescriptions      func(string, []string) (map[string]string, error)
+	Logf                    func(string, ...any)
+	Errf                    func(string, error, string, ...any)
+	IncInProgress           func()
+	DecInProgress           func()
+	SetQueueLength          func(float64)
+	IncJobsTotal            func(string)
+	ObserveJobDuration      func(float64)
 }
 
 type taskType string
 
 const (
-	taskTypeTranscribe taskType = "transcribe"
-	taskTypeRefine     taskType = "refine"
+	taskTypeAudioTranscribe taskType = "audio_transcribe"
+	taskTypeAudioRefine     taskType = "audio_refine"
+	taskTypePDFExtract      taskType = "pdf_extract"
 )
 
 type task struct {
@@ -107,7 +134,7 @@ func (w *Worker) Close() {
 }
 
 func (w *Worker) EnqueueTranscribe(jobID string) {
-	t := task{jobID: jobID, kind: taskTypeTranscribe}
+	t := task{jobID: jobID, kind: taskTypeAudioTranscribe}
 	if w.cfg.SplitTaskQueues {
 		w.transcribeQueue <- t
 		w.setQueueLen()
@@ -118,7 +145,18 @@ func (w *Worker) EnqueueTranscribe(jobID string) {
 }
 
 func (w *Worker) EnqueueRefine(jobID string) {
-	t := task{jobID: jobID, kind: taskTypeRefine}
+	t := task{jobID: jobID, kind: taskTypeAudioRefine}
+	if w.cfg.SplitTaskQueues {
+		w.refineQueue <- t
+		w.setQueueLen()
+		return
+	}
+	w.taskQueue <- t
+	w.setQueueLen()
+}
+
+func (w *Worker) EnqueuePDFExtract(jobID string) {
+	t := task{jobID: jobID, kind: taskTypePDFExtract}
 	if w.cfg.SplitTaskQueues {
 		w.refineQueue <- t
 		w.setQueueLen()
@@ -135,7 +173,9 @@ func (w *Worker) RequeuePending(jobs map[string]*model.Job) {
 		}
 		switch job.Status {
 		case w.cfg.StatusPending, w.cfg.StatusRunning:
-			if store.HasJobBlob(id, store.BlobKindAudioAAC) {
+			if job.FileType == "pdf" && store.HasJobBlob(id, store.BlobKindPDFOriginal) {
+				w.EnqueuePDFExtract(id)
+			} else if store.HasJobBlob(id, store.BlobKindAudioAAC) {
 				w.EnqueueTranscribe(id)
 			}
 		case w.cfg.StatusRefiningPending, w.cfg.StatusRefining:
@@ -216,8 +256,14 @@ func (w *Worker) processTask(t task, splitMode bool) {
 	}
 
 	switch t.kind {
-	case taskTypeTranscribe:
+	case taskTypeAudioTranscribe:
 		if job.Status != w.cfg.StatusPending && job.Status != w.cfg.StatusRunning {
+			return
+		}
+		if job.FileType == "pdf" {
+			if err := w.taskExtractPDF(t.jobID); err != nil {
+				w.deps.Errf("worker.extractPDF", err, "job_id=%s", t.jobID)
+			}
 			return
 		}
 		if err := w.taskTranscribe(t.jobID); err != nil {
@@ -234,11 +280,18 @@ func (w *Worker) processTask(t task, splitMode bool) {
 			return
 		}
 		w.finalizeRefine(t.jobID)
-	case taskTypeRefine:
+	case taskTypeAudioRefine:
 		if job.Status != w.cfg.StatusRefiningPending && job.Status != w.cfg.StatusRefining {
 			return
 		}
 		w.finalizeRefine(t.jobID)
+	case taskTypePDFExtract:
+		if job.Status != w.cfg.StatusPending && job.Status != w.cfg.StatusRunning {
+			return
+		}
+		if err := w.taskExtractPDF(t.jobID); err != nil {
+			w.deps.Errf("worker.extractPDF", err, "job_id=%s", t.jobID)
+		}
 	}
 }
 

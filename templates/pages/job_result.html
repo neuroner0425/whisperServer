@@ -33,9 +33,18 @@
         <div class="info">작업 완료: {{.Job.CompletedAt}}</div>
         <div class="info">작업 소요(초): {{.Job.Duration}}</div>
         <div class="info">미디어 길이: {{.Job.MediaDuration}}</div>
+        {{if .IsPDF}}
+        <div class="info">총 페이지: {{.Job.PageCount}}</div>
+        <div class="info">완료 페이지: {{.Job.ProcessedPageCount}}</div>
+        <div class="info">배치: {{.Job.CurrentChunk}} / {{.Job.TotalChunks}}</div>
+        <div class="info">재개 가능: {{if .Job.ResumeAvailable}}예{{else}}아니오{{end}}</div>
+        {{end}}
         <button type="button" id="open-tag-modal-btn" style="margin-top:6px;">태그 수정</button>
     </div>
     <div style="margin:10px 0;display:flex;align-items:center;gap:10px;">
+        {{if .IsPDF}}
+        <span style="color:#6b7280;">PDF 문서 결과</span>
+        {{else}}
         {{if .HasRefined}}
         <label style="display:flex;align-items:center;gap:6px;">
             <input type="checkbox" id="toggleOriginal" {{if eq .Variant "original"}}checked{{end}}>
@@ -55,9 +64,16 @@
         {{else}}
         <span style="color:#aaa;">정제본 없음(원본 표시)</span>
         {{end}}
+        {{end}}
     </div>
     <div class="result-text">{{.Text}}</div>
     <div style="margin-top:10px;">
+        {{if .IsPDF}}
+        <a class="download-btn" href="/download/{{.JobID}}">Markdown 다운로드</a>
+        {{if .HasDocumentJSON}}
+        <a class="download-btn" href="/download/{{.JobID}}/document-json" style="margin-left:8px;">JSON 다운로드</a>
+        {{end}}
+        {{else}}
         <a class="download-btn" href="/download/{{.JobID}}">원본 txt 다운로드</a>
         {{if .HasRefined}}
         <a class="download-btn" href="/download/{{.JobID}}/refined" style="margin-left:8px;">정제본 txt 다운로드</a>
@@ -69,6 +85,7 @@
                 {{if .HasRefined}}정제 다시 하기{{else}}정제 시작{{end}}
             </button>
         </form>
+        {{end}}
         {{end}}
     </div>
 

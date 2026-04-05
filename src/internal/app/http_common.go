@@ -151,6 +151,67 @@ func resetJobForTranscribe(jobID string, refineEnabled bool) {
 	store.DeleteJobBlob(jobID, store.BlobKindRefined)
 }
 
+func resetJobForPDF(jobID string) {
+	cancelJob(jobID)
+	removeTempWav(jobID)
+	setJobFields(jobID, map[string]any{
+		"result":               "",
+		"result_refined":       "",
+		"refine_enabled":       false,
+		"status":               statusPending,
+		"phase":                "",
+		"progress_percent":     0,
+		"progress_label":       "",
+		"preview_text":         "",
+		"started_at":           "",
+		"started_ts":           0,
+		"completed_at":         "",
+		"completed_ts":         0,
+		"duration":             "",
+		"status_detail":        "",
+		"page_count":           0,
+		"processed_page_count": 0,
+		"current_chunk":        0,
+		"total_chunks":         0,
+		"resume_available":     false,
+	})
+	clearPDFProcessingBlobs(jobID)
+}
+
+func prepareJobForPDFRetry(jobID string) {
+	cancelJob(jobID)
+	removeTempWav(jobID)
+	setJobFields(jobID, map[string]any{
+		"result":           "",
+		"status":           statusPending,
+		"phase":            "",
+		"progress_percent": 0,
+		"progress_label":   "",
+		"preview_text":     "",
+		"completed_at":     "",
+		"completed_ts":     0,
+		"duration":         "",
+		"status_detail":    "",
+	})
+	store.DeleteJobBlob(jobID, store.BlobKindPreview)
+}
+
+func clearPDFProcessingBlobs(jobID string) {
+	store.DeleteJobBlob(jobID, store.BlobKindPreview)
+	store.DeleteJobBlob(jobID, store.BlobKindDocumentJSON)
+	store.DeleteJobBlob(jobID, store.BlobKindDocumentMarkdown)
+	store.DeleteJobBlob(jobID, store.BlobKindDocumentChunkIndex)
+	kinds, err := store.ListJobBlobKinds(jobID)
+	if err != nil {
+		return
+	}
+	for _, kind := range kinds {
+		if strings.HasPrefix(kind, "document_chunk_") {
+			store.DeleteJobBlob(jobID, kind)
+		}
+	}
+}
+
 func resetJobForRetry(jobID string, refineEnabled bool) {
 	resetJobForTranscribe(jobID, refineEnabled)
 }

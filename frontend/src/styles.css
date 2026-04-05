@@ -1426,6 +1426,84 @@ textarea.dark-input:focus {
   min-height: 0;
 }
 
+.markdown-panel {
+  white-space: normal;
+  line-height: 1.55;
+}
+
+.markdown-panel h1,
+.markdown-panel h2,
+.markdown-panel h3,
+.markdown-panel p,
+.markdown-panel ul,
+.markdown-panel hr,
+.markdown-panel table {
+  margin: 0 0 10px;
+}
+
+.markdown-panel h1 {
+  font-size: 1.32rem;
+  line-height: 1.22;
+  margin-bottom: 8px;
+}
+
+.markdown-panel h2 {
+  font-size: 1.12rem;
+  line-height: 1.26;
+  margin-bottom: 8px;
+}
+
+.markdown-panel h3 {
+  font-size: 1rem;
+  line-height: 1.3;
+  margin-bottom: 6px;
+}
+
+.markdown-panel p {
+  line-height: 1.6;
+}
+
+.markdown-panel ul {
+  padding-left: 18px;
+}
+
+.markdown-panel li + li {
+  margin-top: 4px;
+}
+
+.markdown-panel hr {
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  margin: 12px 0;
+}
+
+.markdown-panel .document-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.markdown-panel table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.markdown-panel th,
+.markdown-panel td {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 6px 8px;
+  vertical-align: top;
+}
+
+.markdown-panel th {
+  text-align: left;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.markdown-panel .katex {
+  font-size: 1.02em;
+}
+
 .alert {
   padding: 14px 16px;
   border-radius: 8px;

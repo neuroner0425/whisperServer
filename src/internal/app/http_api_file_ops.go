@@ -111,9 +111,12 @@ func downloadFolderJSONHandler(c echo.Context) error {
 		}
 		blobKind := store.BlobKindTranscript
 		suffix := ".txt"
-		if store.HasJobBlob(id, store.BlobKindRefined) {
+		if job.FileType == "pdf" {
+			blobKind = store.BlobKindDocumentMarkdown
+			suffix = "_document.md"
+		} else if store.HasJobBlob(id, store.BlobKindRefined) {
 			blobKind = store.BlobKindRefined
-			suffix = "_refined.txt"
+			suffix = "_refined.json"
 		}
 		b, err := store.LoadJobBlob(id, blobKind)
 		if err != nil {

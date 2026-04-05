@@ -21,24 +21,41 @@ func apiJobDetailJSONHandler(c echo.Context) error {
 	jobID := strings.TrimSpace(c.Param("job_id"))
 
 	payload := map[string]any{
-		"job_id":            jobID,
-		"current_user_name": currentUserName(c),
-		"job":               toJobView(job),
-		"tag_text":          strings.Join(job.Tags, ", "),
-		"selected_tags":     job.Tags,
-		"status":            job.Status,
-		"status_detail":     job.StatusDetail,
-		"view":              "waiting",
+		"job_id":               jobID,
+		"current_user_name":    currentUserName(c),
+		"job":                  toJobView(job),
+		"tag_text":             strings.Join(job.Tags, ", "),
+		"selected_tags":        job.Tags,
+		"status":               job.Status,
+		"status_detail":        job.StatusDetail,
+		"view":                 "waiting",
+		"page_count":           job.PageCount,
+		"processed_page_count": job.ProcessedPageCount,
+		"current_chunk":        job.CurrentChunk,
+		"total_chunks":         job.TotalChunks,
+		"resume_available":     job.ResumeAvailable,
 	}
 	if tags, err := store.ListTagsByOwner(u.ID); err == nil {
 		payload["available_tags"] = tags
 	}
-	payload["can_refine"] = hasGeminiConfigured()
+	payload["can_refine"] = hasGeminiConfigured() && job.FileType != "pdf"
 	if store.HasJobBlob(jobID, store.BlobKindAudioAAC) {
 		payload["audio_url"] = "/api/jobs/" + jobID + "/audio"
 	}
 
 	if job.Status == statusCompleted {
+		if job.FileType == "pdf" {
+			if store.HasJobBlob(jobID, store.BlobKindDocumentMarkdown) {
+				if b, err := store.LoadJobBlob(jobID, store.BlobKindDocumentMarkdown); err == nil {
+					payload["view"] = "result"
+					payload["text"] = string(b)
+					payload["download_text_url"] = "/download/" + jobID
+					payload["download_document_json_url"] = "/download/" + jobID + "/document-json"
+					payload["can_refine"] = false
+				}
+			}
+			return c.JSON(http.StatusOK, payload)
+		}
 		showOriginal := strings.TrimSpace(c.QueryParam("original")) == "1" || strings.TrimSpace(c.QueryParam("original")) == "true"
 		hasRefined := store.HasJobBlob(jobID, store.BlobKindRefined)
 		useRefined := hasRefined && !showOriginal
@@ -99,6 +116,14 @@ func apiRetryJobJSONHandler(c echo.Context) error {
 	if job.Status != statusFailed {
 		return echo.NewHTTPError(http.StatusBadRequest, "실패한 작업만 재시도할 수 있습니다.")
 	}
+	if job.FileType == "pdf" {
+		if !store.HasJobBlob(jobID, store.BlobKindPDFOriginal) {
+			return echo.NewHTTPError(http.StatusBadRequest, "재시도할 PDF가 없습니다.")
+		}
+		prepareJobForPDFRetry(jobID)
+		enqueuePDFExtract(jobID)
+		return c.JSON(http.StatusOK, map[string]string{"job_id": jobID, "status": "retried"})
+	}
 	if !store.HasJobBlob(jobID, store.BlobKindAudioAAC) {
 		return echo.NewHTTPError(http.StatusBadRequest, "재시도할 오디오가 없습니다.")
 	}
@@ -117,6 +142,18 @@ func apiRetranscribeJobJSONHandler(c echo.Context) error {
 	jobID := strings.TrimSpace(c.Param("job_id"))
 	if job.Status != statusCompleted {
 		return echo.NewHTTPError(http.StatusBadRequest, "완료된 작업만 전사를 다시 시작할 수 있습니다.")
+	}
+	if job.FileType == "pdf" {
+		if !store.HasJobBlob(jobID, store.BlobKindPDFOriginal) {
+			return echo.NewHTTPError(http.StatusBadRequest, "문서를 다시 시작할 PDF가 없습니다.")
+		}
+		resetJobForPDF(jobID)
+		enqueuePDFExtract(jobID)
+		return c.JSON(http.StatusOK, map[string]any{
+			"job_id":      jobID,
+			"status":      "reprocessing",
+			"will_refine": false,
+		})
 	}
 	if !store.HasJobBlob(jobID, store.BlobKindAudioAAC) {
 		return echo.NewHTTPError(http.StatusBadRequest, "전사를 다시 시작할 오디오가 없습니다.")
@@ -141,6 +178,9 @@ func apiRefineJobJSONHandler(c echo.Context) error {
 	jobID := strings.TrimSpace(c.Param("job_id"))
 	if job.Status != statusCompleted {
 		return echo.NewHTTPError(http.StatusBadRequest, "전사 완료된 작업만 정제할 수 있습니다.")
+	}
+	if job.FileType == "pdf" {
+		return echo.NewHTTPError(http.StatusBadRequest, "PDF 작업은 정제를 지원하지 않습니다.")
 	}
 	if !hasGeminiConfigured() {
 		return echo.NewHTTPError(http.StatusBadRequest, "정제 기능이 설정되어 있지 않습니다.")
@@ -169,6 +209,9 @@ func apiRerefineJobJSONHandler(c echo.Context) error {
 	jobID := strings.TrimSpace(c.Param("job_id"))
 	if job.Status != statusCompleted {
 		return echo.NewHTTPError(http.StatusBadRequest, "완료된 작업만 정제를 다시 시작할 수 있습니다.")
+	}
+	if job.FileType == "pdf" {
+		return echo.NewHTTPError(http.StatusBadRequest, "PDF 작업은 정제를 지원하지 않습니다.")
 	}
 	if !hasGeminiConfigured() {
 		return echo.NewHTTPError(http.StatusBadRequest, "정제 기능이 설정되어 있지 않습니다.")

@@ -171,8 +171,26 @@ func EnsureRestoredFolder(ownerID, folderID string, logf func(string, ...any), e
 	return newID
 }
 
-func ResumeRestoredJob(jobID string, job *model.Job, hasAudio func(string) bool, hasBlob func(string, string) bool, setJobFields func(string, map[string]any), enqueueTranscribe func(string), enqueueRefine func(string), statusPending, statusRefiningPending string) {
+func ResumeRestoredJob(jobID string, job *model.Job, hasAudio func(string) bool, hasBlob func(string, string) bool, setJobFields func(string, map[string]any), enqueueTranscribe func(string), enqueueRefine func(string), enqueuePDFExtract func(string), statusPending, statusRefiningPending string) {
 	if job == nil || hasBlob == nil || setJobFields == nil {
+		return
+	}
+	if job.FileType == "pdf" && hasBlob(jobID, store.BlobKindPDFOriginal) && !hasBlob(jobID, store.BlobKindDocumentMarkdown) {
+		setJobFields(jobID, map[string]any{
+			"status":           statusPending,
+			"phase":            "",
+			"progress_percent": 0,
+			"progress_label":   "",
+			"started_at":       "",
+			"started_ts":       0,
+			"completed_at":     "",
+			"completed_ts":     0,
+			"duration":         "",
+			"status_detail":    "",
+		})
+		if enqueuePDFExtract != nil {
+			enqueuePDFExtract(jobID)
+		}
 		return
 	}
 	if hasAudio != nil && hasAudio(jobID) && !hasBlob(jobID, store.BlobKindTranscript) {

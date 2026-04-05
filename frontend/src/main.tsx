@@ -8,6 +8,7 @@ import { FilesPage } from './features/files/FilesPage'
 import { JobDetailPage } from './features/jobs/JobDetailPage'
 import { StoragePage } from './features/storage/StoragePage'
 import { TrashPage } from './features/trash/TrashPage'
+import 'katex/dist/katex.min.css'
 import './styles.css'
 
 const router = createBrowserRouter([

@@ -55,6 +55,12 @@ func enqueueRefine(jobID string) {
 	}
 }
 
+func enqueuePDFExtract(jobID string) {
+	if appWorker != nil {
+		appWorker.EnqueuePDFExtract(jobID)
+	}
+}
+
 func cancelJob(jobID string) {
 	if appWorker != nil {
 		appWorker.Cancel(jobID)
@@ -195,6 +201,16 @@ func applyJobFields(job *model.Job, fields map[string]any) {
 			job.ResultRefined = intutil.AsString(v)
 		case "status_detail":
 			job.StatusDetail = intutil.AsString(v)
+		case "page_count":
+			job.PageCount = intutil.AsInt(v)
+		case "processed_page_count":
+			job.ProcessedPageCount = intutil.AsInt(v)
+		case "current_chunk":
+			job.CurrentChunk = intutil.AsInt(v)
+		case "total_chunks":
+			job.TotalChunks = intutil.AsInt(v)
+		case "resume_available":
+			job.ResumeAvailable = intutil.AsBool(v)
 		}
 	}
 	hydrateJobDerivedFields(job)
@@ -373,19 +389,24 @@ func deriveJobPhase(statusCode int) string {
 
 func toJobView(job *model.Job) JobView {
 	return JobView{
-		Filename:        job.Filename,
-		FileType:        job.FileType,
-		Status:          job.Status,
-		UploadedAt:      intutil.Fallback(job.UploadedAt, "-"),
-		StartedAt:       intutil.Fallback(job.StartedAt, "-"),
-		CompletedAt:     intutil.Fallback(job.CompletedAt, "-"),
-		Duration:        durationString(job.Duration),
-		MediaDuration:   intutil.Fallback(job.MediaDuration, "-"),
-		Phase:           intutil.Fallback(job.Phase, "대기 중"),
-		ProgressLabel:   intutil.Fallback(job.ProgressLabel, ""),
-		ProgressPercent: job.ProgressPercent,
-		PreviewText:     job.PreviewText,
-		StatusDetail:    job.StatusDetail,
+		Filename:           job.Filename,
+		FileType:           job.FileType,
+		Status:             job.Status,
+		UploadedAt:         intutil.Fallback(job.UploadedAt, "-"),
+		StartedAt:          intutil.Fallback(job.StartedAt, "-"),
+		CompletedAt:        intutil.Fallback(job.CompletedAt, "-"),
+		Duration:           durationString(job.Duration),
+		MediaDuration:      intutil.Fallback(job.MediaDuration, "-"),
+		Phase:              intutil.Fallback(job.Phase, "대기 중"),
+		ProgressLabel:      intutil.Fallback(job.ProgressLabel, ""),
+		ProgressPercent:    job.ProgressPercent,
+		PreviewText:        job.PreviewText,
+		StatusDetail:       job.StatusDetail,
+		PageCount:          job.PageCount,
+		ProcessedPageCount: job.ProcessedPageCount,
+		CurrentChunk:       job.CurrentChunk,
+		TotalChunks:        job.TotalChunks,
+		ResumeAvailable:    job.ResumeAvailable,
 	}
 }
 
