@@ -37,6 +37,7 @@ Extract every page into JSON according to the schema. Preserve heading hierarchy
   - For **Data/Process visuals**: Describe trends, flows, or specific data points.
   - For **Conceptual/Illustrative visuals**: Describe what is shown in the image and **how it relates to the surrounding text**. (e.g., "A photograph of a busy street used to illustrate the concept of urban density," or "An illustration of a light bulb appearing above a person's head to symbolize an idea.")
   - The goal is to provide enough descriptive detail so a reader can understand the visual's role in the document without seeing it.
+- **Language Matching**: **The `title` and `description` MUST be written in the same language as the primary text of the current page.** (e.g., If the page text is in Korean, the visual description must also be in Korean.)
 
 ## **3. Nested List Extraction**
 - Represent lists as structured hierarchy, not as a flat array of strings.

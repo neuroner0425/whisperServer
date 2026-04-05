@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"whisperserver/src/internal/store"
 	intutil "whisperserver/src/internal/util"
 )
 
@@ -34,10 +33,15 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 		"progress_percent":     0,
 		"phase":                "PDF 준비 중",
 		"processed_page_count": 0,
-		"current_chunk":        0,
-		"resume_available":     false,
-	})
-	store.DeleteJobBlob(jobID, store.BlobKindPreview)
+			"current_chunk":        0,
+			"resume_available":     false,
+		})
+	if w.deps.BlobSvc == nil {
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+		w.deps.IncJobsTotal("failure")
+		return errors.New("missing blob service")
+	}
+	w.deps.BlobSvc.DeletePreview(jobID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(w.cfg.JobTimeoutSec)*time.Second)
 	w.setCancel(jobID, cancel)
@@ -46,7 +50,7 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 		w.setCancel(jobID, nil)
 	}()
 
-	pdfBytes, err := store.LoadJobBlob(jobID, store.BlobKindPDFOriginal)
+	pdfBytes, err := w.deps.BlobSvc.LoadPDFOriginal(jobID)
 	if err != nil {
 		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
 		w.deps.IncJobsTotal("failure")
@@ -123,14 +127,14 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 	}
 
 	chunkResults := make([][]byte, 0, totalChunks)
-	if resumeState.LastCompletedChunk > 0 {
-		for i := 1; i <= resumeState.LastCompletedChunk; i++ {
-			b, loadErr := store.LoadJobBlob(jobID, pdfChunkJSONKind(i))
-			if loadErr != nil {
-				return loadErr
+		if resumeState.LastCompletedChunk > 0 {
+			for i := 1; i <= resumeState.LastCompletedChunk; i++ {
+				b, loadErr := w.deps.BlobSvc.Load(jobID, pdfChunkJSONKind(i))
+				if loadErr != nil {
+					return loadErr
+				}
+				chunkResults = append(chunkResults, b)
 			}
-			chunkResults = append(chunkResults, b)
-		}
 		w.deps.SetJobFields(jobID, map[string]any{
 			"processed_page_count": processedPagesForChunk(resumeState.LastCompletedChunk, len(imagePaths), w.cfg.PDFMaxPagesPerRequest),
 			"current_chunk":        resumeState.LastCompletedChunk,
@@ -210,18 +214,18 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 			return extractErr
 		}
 
-		if err := store.SaveJobBlob(jobID, pdfChunkJSONKind(idx+1), result); err != nil {
-			return err
-		}
-		if err := store.SaveJobBlob(jobID, pdfChunkContextKind(idx+1), []byte(contextText)); err != nil {
-			return err
-		}
-		chunkResults = append(chunkResults, result)
-		if err := savePDFChunkIndex(jobID, pdfChunkIndex{
-			MaxPagesPerRequest: w.cfg.PDFMaxPagesPerRequest,
-			TotalChunks:        totalChunks,
-			PageCount:          len(imagePaths),
-			LastCompletedChunk: idx + 1,
+			if err := w.deps.BlobSvc.Save(jobID, pdfChunkJSONKind(idx+1), result); err != nil {
+				return err
+			}
+			if err := w.deps.BlobSvc.Save(jobID, pdfChunkContextKind(idx+1), []byte(contextText)); err != nil {
+				return err
+			}
+			chunkResults = append(chunkResults, result)
+			if err := w.savePDFChunkIndex(jobID, pdfChunkIndex{
+				MaxPagesPerRequest: w.cfg.PDFMaxPagesPerRequest,
+				TotalChunks:        totalChunks,
+				PageCount:          len(imagePaths),
+				LastCompletedChunk: idx + 1,
 			UpdatedAtUnix:      time.Now().Unix(),
 		}); err != nil {
 			return err
@@ -250,23 +254,23 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 		"progress_percent": 97,
 	})
 	markdown, err := w.deps.RenderDocumentMarkdown(mergedJSON)
-	if err != nil {
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_detail": "Markdown 생성 실패"})
-		w.deps.IncJobsTotal("failure")
-		return err
-	}
+		if err != nil {
+			w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_detail": "Markdown 생성 실패"})
+			w.deps.IncJobsTotal("failure")
+			return err
+		}
 
-	if err := store.SaveJobBlob(jobID, store.BlobKindDocumentJSON, mergedJSON); err != nil {
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
-		w.deps.IncJobsTotal("failure")
-		return err
-	}
-	if err := store.SaveJobBlob(jobID, store.BlobKindDocumentMarkdown, []byte(markdown)); err != nil {
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
-		w.deps.IncJobsTotal("failure")
-		return err
-	}
-	store.DeleteJobBlob(jobID, store.BlobKindPreview)
+		if err := w.deps.BlobSvc.SaveDocumentJSON(jobID, mergedJSON); err != nil {
+			w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+			w.deps.IncJobsTotal("failure")
+			return err
+		}
+		if err := w.deps.BlobSvc.SaveDocumentMarkdown(jobID, []byte(markdown)); err != nil {
+			w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+			w.deps.IncJobsTotal("failure")
+			return err
+		}
+		w.deps.BlobSvc.DeletePreview(jobID)
 
 	completed := time.Now()
 	w.deps.IncJobsTotal("success")
@@ -296,7 +300,10 @@ type pdfResumeState struct {
 }
 
 func (w *Worker) loadResumeState(jobID string, pageCount, totalChunks int) (pdfResumeState, error) {
-	b, err := store.LoadJobBlob(jobID, store.BlobKindDocumentChunkIndex)
+	if w.deps.BlobSvc == nil {
+		return pdfResumeState{}, nil
+	}
+	b, err := w.deps.BlobSvc.LoadDocumentChunkIndex(jobID)
 	if err != nil {
 		return pdfResumeState{}, nil
 	}
@@ -310,7 +317,7 @@ func (w *Worker) loadResumeState(jobID string, pageCount, totalChunks int) (pdfR
 	if idx.LastCompletedChunk <= 0 {
 		return pdfResumeState{Valid: true}, nil
 	}
-	kinds, err := w.deps.ListJobBlobKinds(jobID)
+	kinds, err := w.deps.BlobSvc.ListKinds(jobID)
 	if err != nil {
 		return pdfResumeState{}, err
 	}
@@ -338,23 +345,29 @@ func (w *Worker) markPDFChunkFailure(jobID string, chunkIndex, totalChunks, star
 }
 
 func (w *Worker) clearPDFChunkBlobs(jobID string) {
-	kinds, err := w.deps.ListJobBlobKinds(jobID)
+	if w.deps.BlobSvc == nil {
+		return
+	}
+	kinds, err := w.deps.BlobSvc.ListKinds(jobID)
 	if err != nil {
 		return
 	}
 	for _, kind := range kinds {
-		if kind == store.BlobKindDocumentChunkIndex || strings.HasPrefix(kind, "document_chunk_") {
-			store.DeleteJobBlob(jobID, kind)
+		if kind == w.deps.BlobSvc.DocumentChunkIndexKind() || strings.HasPrefix(kind, "document_chunk_") {
+			w.deps.BlobSvc.Delete(jobID, kind)
 		}
 	}
 }
 
-func savePDFChunkIndex(jobID string, idx pdfChunkIndex) error {
+func (w *Worker) savePDFChunkIndex(jobID string, idx pdfChunkIndex) error {
 	b, err := json.Marshal(idx)
 	if err != nil {
 		return err
 	}
-	return store.SaveJobBlob(jobID, store.BlobKindDocumentChunkIndex, b)
+	if w.deps.BlobSvc == nil {
+		return errors.New("missing blob service")
+	}
+	return w.deps.BlobSvc.SaveDocumentChunkIndex(jobID, b)
 }
 
 func pdfChunkJSONKind(n int) string {

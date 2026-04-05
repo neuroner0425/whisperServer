@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"whisperserver/src/internal/model"
-	"whisperserver/src/internal/store"
+	intwhisper "whisperserver/src/internal/integrations/whisper"
+	"whisperserver/src/internal/queue"
+	"whisperserver/src/internal/service"
 	intutil "whisperserver/src/internal/util"
 )
 
@@ -55,7 +57,11 @@ type Deps struct {
 	SetJobFields            func(string, map[string]any)
 	AppendJobPreviewLine    func(string, string)
 	ReplaceJobPreviewText   func(string, string)
+	BlobSvc                 *service.JobBlobService
 	ConvertToWav            func(string, string) error
+	WhisperRunner           interface {
+		RunFromBlob(context.Context, string, []byte, *int) (intwhisper.RunResult, error)
+	}
 	HasGeminiConfigured     func() bool
 	RefineTranscript        func(string, string) (string, error)
 	CountPDFPages           func(string) (int, error)
@@ -64,7 +70,6 @@ type Deps struct {
 	BuildConsistencyContext func([]byte) (string, error)
 	MergeDocumentJSON       func(...[]byte) ([]byte, error)
 	RenderDocumentMarkdown  func([]byte) (string, error)
-	ListJobBlobKinds        func(string) ([]string, error)
 	UniqueStrings           func([]string) []string
 	GetTagDescriptions      func(string, []string) (map[string]string, error)
 	Logf                    func(string, ...any)
@@ -76,37 +81,29 @@ type Deps struct {
 	ObserveJobDuration      func(float64)
 }
 
-type taskType string
-
-const (
-	taskTypeAudioTranscribe taskType = "audio_transcribe"
-	taskTypeAudioRefine     taskType = "audio_refine"
-	taskTypePDFExtract      taskType = "pdf_extract"
-)
-
-type task struct {
-	jobID string
-	kind  taskType
-}
-
 type Worker struct {
 	cfg             Config
 	deps            Deps
-	taskQueue       chan task
-	transcribeQueue chan task
-	refineQueue     chan task
+	taskQueue       queue.Queue
+	transcribeQueue queue.Queue
+	refineQueue     queue.Queue
 	once            sync.Once
+	ctx             context.Context
+	cancel          context.CancelFunc
 	cancelMu        sync.Mutex
 	cancelMap       map[string]context.CancelFunc
 }
 
 func New(cfg Config, deps Deps) *Worker {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Worker{
 		cfg:             cfg,
 		deps:            deps,
-		taskQueue:       make(chan task, 256),
-		transcribeQueue: make(chan task, 256),
-		refineQueue:     make(chan task, 256),
+		taskQueue:       queue.NewInmem(256),
+		transcribeQueue: queue.NewInmem(256),
+		refineQueue:     queue.NewInmem(256),
+		ctx:             ctx,
+		cancel:          cancel,
 		cancelMap:       map[string]context.CancelFunc{},
 	}
 }
@@ -125,44 +122,47 @@ func (w *Worker) Start() {
 }
 
 func (w *Worker) Close() {
+	if w.cancel != nil {
+		w.cancel()
+	}
 	if w.cfg.SplitTaskQueues {
-		close(w.transcribeQueue)
-		close(w.refineQueue)
+		w.transcribeQueue.Close()
+		w.refineQueue.Close()
 		return
 	}
-	close(w.taskQueue)
+	w.taskQueue.Close()
 }
 
 func (w *Worker) EnqueueTranscribe(jobID string) {
-	t := task{jobID: jobID, kind: taskTypeAudioTranscribe}
+	t := queue.Task{JobID: jobID, Kind: queue.TaskAudioTranscribe}
 	if w.cfg.SplitTaskQueues {
-		w.transcribeQueue <- t
+		_ = w.transcribeQueue.Enqueue(t)
 		w.setQueueLen()
 		return
 	}
-	w.taskQueue <- t
+	_ = w.taskQueue.Enqueue(t)
 	w.setQueueLen()
 }
 
 func (w *Worker) EnqueueRefine(jobID string) {
-	t := task{jobID: jobID, kind: taskTypeAudioRefine}
+	t := queue.Task{JobID: jobID, Kind: queue.TaskAudioRefine}
 	if w.cfg.SplitTaskQueues {
-		w.refineQueue <- t
+		_ = w.refineQueue.Enqueue(t)
 		w.setQueueLen()
 		return
 	}
-	w.taskQueue <- t
+	_ = w.taskQueue.Enqueue(t)
 	w.setQueueLen()
 }
 
 func (w *Worker) EnqueuePDFExtract(jobID string) {
-	t := task{jobID: jobID, kind: taskTypePDFExtract}
+	t := queue.Task{JobID: jobID, Kind: queue.TaskPDFExtract}
 	if w.cfg.SplitTaskQueues {
-		w.refineQueue <- t
+		_ = w.refineQueue.Enqueue(t)
 		w.setQueueLen()
 		return
 	}
-	w.taskQueue <- t
+	_ = w.taskQueue.Enqueue(t)
 	w.setQueueLen()
 }
 
@@ -173,13 +173,13 @@ func (w *Worker) RequeuePending(jobs map[string]*model.Job) {
 		}
 		switch job.Status {
 		case w.cfg.StatusPending, w.cfg.StatusRunning:
-			if job.FileType == "pdf" && store.HasJobBlob(id, store.BlobKindPDFOriginal) {
+			if job.FileType == "pdf" && w.deps.BlobSvc != nil && w.deps.BlobSvc.HasPDFOriginal(id) {
 				w.EnqueuePDFExtract(id)
-			} else if store.HasJobBlob(id, store.BlobKindAudioAAC) {
+			} else if w.deps.BlobSvc != nil && w.deps.BlobSvc.HasAudioAAC(id) {
 				w.EnqueueTranscribe(id)
 			}
 		case w.cfg.StatusRefiningPending, w.cfg.StatusRefining:
-			if store.HasJobBlob(id, store.BlobKindTranscript) {
+			if w.deps.BlobSvc != nil && w.deps.BlobSvc.HasTranscript(id) {
 				w.EnqueueRefine(id)
 			}
 		}
@@ -210,15 +210,19 @@ func (w *Worker) setQueueLen() {
 		return
 	}
 	if w.cfg.SplitTaskQueues {
-		w.deps.SetQueueLength(float64(len(w.transcribeQueue) + len(w.refineQueue)))
+		w.deps.SetQueueLength(float64(w.transcribeQueue.Len() + w.refineQueue.Len()))
 		return
 	}
-	w.deps.SetQueueLength(float64(len(w.taskQueue)))
+	w.deps.SetQueueLength(float64(w.taskQueue.Len()))
 }
 
 func (w *Worker) workerLoop() {
-	for t := range w.taskQueue {
-		w.deps.Logf("[WORKER] dequeued mode=single job_id=%s kind=%s", t.jobID, t.kind)
+	for {
+		t, err := w.taskQueue.Dequeue(w.ctx)
+		if err != nil {
+			return
+		}
+		w.deps.Logf("[WORKER] dequeued mode=single job_id=%s kind=%s", t.JobID, t.Kind)
 		w.deps.IncInProgress()
 		w.setQueueLen()
 		w.processTask(t, false)
@@ -228,8 +232,12 @@ func (w *Worker) workerLoop() {
 }
 
 func (w *Worker) transcribeWorkerLoop() {
-	for t := range w.transcribeQueue {
-		w.deps.Logf("[WORKER] dequeued mode=transcribe job_id=%s kind=%s", t.jobID, t.kind)
+	for {
+		t, err := w.transcribeQueue.Dequeue(w.ctx)
+		if err != nil {
+			return
+		}
+		w.deps.Logf("[WORKER] dequeued mode=transcribe job_id=%s kind=%s", t.JobID, t.Kind)
 		w.deps.IncInProgress()
 		w.setQueueLen()
 		w.processTask(t, true)
@@ -239,8 +247,12 @@ func (w *Worker) transcribeWorkerLoop() {
 }
 
 func (w *Worker) refineWorkerLoop() {
-	for t := range w.refineQueue {
-		w.deps.Logf("[WORKER] dequeued mode=refine job_id=%s kind=%s", t.jobID, t.kind)
+	for {
+		t, err := w.refineQueue.Dequeue(w.ctx)
+		if err != nil {
+			return
+		}
+		w.deps.Logf("[WORKER] dequeued mode=refine job_id=%s kind=%s", t.JobID, t.Kind)
 		w.deps.IncInProgress()
 		w.setQueueLen()
 		w.processTask(t, true)
@@ -249,48 +261,48 @@ func (w *Worker) refineWorkerLoop() {
 	}
 }
 
-func (w *Worker) processTask(t task, splitMode bool) {
-	job := w.deps.GetJob(t.jobID)
+func (w *Worker) processTask(t queue.Task, splitMode bool) {
+	job := w.deps.GetJob(t.JobID)
 	if job == nil || job.IsTrashed {
 		return
 	}
 
-	switch t.kind {
-	case taskTypeAudioTranscribe:
+	switch t.Kind {
+	case queue.TaskAudioTranscribe:
 		if job.Status != w.cfg.StatusPending && job.Status != w.cfg.StatusRunning {
 			return
 		}
 		if job.FileType == "pdf" {
-			if err := w.taskExtractPDF(t.jobID); err != nil {
-				w.deps.Errf("worker.extractPDF", err, "job_id=%s", t.jobID)
+			if err := w.taskExtractPDF(t.JobID); err != nil {
+				w.deps.Errf("worker.extractPDF", err, "job_id=%s", t.JobID)
 			}
 			return
 		}
-		if err := w.taskTranscribe(t.jobID); err != nil {
-			w.deps.Errf("worker.transcribe", err, "job_id=%s", t.jobID)
+		if err := w.taskTranscribe(t.JobID); err != nil {
+			w.deps.Errf("worker.transcribe", err, "job_id=%s", t.JobID)
 			return
 		}
-		updated := w.deps.GetJob(t.jobID)
+		updated := w.deps.GetJob(t.JobID)
 		if updated == nil || updated.Status != w.cfg.StatusRefiningPending {
 			return
 		}
 		if splitMode {
-			w.EnqueueRefine(t.jobID)
-			w.deps.Logf("[WORKER] queued refine job_id=%s", t.jobID)
+			w.EnqueueRefine(t.JobID)
+			w.deps.Logf("[WORKER] queued refine job_id=%s", t.JobID)
 			return
 		}
-		w.finalizeRefine(t.jobID)
-	case taskTypeAudioRefine:
+		w.finalizeRefine(t.JobID)
+	case queue.TaskAudioRefine:
 		if job.Status != w.cfg.StatusRefiningPending && job.Status != w.cfg.StatusRefining {
 			return
 		}
-		w.finalizeRefine(t.jobID)
-	case taskTypePDFExtract:
+		w.finalizeRefine(t.JobID)
+	case queue.TaskPDFExtract:
 		if job.Status != w.cfg.StatusPending && job.Status != w.cfg.StatusRunning {
 			return
 		}
-		if err := w.taskExtractPDF(t.jobID); err != nil {
-			w.deps.Errf("worker.extractPDF", err, "job_id=%s", t.jobID)
+		if err := w.taskExtractPDF(t.JobID); err != nil {
+			w.deps.Errf("worker.extractPDF", err, "job_id=%s", t.JobID)
 		}
 	}
 }
@@ -300,7 +312,14 @@ func (w *Worker) finalizeRefine(jobID string) {
 	if job == nil || job.IsTrashed {
 		return
 	}
-	b, err := store.LoadJobBlob(jobID, store.BlobKindTranscript)
+	if w.deps.BlobSvc == nil {
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+		if w.deps.Errf != nil {
+			w.deps.Errf("worker.blobSvc", errors.New("missing blob service"), "job_id=%s", jobID)
+		}
+		return
+	}
+	b, err := w.deps.BlobSvc.LoadTranscript(jobID)
 	if err != nil {
 		w.deps.Errf("worker.loadTranscriptBlob", err, "job_id=%s", jobID)
 		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
@@ -327,7 +346,17 @@ func (w *Worker) taskTranscribe(jobID string) error {
 		"started_ts":   float64(started.Unix()),
 		"preview_text": "",
 	})
-	store.DeleteJobBlob(jobID, store.BlobKindPreview)
+	if w.deps.BlobSvc == nil {
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+		w.deps.IncJobsTotal("failure")
+		return errors.New("missing blob service")
+	}
+	if w.deps.WhisperRunner == nil {
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+		w.deps.IncJobsTotal("failure")
+		return errors.New("missing whisper runner")
+	}
+	w.deps.BlobSvc.DeletePreview(jobID)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(w.cfg.JobTimeoutSec)*time.Second)
 	w.setCancel(jobID, cancel)
 	defer func() {
@@ -337,7 +366,7 @@ func (w *Worker) taskTranscribe(jobID string) error {
 
 	job := w.deps.GetJob(jobID)
 	totalSec := job.MediaDurationSeconds
-	audioBytes, err := store.LoadJobBlob(jobID, store.BlobKindAudioAAC)
+	audioBytes, err := w.deps.BlobSvc.LoadAudioAAC(jobID)
 	if err != nil {
 		w.deps.Errf("transcribe.loadAudioBlob", err, "job_id=%s", jobID)
 		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
@@ -368,7 +397,7 @@ func (w *Worker) taskTranscribe(jobID string) error {
 		w.deps.IncJobsTotal("failure")
 		return err
 	}
-	timelineText, transcriptJSON, err := w.runWhisperFromBlob(ctx, jobID, wavBytes, totalSec)
+	runResult, err := w.deps.WhisperRunner.RunFromBlob(ctx, jobID, wavBytes, totalSec)
 	if err != nil {
 		statusLabel := "failure"
 		fields := map[string]any{"status": w.cfg.StatusFailed}
@@ -381,26 +410,26 @@ func (w *Worker) taskTranscribe(jobID string) error {
 		w.deps.Errf("transcribe.runWhisper", err, "job_id=%s", jobID)
 		_ = os.Remove(wavPath)
 		return err
-	}
-	if updated := w.deps.GetJob(jobID); updated == nil || updated.IsTrashed {
-		return nil
-	}
+		}
+		if updated := w.deps.GetJob(jobID); updated == nil || updated.IsTrashed {
+			return nil
+		}
 
-	if err := store.SaveJobBlob(jobID, store.BlobKindTranscript, []byte(timelineText)); err != nil {
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
-		w.deps.IncJobsTotal("failure")
-		w.deps.Errf("transcribe.saveTranscriptBlob", err, "job_id=%s", jobID)
-		return err
-	}
-	if len(transcriptJSON) > 0 {
-		if err := store.SaveJobBlob(jobID, store.BlobKindTranscriptJSON, transcriptJSON); err != nil {
+		if err := w.deps.BlobSvc.SaveTranscript(jobID, []byte(runResult.TimelineText)); err != nil {
 			w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
 			w.deps.IncJobsTotal("failure")
-			w.deps.Errf("transcribe.saveTranscriptJSONBlob", err, "job_id=%s", jobID)
+			w.deps.Errf("transcribe.saveTranscriptBlob", err, "job_id=%s", jobID)
 			return err
 		}
-	}
-	store.DeleteJobBlob(jobID, store.BlobKindPreview)
+		if len(runResult.TranscriptJSON) > 0 {
+			if err := w.deps.BlobSvc.SaveTranscriptJSON(jobID, runResult.TranscriptJSON); err != nil {
+				w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+				w.deps.IncJobsTotal("failure")
+				w.deps.Errf("transcribe.saveTranscriptJSONBlob", err, "job_id=%s", jobID)
+				return err
+			}
+		}
+		w.deps.BlobSvc.DeletePreview(jobID)
 
 	completed := time.Now()
 	w.deps.IncJobsTotal("success")
@@ -446,7 +475,10 @@ func (w *Worker) taskRefining(jobID, timelineText string) error {
 		}
 		return err
 	}
-	if err := store.SaveJobBlob(jobID, store.BlobKindRefined, []byte(refined)); err != nil {
+	if w.deps.BlobSvc == nil {
+		return errors.New("missing blob service")
+	}
+	if err := w.deps.BlobSvc.SaveRefined(jobID, []byte(refined)); err != nil {
 		w.deps.Errf("refine.saveRefinedBlob", err, "job_id=%s", jobID)
 		return err
 	}
