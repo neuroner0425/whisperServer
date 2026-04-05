@@ -12,6 +12,11 @@ export type JobView = {
   ProgressPercent: number
   PreviewText: string
   StatusDetail?: string
+  PageCount?: number
+  ProcessedPageCount?: number
+  CurrentChunk?: number
+  TotalChunks?: number
+  ResumeAvailable?: boolean
 }
 
 export type AvailableTag = {
@@ -36,5 +41,11 @@ export type JobDetailResponse = {
   audio_url?: string
   download_text_url?: string
   download_refined_url?: string
+  download_document_json_url?: string
+  page_count?: number
+  processed_page_count?: number
+  current_chunk?: number
+  total_chunks?: number
+  resume_available?: boolean
   available_tags?: AvailableTag[]
 }

@@ -15,11 +15,26 @@ import (
 )
 
 func DownloadHandler(c echo.Context, deps JobsDeps) error {
+	jobID := c.Param("job_id")
+	job, _, err := deps.RequireOwnedJob(c, jobID, false)
+	if err != nil {
+		if _, ok := err.(*echo.HTTPError); ok {
+			return echo.NewHTTPError(http.StatusNotFound, "다운로드할 결과가 없습니다.")
+		}
+		return err
+	}
+	if job.FileType == "pdf" {
+		return downloadBlobHandler(c, deps, store.BlobKindDocumentMarkdown, "_document.md", "다운로드할 결과가 없습니다.")
+	}
 	return downloadBlobHandler(c, deps, store.BlobKindTranscript, ".txt", "다운로드할 결과가 없습니다.")
 }
 
 func DownloadRefinedHandler(c echo.Context, deps JobsDeps) error {
 	return downloadBlobHandler(c, deps, store.BlobKindRefined, "_refined.json", "정제본이 없습니다.")
+}
+
+func DownloadDocumentJSONHandler(c echo.Context, deps JobsDeps) error {
+	return downloadBlobHandler(c, deps, store.BlobKindDocumentJSON, "_document.json", "문서 JSON 결과가 없습니다.")
 }
 
 func downloadBlobHandler(c echo.Context, deps JobsDeps, kind, suffix, notFoundMessage string) error {
@@ -42,7 +57,7 @@ func downloadBlobHandler(c echo.Context, deps JobsDeps, kind, suffix, notFoundMe
 	base := strings.TrimSuffix(job.Filename, filepath.Ext(job.Filename))
 	c.Response().Header().Set(echo.HeaderContentDisposition, fmt.Sprintf(`attachment; filename="%s"`, base+suffix))
 	contentType := "text/plain; charset=utf-8"
-	if kind == store.BlobKindRefined && strings.HasSuffix(suffix, ".json") {
+	if (kind == store.BlobKindRefined || kind == store.BlobKindDocumentJSON) && strings.HasSuffix(suffix, ".json") {
 		contentType = "application/json; charset=utf-8"
 	}
 	return c.Blob(http.StatusOK, contentType, b)
@@ -73,7 +88,10 @@ func BatchDownloadHandler(c echo.Context, deps JobsDeps) error {
 		}
 		blobKind := store.BlobKindTranscript
 		ext := ".txt"
-		if store.HasJobBlob(id, store.BlobKindRefined) {
+		if job.FileType == "pdf" {
+			blobKind = store.BlobKindDocumentMarkdown
+			ext = "_document.md"
+		} else if store.HasJobBlob(id, store.BlobKindRefined) {
 			blobKind = store.BlobKindRefined
 			ext = "_refined.json"
 		}

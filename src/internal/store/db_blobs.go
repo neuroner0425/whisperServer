@@ -57,6 +57,27 @@ func DeleteJobBlob(jobID, kind string) {
 	_, _ = dbConn.Exec(`DELETE FROM job_blobs WHERE job_id = ? AND kind = ?`, jobID, kind)
 }
 
+func ListJobBlobKinds(jobID string) ([]string, error) {
+	if dbConn == nil {
+		return nil, fmt.Errorf("db is not initialized")
+	}
+	rows, err := dbConn.Query(`SELECT kind FROM job_blobs WHERE job_id = ? ORDER BY kind`, jobID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []string{}
+	for rows.Next() {
+		var kind string
+		if err := rows.Scan(&kind); err != nil {
+			return nil, err
+		}
+		out = append(out, kind)
+	}
+	return out, rows.Err()
+}
+
 func ListJobBlobUsageByOwner(ownerID string) ([]JobBlobUsage, error) {
 	if dbConn == nil {
 		return nil, fmt.Errorf("db is not initialized")

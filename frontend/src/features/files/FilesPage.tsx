@@ -88,6 +88,9 @@ export function FilesPage({ viewMode }: FilesPageProps) {
   const page = normalizePage(searchParams.get('page'))
   const pendingUploads = usePendingUploads()
   const folderTitle = data?.folder_path?.[data.folder_path.length - 1]?.Name || ''
+  const isPDFUpload = uploadState ? uploadState.file.name.toLowerCase().endsWith('.pdf') || uploadState.file.type === 'application/pdf' : false
+  const pdfMaxPages = data?.upload_limits?.pdf_max_pages ?? 0
+  const pdfMaxPagesPerRequest = data?.upload_limits?.pdf_max_pages_per_request ?? 0
 
   usePageTitle(viewMode === 'home' ? 'Home' : viewMode === 'search' ? 'Search' : folderId ? folderTitle || 'Folder' : 'My Files')
 
@@ -400,12 +403,13 @@ export function FilesPage({ viewMode }: FilesPageProps) {
     if (!file) {
       return
     }
+    const isPDF = file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf'
     setUploadState({
       file,
       displayName: stripExtension(file.name),
       folderId,
       description: '',
-      refineEnabled: true,
+      refineEnabled: !isPDF,
     })
     event.target.value = ''
   }
@@ -841,7 +845,7 @@ export function FilesPage({ viewMode }: FilesPageProps) {
 
   return (
     <div className="view-shell">
-      <input hidden onChange={handleUploadFileInput} ref={fileInputRef} type="file" />
+      <input hidden accept=".mp3,.wav,.m4a,.pdf,audio/*,application/pdf" onChange={handleUploadFileInput} ref={fileInputRef} type="file" />
 
       <section
         className="content-surface"
@@ -1450,16 +1454,29 @@ export function FilesPage({ viewMode }: FilesPageProps) {
               </div>
               <div className="label-field">
                 <label>처리 방식</label>
-                <select
-                  className="dark-select"
-                  onChange={(event) =>
-                    setUploadState((current: UploadState | null) => (current ? { ...current, refineEnabled: event.target.value === 'true' } : current))
-                  }
-                  value={String(uploadState.refineEnabled)}
-                >
-                  <option value="true">전사 후 정제</option>
-                  <option value="false">전사만</option>
-                </select>
+                {isPDFUpload ? (
+                  <>
+                    <div className="detail-row compact">
+                      <span className="detail-value">PDF 페이지 이미지 분석 후 Markdown 생성</span>
+                    </div>
+                    <div className="detail-row compact">
+                      <span className="detail-value">
+                        최대 {pdfMaxPages || '-'}페이지, 요청당 최대 {pdfMaxPagesPerRequest || '-'}페이지
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <select
+                    className="dark-select"
+                    onChange={(event) =>
+                      setUploadState((current: UploadState | null) => (current ? { ...current, refineEnabled: event.target.value === 'true' } : current))
+                    }
+                    value={String(uploadState.refineEnabled)}
+                  >
+                    <option value="true">전사 후 정제</option>
+                    <option value="false">전사만</option>
+                  </select>
+                )}
               </div>
               <div className="label-field">
                 <label>설명</label>

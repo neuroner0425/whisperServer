@@ -1,0 +1,99 @@
+{
+  "type": "object",
+  "properties": {
+    "pages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "page_index": {
+            "type": "integer"
+          },
+          "elements": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "header": {
+                  "type": "object",
+                  "properties": {
+                    "level": {
+                      "type": "integer"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "level",
+                    "text"
+                  ]
+                },
+                "text": {
+                  "type": "string"
+                },
+                "img": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title",
+                    "description"
+                  ]
+                },
+                "list": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "table": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "cells": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "cells"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "title",
+                    "rows"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "page_index",
+          "elements"
+        ]
+      }
+    }
+  },
+  "required": [
+    "pages"
+  ]
+}

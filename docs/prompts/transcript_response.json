@@ -1,0 +1,41 @@
+{
+  "type": "object",
+  "properties": {
+    "paragraph": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "paragraph_summary": {
+            "type": "string"
+          },
+          "sentence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "start_time": {
+                  "type": "string"
+                },
+                "content": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "start_time",
+                "content"
+              ]
+            }
+          }
+        },
+        "required": [
+          "paragraph_summary",
+          "sentence"
+        ]
+      }
+    }
+  },
+  "required": [
+    "paragraph"
+  ]
+}

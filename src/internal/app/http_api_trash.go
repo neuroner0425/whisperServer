@@ -35,7 +35,7 @@ func apiRestoreJobJSONHandler(c echo.Context) error {
 	job = getJob(jobID)
 	httpx.ResumeRestoredJob(jobID, job, func(jobID string) bool {
 		return store.HasJobBlob(jobID, store.BlobKindAudioAAC)
-	}, store.HasJobBlob, setJobFields, enqueueTranscribe, enqueueRefine, statusPending, statusRefiningPending)
+	}, store.HasJobBlob, setJobFields, enqueueTranscribe, enqueueRefine, enqueuePDFExtract, statusPending, statusRefiningPending)
 	httpx.TouchFolderAncestors(u.ID, folderID, procErrf, "api.job.restoreTouchFolder", "owner_id=%s job_id=%s folder_id=%s", u.ID, jobID, folderID)
 	return c.JSON(http.StatusOK, map[string]string{"job_id": jobID, "status": "restored"})
 }

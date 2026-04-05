@@ -18,6 +18,7 @@ type TrashDeps struct {
 	CancelJob              func(string)
 	EnqueueTranscribe      func(string)
 	EnqueueRefine          func(string)
+	EnqueuePDFExtract      func(string)
 	HasAudioBlob           func(string) bool
 	HasJobBlob             func(string, string) bool
 	StatusPending          string
@@ -46,7 +47,7 @@ func RestoreJobHandler(c echo.Context, deps TrashDeps) error {
 	updates := map[string]any{"is_trashed": false, "deleted_at": ""}
 	updates["folder_id"] = folderID
 	deps.SetJobFields(jobID, updates)
-	ResumeRestoredJob(jobID, deps.GetJob(jobID), deps.HasAudioBlob, deps.HasJobBlob, deps.SetJobFields, deps.EnqueueTranscribe, deps.EnqueueRefine, deps.StatusPending, deps.StatusRefiningPending)
+	ResumeRestoredJob(jobID, deps.GetJob(jobID), deps.HasAudioBlob, deps.HasJobBlob, deps.SetJobFields, deps.EnqueueTranscribe, deps.EnqueueRefine, deps.EnqueuePDFExtract, deps.StatusPending, deps.StatusRefiningPending)
 	TouchFolderAncestors(u.ID, folderID, deps.Errf, "job.restoreTouchFolder", "owner_id=%s job_id=%s folder_id=%s", u.ID, jobID, folderID)
 	return c.Redirect(http.StatusSeeOther, routes.Trash)
 }

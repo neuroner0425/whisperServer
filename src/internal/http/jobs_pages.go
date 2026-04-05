@@ -172,11 +172,16 @@ func StatusHandler(c echo.Context, deps JobsDeps) error {
 		return c.JSON(http.StatusUnauthorized, map[string]string{"detail": "인증이 필요합니다."})
 	}
 	return c.JSON(http.StatusOK, map[string]any{
-		"status":           deps.Fallback(job.Status, "알 수 없음"),
-		"progress_percent": job.ProgressPercent,
-		"phase":            deps.Fallback(job.Phase, "대기 중"),
-		"progress_label":   job.ProgressLabel,
-		"preview_text":     job.PreviewText,
+		"status":               deps.Fallback(job.Status, "알 수 없음"),
+		"progress_percent":     job.ProgressPercent,
+		"phase":                deps.Fallback(job.Phase, "대기 중"),
+		"progress_label":       job.ProgressLabel,
+		"preview_text":         job.PreviewText,
+		"page_count":           job.PageCount,
+		"processed_page_count": job.ProcessedPageCount,
+		"current_chunk":        job.CurrentChunk,
+		"total_chunks":         job.TotalChunks,
+		"resume_available":     job.ResumeAvailable,
 	})
 }
 
@@ -218,6 +223,30 @@ func JobHandler(c echo.Context, deps JobsDeps) error {
 	}
 
 	if status == "완료" {
+		if job.FileType == "pdf" {
+			if !store.HasJobBlob(jobID, store.BlobKindDocumentMarkdown) {
+				return echo.NewHTTPError(http.StatusNotFound, "결과 파일을 찾을 수 없습니다.")
+			}
+			b, err := store.LoadJobBlob(jobID, store.BlobKindDocumentMarkdown)
+			if err != nil {
+				deps.Errf("job.loadDocumentMarkdownBlob", err, "job_id=%s", jobID)
+				return echo.NewHTTPError(http.StatusInternalServerError, "결과 읽기 실패")
+			}
+			return c.Render(http.StatusOK, "job_result.html", map[string]any{
+				"Job":             deps.ToJobView(job),
+				"JobID":           jobID,
+				"Text":            deps.RenderMarkdownText(string(b)),
+				"Variant":         "document",
+				"HasRefined":      false,
+				"CanRefine":       false,
+				"CurrentUserName": deps.CurrentUserName(c),
+				"Tags":            tags,
+				"SelectedTagsMap": tagMap,
+				"TagText":         tagText,
+				"IsPDF":           true,
+				"HasDocumentJSON": store.HasJobBlob(jobID, store.BlobKindDocumentJSON),
+			})
+		}
 		showOriginal := strings.TrimSpace(c.QueryParam("original")) == "1" || strings.TrimSpace(c.QueryParam("original")) == "true"
 		hasRefined := store.HasJobBlob(jobID, store.BlobKindRefined)
 		useRefined := hasRefined && !showOriginal

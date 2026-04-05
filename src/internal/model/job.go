@@ -30,6 +30,11 @@ type Job struct {
 	PreviewText          string   `json:"preview_text,omitempty"`
 	ResultRefined        string   `json:"result_refined,omitempty"`
 	StatusDetail         string   `json:"status_detail,omitempty"`
+	PageCount            int      `json:"page_count,omitempty"`
+	ProcessedPageCount   int      `json:"processed_page_count,omitempty"`
+	CurrentChunk         int      `json:"current_chunk,omitempty"`
+	TotalChunks          int      `json:"total_chunks,omitempty"`
+	ResumeAvailable      bool     `json:"resume_available,omitempty"`
 }
 
 func (j *Job) Clone() *Job {

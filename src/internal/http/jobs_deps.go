@@ -26,6 +26,7 @@ type JobsDeps struct {
 	SelectedTagMap      func([]string) map[string]bool
 	ToJobView           func(*model.Job) JobView
 	RenderResultText    func(string, bool, *int) htmpl.HTML
+	RenderMarkdownText  func(string) htmpl.HTML
 	Fallback            func(string, string) string
 	SanitizePreviewText func(string) string
 	HasGeminiConfigured func() bool

@@ -47,4 +47,8 @@ export type FilesResponse = {
   total_pages: number
   total_items: number
   version: string
+  upload_limits?: {
+    pdf_max_pages: number
+    pdf_max_pages_per_request: number
+  }
 }

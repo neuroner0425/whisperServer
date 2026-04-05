@@ -33,9 +33,116 @@ func renderResultText(content string, withTimeline bool, totalSec *int) htmpl.HT
 			htmlLines = append(htmlLines, fmt.Sprintf(`<div style="margin-bottom:4px;">%s<span style="color:#2563eb;font-weight:bold;">%s</span> %s %s</div>`, bar, safeTimeline, body, pct))
 			continue
 		}
-		htmlLines = append(htmlLines, html.EscapeString(strings.TrimSpace(line)))
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		htmlLines = append(htmlLines, "<div>"+html.EscapeString(strings.TrimSpace(line))+"</div>")
 	}
 	return htmpl.HTML(strings.Join(htmlLines, "\n"))
+}
+
+func renderMarkdownText(content string) htmpl.HTML {
+	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
+	htmlLines := make([]string, 0, len(lines))
+	inList := false
+	inTable := false
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		switch {
+		case strings.HasPrefix(line, "### "):
+			htmlLines, inList, inTable = closeMarkdownBlocks(htmlLines, inList, inTable)
+			htmlLines = append(htmlLines, "<h3>"+html.EscapeString(strings.TrimSpace(strings.TrimPrefix(line, "### ")))+"</h3>")
+		case strings.HasPrefix(line, "## "):
+			htmlLines, inList, inTable = closeMarkdownBlocks(htmlLines, inList, inTable)
+			htmlLines = append(htmlLines, "<h2>"+html.EscapeString(strings.TrimSpace(strings.TrimPrefix(line, "## ")))+"</h2>")
+		case strings.HasPrefix(line, "# "):
+			htmlLines, inList, inTable = closeMarkdownBlocks(htmlLines, inList, inTable)
+			htmlLines = append(htmlLines, "<h1>"+html.EscapeString(strings.TrimSpace(strings.TrimPrefix(line, "# ")))+"</h1>")
+		case strings.HasPrefix(line, "- "):
+			if inTable {
+				htmlLines = append(htmlLines, "</table>")
+				inTable = false
+			}
+			if !inList {
+				htmlLines = append(htmlLines, "<ul>")
+				inList = true
+			}
+			htmlLines = append(htmlLines, "<li>"+html.EscapeString(strings.TrimSpace(strings.TrimPrefix(line, "- ")))+"</li>")
+		case strings.HasPrefix(line, "|") && strings.HasSuffix(line, "|"):
+			if inList {
+				htmlLines = append(htmlLines, "</ul>")
+				inList = false
+			}
+			if isMarkdownDividerRow(line) {
+				continue
+			}
+			if !inTable {
+				htmlLines = append(htmlLines, `<table class="document-table">`)
+				inTable = true
+			}
+			htmlLines = append(htmlLines, renderMarkdownTableRow(line))
+		case line == "---":
+			htmlLines, inList, inTable = closeMarkdownBlocks(htmlLines, inList, inTable)
+			htmlLines = append(htmlLines, "<hr>")
+		case line == "":
+			htmlLines, inList, inTable = closeMarkdownBlocks(htmlLines, inList, inTable)
+		default:
+			htmlLines, inList, inTable = closeMarkdownBlocks(htmlLines, inList, inTable)
+			htmlLines = append(htmlLines, "<p>"+html.EscapeString(line)+"</p>")
+		}
+	}
+	if inList {
+		htmlLines = append(htmlLines, "</ul>")
+	}
+	if inTable {
+		htmlLines = append(htmlLines, "</table>")
+	}
+	return htmpl.HTML(strings.Join(htmlLines, "\n"))
+}
+
+func closeMarkdownBlocks(htmlLines []string, inList, inTable bool) ([]string, bool, bool) {
+	if inList {
+		htmlLines = append(htmlLines, "</ul>")
+	}
+	if inTable {
+		htmlLines = append(htmlLines, "</table>")
+	}
+	return htmlLines, false, false
+}
+
+func isMarkdownDividerRow(line string) bool {
+	parts := splitMarkdownTableLine(line)
+	if len(parts) == 0 {
+		return false
+	}
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		part = strings.Trim(part, ":")
+		if part == "" || strings.Trim(part, "-") != "" {
+			return false
+		}
+	}
+	return true
+}
+
+func renderMarkdownTableRow(line string) string {
+	parts := splitMarkdownTableLine(line)
+	cells := make([]string, 0, len(parts))
+	for _, part := range parts {
+		cells = append(cells, "<td>"+html.EscapeString(strings.TrimSpace(part))+"</td>")
+	}
+	return "<tr>" + strings.Join(cells, "") + "</tr>"
+}
+
+func splitMarkdownTableLine(line string) []string {
+	line = strings.TrimPrefix(line, "|")
+	line = strings.TrimSuffix(line, "|")
+	rawParts := strings.Split(line, "|")
+	parts := make([]string, 0, len(rawParts))
+	for _, part := range rawParts {
+		parts = append(parts, strings.TrimSpace(part))
+	}
+	return parts
 }
 
 func parseStartSec(timeline string) float64 {

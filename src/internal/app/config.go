@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -216,6 +217,71 @@ func initRuntimeConfig() error {
 	}
 	authCookieSecure = confBool("AUTH_COOKIE_SECURE")
 
+	pdfMaxPages = confInt("PDF_MAX_PAGES")
+	pdfMaxPagesPerRequest = confInt("PDF_MAX_PAGES_PER_REQUEST")
+	pdfRenderDPI = confInt("PDF_RENDER_DPI")
+	pdfBatchTimeoutSec = confInt("PDF_BATCH_TIMEOUT_SEC")
+	pdfMaxRenderedImageBytes = int64(confInt("PDF_MAX_RENDERED_IMAGE_BYTES"))
+	pdfConsistencyContextMaxChars = confInt("PDF_CONSISTENCY_CONTEXT_MAX_CHARS")
+	pdfToolPDFInfo = strings.TrimSpace(confString("PDF_TOOL_PDFINFO"))
+	pdfToolPDFToPPM = strings.TrimSpace(confString("PDF_TOOL_PDFTOPPM"))
+	if err := validatePDFConfigValues(); err != nil {
+		return fmt.Errorf("%w (source: %s)", err, configPath)
+	}
+
+	return nil
+}
+
+func validatePDFConfigValues() error {
+	if pdfMaxPages <= 0 {
+		return fmt.Errorf("PDF_MAX_PAGES must be > 0")
+	}
+	if pdfMaxPagesPerRequest <= 0 {
+		return fmt.Errorf("PDF_MAX_PAGES_PER_REQUEST must be > 0")
+	}
+	if pdfMaxPagesPerRequest > pdfMaxPages {
+		return fmt.Errorf("PDF_MAX_PAGES_PER_REQUEST must be <= PDF_MAX_PAGES")
+	}
+	if pdfRenderDPI <= 0 {
+		return fmt.Errorf("PDF_RENDER_DPI must be > 0")
+	}
+	if pdfBatchTimeoutSec <= 0 {
+		return fmt.Errorf("PDF_BATCH_TIMEOUT_SEC must be > 0")
+	}
+	if pdfMaxRenderedImageBytes <= 0 {
+		return fmt.Errorf("PDF_MAX_RENDERED_IMAGE_BYTES must be > 0")
+	}
+	if pdfConsistencyContextMaxChars <= 0 {
+		return fmt.Errorf("PDF_CONSISTENCY_CONTEXT_MAX_CHARS must be > 0")
+	}
+	if pdfToolPDFInfo == "" {
+		return fmt.Errorf("PDF_TOOL_PDFINFO must not be empty")
+	}
+	if pdfToolPDFToPPM == "" {
+		return fmt.Errorf("PDF_TOOL_PDFTOPPM must not be empty")
+	}
+	return nil
+}
+
+func validatePDFTools() error {
+	check := func(label, tool, configKey string) error {
+		if strings.Contains(tool, "/") {
+			if _, err := os.Stat(tool); err != nil {
+				return fmt.Errorf("%s tool not found: %s (config key: %s)", label, tool, configKey)
+			}
+			return nil
+		}
+		if _, err := exec.LookPath(tool); err != nil {
+			return fmt.Errorf("%s tool not found in PATH: %s (config key: %s)", label, tool, configKey)
+		}
+		return nil
+	}
+	if err := check("pdfinfo", pdfToolPDFInfo, "PDF_TOOL_PDFINFO"); err != nil {
+		return err
+	}
+	if err := check("pdftoppm", pdfToolPDFToPPM, "PDF_TOOL_PDFTOPPM"); err != nil {
+		return err
+	}
 	return nil
 }
 

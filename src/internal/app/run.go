@@ -27,6 +27,9 @@ func Run() {
 	if err := initRuntimeConfig(); err != nil {
 		log.Fatalf("config init failed: %v", err)
 	}
+	if err := validatePDFTools(); err != nil {
+		log.Fatalf("pdf tool validation failed: %v", err)
+	}
 	if err := initProcessingLogger(); err != nil {
 		log.Fatalf("processing logger init failed: %v", err)
 	}
@@ -47,18 +50,22 @@ func Run() {
 	queueLength.Set(0)
 
 	appWorker = worker.New(worker.Config{
-		SplitTaskQueues:       splitTaskQueues,
-		TmpFolder:             tmpFolder,
-		ModelDir:              modelDir,
-		WhisperCLI:            whisperCLI,
-		JobTimeoutSec:         jobTimeoutSec,
-		ProgressRe:            progressRe,
-		StatusPending:         statusPending,
-		StatusRunning:         statusRunning,
-		StatusRefiningPending: statusRefiningPending,
-		StatusRefining:        statusRefining,
-		StatusCompleted:       statusCompleted,
-		StatusFailed:          statusFailed,
+		SplitTaskQueues:          splitTaskQueues,
+		TmpFolder:                tmpFolder,
+		ModelDir:                 modelDir,
+		WhisperCLI:               whisperCLI,
+		JobTimeoutSec:            jobTimeoutSec,
+		PDFBatchTimeoutSec:       pdfBatchTimeoutSec,
+		PDFMaxPages:              pdfMaxPages,
+		PDFMaxPagesPerRequest:    pdfMaxPagesPerRequest,
+		PDFMaxRenderedImageBytes: pdfMaxRenderedImageBytes,
+		ProgressRe:               progressRe,
+		StatusPending:            statusPending,
+		StatusRunning:            statusRunning,
+		StatusRefiningPending:    statusRefiningPending,
+		StatusRefining:           statusRefining,
+		StatusCompleted:          statusCompleted,
+		StatusFailed:             statusFailed,
 	}, worker.Deps{
 		GetJob:                getJob,
 		SetJobFields:          setJobFields,
@@ -67,13 +74,24 @@ func Run() {
 		ConvertToWav:          intutil.ConvertToWav,
 		HasGeminiConfigured:   hasGeminiConfigured,
 		RefineTranscript:      refineTranscript,
-		UniqueStrings:         intutil.UniqueStringsKeepOrder,
-		GetTagDescriptions:    store.GetTagDescriptionsByNames,
-		Logf:                  procLogf,
-		Errf:                  procErrf,
-		IncInProgress:         jobsInProgress.Inc,
-		DecInProgress:         jobsInProgress.Dec,
-		SetQueueLength:        queueLength.Set,
+		CountPDFPages: func(path string) (int, error) {
+			return intutil.CountPDFPages(pdfToolPDFInfo, path)
+		},
+		RenderPDFToJPEGs: func(pdfPath, outDir string) ([]string, error) {
+			return intutil.RenderPDFToJPEGs(pdfToolPDFToPPM, pdfPath, outDir, pdfRenderDPI)
+		},
+		ExtractDocumentChunk:    extractDocumentChunk,
+		BuildConsistencyContext: buildConsistencyContext,
+		MergeDocumentJSON:       mergeDocumentJSON,
+		RenderDocumentMarkdown:  renderDocumentMarkdown,
+		ListJobBlobKinds:        store.ListJobBlobKinds,
+		UniqueStrings:           intutil.UniqueStringsKeepOrder,
+		GetTagDescriptions:      store.GetTagDescriptionsByNames,
+		Logf:                    procLogf,
+		Errf:                    procErrf,
+		IncInProgress:           jobsInProgress.Inc,
+		DecInProgress:           jobsInProgress.Dec,
+		SetQueueLength:          queueLength.Set,
 		IncJobsTotal: func(status string) {
 			jobsTotal.WithLabelValues(status).Inc()
 		},
@@ -123,6 +141,7 @@ func Run() {
 	e.GET("/job/:job_id", spaJobPageHandler)
 	e.GET("/download/:job_id", func(c echo.Context) error { return httpx.DownloadHandler(c, jobsD) })
 	e.GET("/download/:job_id/refined", func(c echo.Context) error { return httpx.DownloadRefinedHandler(c, jobsD) })
+	e.GET("/download/:job_id/document-json", func(c echo.Context) error { return httpx.DownloadDocumentJSONHandler(c, jobsD) })
 	e.POST("/batch-download", func(c echo.Context) error { return httpx.BatchDownloadHandler(c, jobsD) })
 	e.POST("/batch-delete", func(c echo.Context) error { return httpx.BatchDeleteHandler(c, mutationD) })
 	e.POST("/batch-move", func(c echo.Context) error { return httpx.MoveJobsHandler(c, folderD) })

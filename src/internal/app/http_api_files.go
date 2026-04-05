@@ -86,6 +86,10 @@ func apiFilesJSONHandler(c echo.Context) error {
 			"legacy_root": routes.FilesRoot,
 			"legacy_home": routes.FilesHome,
 		},
+		"upload_limits": map[string]any{
+			"pdf_max_pages":             pdfMaxPages,
+			"pdf_max_pages_per_request": pdfMaxPagesPerRequest,
+		},
 	})
 }
 

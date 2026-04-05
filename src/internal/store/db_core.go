@@ -14,12 +14,16 @@ import (
 )
 
 const (
-	BlobKindAudioAAC       = "audio_aac"
-	BlobKindWav            = "wav"
-	BlobKindPreview        = "preview"
-	BlobKindTranscript     = "transcript"
-	BlobKindTranscriptJSON = "transcript_json"
-	BlobKindRefined        = "refined"
+	BlobKindAudioAAC           = "audio_aac"
+	BlobKindWav                = "wav"
+	BlobKindPDFOriginal        = "pdf_original"
+	BlobKindPreview            = "preview"
+	BlobKindTranscript         = "transcript"
+	BlobKindTranscriptJSON     = "transcript_json"
+	BlobKindRefined            = "refined"
+	BlobKindDocumentJSON       = "document_json"
+	BlobKindDocumentMarkdown   = "document_markdown"
+	BlobKindDocumentChunkIndex = "document_chunk_index"
 )
 
 var (
@@ -46,6 +50,14 @@ func Init(projectRoot string) error {
 	dbPath := filepath.Join(runDir, "whisper.db")
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
+		return err
+	}
+	if _, err := db.Exec(`PRAGMA journal_mode = WAL;`); err != nil {
+		_ = db.Close()
+		return err
+	}
+	if _, err := db.Exec(`PRAGMA busy_timeout = 5000;`); err != nil {
+		_ = db.Close()
 		return err
 	}
 	if _, err := db.Exec(`PRAGMA foreign_keys = ON;`); err != nil {
