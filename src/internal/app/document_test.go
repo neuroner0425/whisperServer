@@ -27,7 +27,7 @@ func TestRenderDocumentMarkdown(t *testing.T) {
 	      "elements": [
 	        { "header": { "level": 1, "text": "Doc" } },
 	        { "text": "Paragraph" },
-	        { "list": ["One", "Two"] },
+	        { "list": { "ordered": false, "items": [ { "text": "One" }, { "text": "Two" } ] } },
 	        { "table": { "title": "Grid", "rows": [ { "cells": ["A", "B"] }, { "cells": ["1", "2"] } ] } }
 	      ]
 	    }
@@ -39,6 +39,56 @@ func TestRenderDocumentMarkdown(t *testing.T) {
 		t.Fatalf("renderDocumentMarkdown returned error: %v", err)
 	}
 	for _, want := range []string{"## Page 1", "# Doc", "Paragraph", "- One", "| A | B |"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("markdown missing %q: %s", want, out)
+		}
+	}
+}
+
+func TestRenderDocumentMarkdownNestedList(t *testing.T) {
+	raw := []byte(`{
+	  "pages": [
+	    {
+	      "page_index": 1,
+	      "elements": [
+	        {
+	          "list": {
+	            "ordered": false,
+	            "items": [
+	              {
+	                "text": "가 항목 내용",
+	                "children": [
+	                  { "text": "가" },
+	                  { "text": "나" }
+	                ]
+	              },
+	              {
+	                "text": "나 항목 내용",
+	                "children": [
+	                  { "text": "다" },
+	                  { "text": "라" }
+	                ]
+	              }
+	            ]
+	          }
+	        }
+	      ]
+	    }
+	  ]
+	}`)
+
+	out, err := renderDocumentMarkdown(raw)
+	if err != nil {
+		t.Fatalf("renderDocumentMarkdown returned error: %v", err)
+	}
+	for _, want := range []string{
+		"- 가 항목 내용",
+		"  - 가",
+		"  - 나",
+		"- 나 항목 내용",
+		"  - 다",
+		"  - 라",
+	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("markdown missing %q: %s", want, out)
 		}

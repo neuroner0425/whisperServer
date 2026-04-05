@@ -16,6 +16,27 @@ import (
 	"whisperserver/src/internal/worker"
 )
 
+func (l *documentList) normalize() {
+	l.Items = normalizeListItems(l.Items, 1)
+}
+
+func normalizeListItems(items []documentListItem, depth int) []documentListItem {
+	out := make([]documentListItem, 0, len(items))
+	for _, item := range items {
+		item.Text = strings.TrimSpace(item.Text)
+		if item.Text == "" {
+			continue
+		}
+		if depth < 3 && len(item.Children) > 0 {
+			item.Children = normalizeListItems(item.Children, depth+1)
+		} else {
+			item.Children = nil
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
 type documentElement struct {
 	Header *struct {
 		Level int    `json:"level"`
@@ -24,7 +45,7 @@ type documentElement struct {
 	Text       string   `json:"text,omitempty"`
 	MathInline string   `json:"math_inline,omitempty"`
 	MathBlock  string   `json:"math_block,omitempty"`
-	List       []string `json:"list,omitempty"`
+	List       *documentList `json:"list,omitempty"`
 	Img        *struct {
 		Title       string `json:"title"`
 		Description string `json:"description"`
@@ -44,6 +65,16 @@ type documentPage struct {
 
 type documentResponse struct {
 	Pages []documentPage `json:"pages"`
+}
+
+type documentList struct {
+	Ordered bool               `json:"ordered,omitempty"`
+	Items   []documentListItem `json:"items"`
+}
+
+type documentListItem struct {
+	Text     string               `json:"text"`
+	Children []documentListItem   `json:"children,omitempty"`
 }
 
 var (
@@ -111,10 +142,57 @@ const documentResponseSchemaJSON = `{
                   ]
                 },
                 "list": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
+                  "type": "object",
+                  "properties": {
+                    "ordered": {
+                      "type": "boolean"
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "text": {
+                            "type": "string"
+                          },
+                          "children": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "text": {
+                                  "type": "string"
+                                },
+                                "children": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "text": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "text"
+                                    ]
+                                  }
+                                }
+                              },
+                              "required": [
+                                "text"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "text"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
                 },
                 "table": {
                   "type": "object",
@@ -324,8 +402,8 @@ func normalizeDocumentResponseJSON(raw string) ([]byte, error) {
 			parsed.Pages[i].Elements[j].Text = strings.TrimSpace(parsed.Pages[i].Elements[j].Text)
 			parsed.Pages[i].Elements[j].MathInline = strings.TrimSpace(parsed.Pages[i].Elements[j].MathInline)
 			parsed.Pages[i].Elements[j].MathBlock = strings.TrimSpace(parsed.Pages[i].Elements[j].MathBlock)
-			for k := range parsed.Pages[i].Elements[j].List {
-				parsed.Pages[i].Elements[j].List[k] = strings.TrimSpace(parsed.Pages[i].Elements[j].List[k])
+			if parsed.Pages[i].Elements[j].List != nil {
+				parsed.Pages[i].Elements[j].List.normalize()
 			}
 			if parsed.Pages[i].Elements[j].Img != nil {
 				parsed.Pages[i].Elements[j].Img.Title = strings.TrimSpace(parsed.Pages[i].Elements[j].Img.Title)
@@ -444,13 +522,8 @@ func renderDocumentMarkdown(raw []byte) (string, error) {
 				lines = append(lines, "$"+strings.TrimSpace(el.MathInline)+"$", "")
 			case strings.TrimSpace(el.Text) != "":
 				lines = append(lines, formatDocumentTextForMarkdown(el.Text), "")
-			case len(el.List) > 0:
-				for _, item := range el.List {
-					if strings.TrimSpace(item) == "" {
-						continue
-					}
-					lines = append(lines, "- "+formatDocumentTextForMarkdown(item))
-				}
+			case el.List != nil && len(el.List.Items) > 0:
+				lines = append(lines, renderMarkdownList(el.List.Items, el.List.Ordered, 0)...)
 				lines = append(lines, "")
 			case el.Img != nil:
 				lines = append(lines, fmt.Sprintf("**%s**", formatDocumentTextForMarkdown(el.Img.Title)), "", formatDocumentTextForMarkdown(el.Img.Description), "")
@@ -482,6 +555,22 @@ func renderMarkdownTable(rows []struct {
 	out = append(out, "| "+strings.Join(divider, " | ")+" |")
 	for _, row := range rows[1:] {
 		out = append(out, "| "+strings.Join(row.Cells, " | ")+" |")
+	}
+	return out
+}
+
+func renderMarkdownList(items []documentListItem, ordered bool, depth int) []string {
+	out := make([]string, 0, len(items)*2)
+	for idx, item := range items {
+		marker := "-"
+		if ordered {
+			marker = fmt.Sprintf("%d.", idx+1)
+		}
+		prefix := strings.Repeat("  ", depth)
+		out = append(out, prefix+marker+" "+formatDocumentTextForMarkdown(item.Text))
+		if len(item.Children) > 0 {
+			out = append(out, renderMarkdownList(item.Children, false, depth+1)...)
+		}
 	}
 	return out
 }

@@ -32,7 +32,10 @@ export type DocumentPageElement = {
   text?: string
   math_inline?: string
   math_block?: string
-  list?: string[]
+  list?: {
+    ordered?: boolean
+    items: DocumentListItem[]
+  }
   img?: {
     title: string
     description: string
@@ -43,6 +46,11 @@ export type DocumentPageElement = {
       cells: string[]
     }>
   }
+}
+
+export type DocumentListItem = {
+  text: string
+  children?: DocumentListItem[]
 }
 
 export type DocumentPage = {

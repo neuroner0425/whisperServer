@@ -8,7 +8,7 @@ import { useParams, useSearchParams } from 'react-router-dom'
 
 import { fetchDocumentJSON, fetchJobDetail, refineJob, rerefineJob, retranscribeJob, retryJob } from './api'
 import { buildJobStatusText } from './jobStatusText'
-import type { DocumentPage, JobDetailResponse } from './types'
+import type { DocumentListItem, DocumentPage, JobDetailResponse } from './types'
 import { usePageTitle } from '../../usePageTitle'
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString()
@@ -859,12 +859,8 @@ function renderDocumentPageMarkdown(page: DocumentPage) {
       lines.push(element.text.trim(), '')
       continue
     }
-    if (element.list?.length) {
-      for (const item of element.list) {
-        if (item.trim()) {
-          lines.push(`- ${item.trim()}`)
-        }
-      }
+    if (element.list?.items?.length) {
+      lines.push(...renderPageListMarkdown(element.list.items, Boolean(element.list.ordered), 0))
       lines.push('')
       continue
     }
@@ -892,6 +888,23 @@ function renderPageTableMarkdown(rows: Array<{ cells: string[] }>) {
     `| ${divider.join(' | ')} |`,
     ...rows.slice(1).map((row) => `| ${row.cells.join(' | ')} |`),
   ]
+}
+
+function renderPageListMarkdown(items: DocumentListItem[], ordered: boolean, depth: number): string[] {
+  const lines: string[] = []
+  for (const [index, item] of items.entries()) {
+    const text = item.text?.trim()
+    if (!text) {
+      continue
+    }
+    const marker = ordered ? `${index + 1}.` : '-'
+    const prefix = '  '.repeat(depth)
+    lines.push(`${prefix}${marker} ${text}`)
+    if (item.children?.length) {
+      lines.push(...renderPageListMarkdown(item.children, false, depth + 1))
+    }
+  }
+  return lines
 }
 
 function clampPage(page: number, maxPage: number) {
