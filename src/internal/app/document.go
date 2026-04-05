@@ -21,9 +21,11 @@ type documentElement struct {
 		Level int    `json:"level"`
 		Text  string `json:"text"`
 	} `json:"header,omitempty"`
-	Text string   `json:"text,omitempty"`
-	List []string `json:"list,omitempty"`
-	Img  *struct {
+	Text       string   `json:"text,omitempty"`
+	MathInline string   `json:"math_inline,omitempty"`
+	MathBlock  string   `json:"math_block,omitempty"`
+	List       []string `json:"list,omitempty"`
+	Img        *struct {
 		Title       string `json:"title"`
 		Description string `json:"description"`
 	} `json:"img,omitempty"`
@@ -85,6 +87,12 @@ const documentResponseSchemaJSON = `{
                   ]
                 },
                 "text": {
+                  "type": "string"
+                },
+                "math_inline": {
+                  "type": "string"
+                },
+                "math_block": {
                   "type": "string"
                 },
                 "img": {
@@ -314,6 +322,8 @@ func normalizeDocumentResponseJSON(raw string) ([]byte, error) {
 				parsed.Pages[i].Elements[j].Header.Text = strings.TrimSpace(parsed.Pages[i].Elements[j].Header.Text)
 			}
 			parsed.Pages[i].Elements[j].Text = strings.TrimSpace(parsed.Pages[i].Elements[j].Text)
+			parsed.Pages[i].Elements[j].MathInline = strings.TrimSpace(parsed.Pages[i].Elements[j].MathInline)
+			parsed.Pages[i].Elements[j].MathBlock = strings.TrimSpace(parsed.Pages[i].Elements[j].MathBlock)
 			for k := range parsed.Pages[i].Elements[j].List {
 				parsed.Pages[i].Elements[j].List[k] = strings.TrimSpace(parsed.Pages[i].Elements[j].List[k])
 			}
@@ -428,6 +438,10 @@ func renderDocumentMarkdown(raw []byte) (string, error) {
 					level = 3
 				}
 				lines = append(lines, strings.Repeat("#", level)+" "+el.Header.Text, "")
+			case strings.TrimSpace(el.MathBlock) != "":
+				lines = append(lines, "$$", strings.TrimSpace(el.MathBlock), "$$", "")
+			case strings.TrimSpace(el.MathInline) != "":
+				lines = append(lines, "$"+strings.TrimSpace(el.MathInline)+"$", "")
 			case strings.TrimSpace(el.Text) != "":
 				lines = append(lines, formatDocumentTextForMarkdown(el.Text), "")
 			case len(el.List) > 0:

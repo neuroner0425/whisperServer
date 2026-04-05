@@ -24,6 +24,36 @@ export type AvailableTag = {
   Description: string
 }
 
+export type DocumentPageElement = {
+  header?: {
+    level: number
+    text: string
+  }
+  text?: string
+  math_inline?: string
+  math_block?: string
+  list?: string[]
+  img?: {
+    title: string
+    description: string
+  }
+  table?: {
+    title: string
+    rows: Array<{
+      cells: string[]
+    }>
+  }
+}
+
+export type DocumentPage = {
+  page_index: number
+  elements: DocumentPageElement[]
+}
+
+export type DocumentResponse = {
+  pages: DocumentPage[]
+}
+
 export type JobDetailResponse = {
   job_id: string
   current_user_name: string
@@ -42,6 +72,7 @@ export type JobDetailResponse = {
   download_text_url?: string
   download_refined_url?: string
   download_document_json_url?: string
+  original_pdf_url?: string
   page_count?: number
   processed_page_count?: number
   current_chunk?: number

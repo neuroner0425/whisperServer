@@ -1,14 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { Document, Page, pdfjs } from 'react-pdf'
 import ReactMarkdown from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import { useParams, useSearchParams } from 'react-router-dom'
 
-import { fetchJobDetail, refineJob, rerefineJob, retranscribeJob, retryJob } from './api'
+import { fetchDocumentJSON, fetchJobDetail, refineJob, rerefineJob, retranscribeJob, retryJob } from './api'
 import { buildJobStatusText } from './jobStatusText'
-import type { JobDetailResponse } from './types'
+import type { DocumentPage, JobDetailResponse } from './types'
 import { usePageTitle } from '../../usePageTitle'
+
+pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString()
 
 type TimelineSegment = {
   key: string
@@ -37,6 +40,24 @@ type ActiveItem = {
   endMs: number
 }
 
+const PDFPreviewPage = memo(function PDFPreviewPage({
+  isActive,
+  onRef,
+  pageNumber,
+  width,
+}: {
+  isActive: boolean
+  onRef: (node: HTMLDivElement | null) => void
+  pageNumber: number
+  width: number
+}) {
+  return (
+    <div className={`pdf-page-shell${isActive ? ' active' : ''}`} data-page-number={pageNumber} ref={onRef}>
+      <Page pageNumber={pageNumber} renderAnnotationLayer={false} renderTextLayer={false} width={width} />
+    </div>
+  )
+})
+
 export function JobDetailPage() {
   const { jobId = '' } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -50,10 +71,18 @@ export function JobDetailPage() {
   const [isRerefining, setIsRerefining] = useState(false)
   const [showMeta, setShowMeta] = useState(false)
   const [activeKey, setActiveKey] = useState('')
+  const [documentPages, setDocumentPages] = useState<DocumentPage[]>([])
+  const [currentPDFPage, setCurrentPDFPage] = useState(1)
+  const [pdfPageCount, setPDFPageCount] = useState(0)
+  const [pdfRenderWidth, setPDFRenderWidth] = useState(760)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const itemRefs = useRef<Record<string, HTMLElement | null>>({})
+  const pdfViewportRef = useRef<HTMLElement | null>(null)
+  const pdfPageRefs = useRef<Record<number, HTMLDivElement | null>>({})
+  const comparePageRefs = useRef<Record<number, HTMLElement | null>>({})
 
   const showOriginal = searchParams.get('original') === 'true'
+  const showCompare = searchParams.get('compare') === 'true'
   const currentFileName = displayFilename(data?.job.Filename || '파일')
   const progressText = data ? buildJobStatusText(data.job) : ''
   const isPDF = data?.job.FileType === 'pdf'
@@ -102,12 +131,59 @@ export function JobDetailPage() {
     }
   }, [jobId, showOriginal, data?.view])
 
+  useEffect(() => {
+    if (!isPDF || data?.view !== 'result' || !data.download_document_json_url) {
+      setDocumentPages([])
+      setCurrentPDFPage(1)
+      return
+    }
+    let closed = false
+    const controller = new AbortController()
+    void fetchDocumentJSON(data.download_document_json_url, controller.signal)
+      .then((payload) => {
+        if (closed) {
+          return
+        }
+        const pages = [...(payload.pages || [])].sort((a, b) => a.page_index - b.page_index)
+        setDocumentPages(pages)
+        setCurrentPDFPage((current) => {
+          if (pages.length === 0) {
+            return 1
+          }
+          const pageIndexes = new Set(pages.map((page) => page.page_index))
+          if (pageIndexes.has(current)) {
+            return current
+          }
+          return pages[0].page_index
+        })
+      })
+      .catch((loadError) => {
+        if (!closed && !controller.signal.aborted) {
+          setError(normalizeLoadError(loadError, '문서 JSON을 불러오지 못했습니다.'))
+        }
+      })
+    return () => {
+      closed = true
+      controller.abort()
+    }
+  }, [data?.download_document_json_url, data?.view, isPDF])
+
   const toggleOriginal = (enabled: boolean) => {
     const next = new URLSearchParams(searchParams)
     if (enabled) {
       next.set('original', 'true')
     } else {
       next.delete('original')
+    }
+    setSearchParams(next)
+  }
+
+  const toggleCompare = (enabled: boolean) => {
+    const next = new URLSearchParams(searchParams)
+    if (enabled) {
+      next.set('compare', 'true')
+    } else {
+      next.delete('compare')
     }
     setSearchParams(next)
   }
@@ -133,6 +209,8 @@ export function JobDetailPage() {
   }, [data])
   const transcriptSegments = useMemo(() => parseTimelineTranscriptText(sourceText), [sourceText])
   const refinedParagraphs = useMemo(() => parseRefinedParagraphs(data?.view === 'result' ? data?.text || '' : ''), [data?.text, data?.view])
+  const pdfDocumentOptions = useMemo(() => ({ withCredentials: true }), [])
+  const pdfPageNumbers = useMemo(() => Array.from({ length: pdfPageCount }, (_, index) => index + 1), [pdfPageCount])
   const activeItems = useMemo(() => {
     if (refinedParagraphs.length > 0 && !(data?.variant === 'original')) {
       return buildActiveItemsFromParagraphs(refinedParagraphs)
@@ -157,6 +235,79 @@ export function JobDetailPage() {
     }, 2800)
     return () => window.clearTimeout(timer)
   }, [error, message])
+
+  useEffect(() => {
+    const container = pdfViewportRef.current
+    if (!container) {
+      return
+    }
+
+    const updateWidth = () => {
+      const nextWidth = Math.max(320, Math.min(900, Math.floor(container.clientWidth - 40)))
+      setPDFRenderWidth((current) => (current === nextWidth ? current : nextWidth))
+    }
+
+    updateWidth()
+    const observer = new ResizeObserver(updateWidth)
+    observer.observe(container)
+    return () => {
+      observer.disconnect()
+    }
+  }, [])
+
+  useEffect(() => {
+    const container = pdfViewportRef.current
+    if (!container || pdfPageCount <= 0) {
+      return
+    }
+    const ratios = new Map<number, number>()
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const page = Number((entry.target as HTMLElement).dataset.pageNumber || '0')
+          if (page > 0) {
+            ratios.set(page, entry.isIntersecting ? entry.intersectionRatio : 0)
+          }
+        }
+        let bestPage = currentPDFPage
+        let bestRatio = 0
+        for (const [page, ratio] of ratios.entries()) {
+          if (ratio > bestRatio || (ratio === bestRatio && page < bestPage)) {
+            bestPage = page
+            bestRatio = ratio
+          }
+        }
+        if (bestRatio > 0) {
+          setCurrentPDFPage((current) => (current === bestPage ? current : bestPage))
+        }
+      },
+      {
+        root: container,
+        threshold: [0.25, 0.5, 0.75],
+      },
+    )
+
+    for (let pageNumber = 1; pageNumber <= pdfPageCount; pageNumber += 1) {
+      const node = pdfPageRefs.current[pageNumber]
+      if (node) {
+        observer.observe(node)
+      }
+    }
+    return () => {
+      observer.disconnect()
+    }
+  }, [currentPDFPage, pdfPageCount])
+
+  useEffect(() => {
+    if (!showCompare) {
+      return
+    }
+    const node = comparePageRefs.current[currentPDFPage]
+    if (!node) {
+      return
+    }
+    node.scrollIntoView({ block: 'nearest' })
+  }, [currentPDFPage, showCompare])
 
   useEffect(() => {
     const audio = audioRef.current
@@ -281,6 +432,16 @@ export function JobDetailPage() {
     }
   }
 
+  const scrollPDFToPage = (pageNumber: number) => {
+    const node = pdfPageRefs.current[pageNumber]
+    if (!node) {
+      setCurrentPDFPage(pageNumber)
+      return
+    }
+    node.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    setCurrentPDFPage(pageNumber)
+  }
+
   return (
     <section className="view-shell job-detail-view">
       <header className="view-header">
@@ -392,6 +553,12 @@ export function JobDetailPage() {
                     </button>
                   </>
                 ) : null}
+                {isPDF && data.view === 'result' && data.original_pdf_url ? (
+                  <button className={`ghost-button small${showCompare ? ' active' : ''}`} onClick={() => toggleCompare(!showCompare)} type="button">
+                    대조 보기
+                  </button>
+                ) : null}
+                {isPDF && data.view === 'result' && data.original_pdf_url ? <span className="pdf-page-indicator">현재 페이지 {currentPDFPage}</span> : null}
               </div>
             </div>
 
@@ -478,10 +645,63 @@ export function JobDetailPage() {
                 </div>
               </section>
             ) : isPDF && data.view === 'result' ? (
-              <section className="result-panel dark markdown-panel">
-                <ReactMarkdown rehypePlugins={[rehypeKatex]} remarkPlugins={[remarkGfm, remarkMath]}>
-                  {sourceText}
-                </ReactMarkdown>
+              <section className={`pdf-reading-layout${showCompare && data.original_pdf_url ? ' compare' : ''}`}>
+                <section className="result-panel dark pdf-source-panel" ref={pdfViewportRef}>
+                  {data.original_pdf_url ? (
+                    <Document
+                      file={data.original_pdf_url}
+                      loading={<div className="pdf-viewer-loading">PDF를 불러오는 중입니다.</div>}
+                      onLoadError={(loadError) => {
+                        setError(normalizeLoadError(loadError, 'PDF를 불러오지 못했습니다.'))
+                      }}
+                      options={pdfDocumentOptions}
+                      onLoadSuccess={({ numPages }) => {
+                        setPDFPageCount(numPages)
+                        setCurrentPDFPage((current) => clampPage(current, numPages))
+                      }}
+                    >
+                      {pdfPageNumbers.map((pageNumber) => (
+                        <PDFPreviewPage
+                          isActive={pageNumber === currentPDFPage}
+                          key={pageNumber}
+                          onRef={(node) => {
+                            pdfPageRefs.current[pageNumber] = node
+                          }}
+                          pageNumber={pageNumber}
+                          width={pdfRenderWidth}
+                        />
+                      ))}
+                    </Document>
+                  ) : (
+                    <div className="pdf-viewer-loading">원본 PDF를 찾을 수 없습니다.</div>
+                  )}
+                </section>
+                {showCompare && data.original_pdf_url ? (
+                  <section className="result-panel dark markdown-panel compare-text-panel">
+                    {documentPages.map((page) => (
+                      <article
+                        className={`compare-page-section${page.page_index === currentPDFPage ? ' active' : ''}`}
+                        key={page.page_index}
+                        onClick={() => scrollPDFToPage(page.page_index)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault()
+                            scrollPDFToPage(page.page_index)
+                          }
+                        }}
+                        role="button"
+                        ref={(node) => {
+                          comparePageRefs.current[page.page_index] = node
+                        }}
+                        tabIndex={0}
+                      >
+                        <ReactMarkdown rehypePlugins={[rehypeKatex]} remarkPlugins={[remarkGfm, remarkMath]}>
+                          {renderDocumentPageMarkdown(page)}
+                        </ReactMarkdown>
+                      </article>
+                    ))}
+                  </section>
+                ) : null}
               </section>
             ) : (
               <pre className="result-panel dark">{fallbackText}</pre>
@@ -617,6 +837,72 @@ function normalizePlainText(text: string) {
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
     .join('\n')
+}
+
+function renderDocumentPageMarkdown(page: DocumentPage) {
+  const lines: string[] = [`## Page ${page.page_index}`, '']
+  for (const element of page.elements) {
+    if (element.header) {
+      const level = Math.max(1, Math.min(3, element.header.level || 1))
+      lines.push(`${'#'.repeat(level)} ${element.header.text}`, '')
+      continue
+    }
+    if (element.math_block?.trim()) {
+      lines.push('$$', element.math_block.trim(), '$$', '')
+      continue
+    }
+    if (element.math_inline?.trim()) {
+      lines.push(`$${element.math_inline.trim()}$`, '')
+      continue
+    }
+    if (element.text?.trim()) {
+      lines.push(element.text.trim(), '')
+      continue
+    }
+    if (element.list?.length) {
+      for (const item of element.list) {
+        if (item.trim()) {
+          lines.push(`- ${item.trim()}`)
+        }
+      }
+      lines.push('')
+      continue
+    }
+    if (element.img) {
+      lines.push(`**${element.img.title}**`, '', element.img.description, '')
+      continue
+    }
+    if (element.table) {
+      lines.push(`**${element.table.title}**`, '')
+      lines.push(...renderPageTableMarkdown(element.table.rows))
+      lines.push('')
+    }
+  }
+  return lines.join('\n').trim()
+}
+
+function renderPageTableMarkdown(rows: Array<{ cells: string[] }>) {
+  if (!rows.length) {
+    return []
+  }
+  const header = rows[0].cells
+  const divider = header.map(() => '---')
+  return [
+    `| ${header.join(' | ')} |`,
+    `| ${divider.join(' | ')} |`,
+    ...rows.slice(1).map((row) => `| ${row.cells.join(' | ')} |`),
+  ]
+}
+
+function clampPage(page: number, maxPage: number) {
+  const upper = maxPage > 0 ? maxPage : 1
+  if (page < 1) {
+    return 1
+  }
+  if (page > upper) {
+    return upper
+  }
+  return page
 }
 
 function isPersistentNetworkError(error: string) {

@@ -51,8 +51,9 @@ func TestRenderDocumentMarkdownFormatsMath(t *testing.T) {
 	    {
 	      "page_index": 1,
 	      "elements": [
-	        { "text": "행렬 A=(a_ij)에서 a_ij가 다음과 같을 때, 행렬 A를 구하라." },
-	        { "text": "\\begin{pmatrix} x & y \\\\ 2 & 1 \\end{pmatrix} \\begin{pmatrix} x & 0 \\\\ y & x \\end{pmatrix} = 2 \\begin{pmatrix} 1 & 0 \\\\ 3 & 0 \\end{pmatrix}" }
+	        { "text": "행렬 A에서 다음 식을 보자." },
+	        { "math_inline": "A=(a_ij)" },
+	        { "math_block": "\\begin{pmatrix} x & y \\\\ 2 & 1 \\end{pmatrix} \\begin{pmatrix} x & 0 \\\\ y & x \\end{pmatrix} = 2 \\begin{pmatrix} 1 & 0 \\\\ 3 & 0 \\end{pmatrix}" }
 	      ]
 	    }
 	  ]
@@ -63,11 +64,37 @@ func TestRenderDocumentMarkdownFormatsMath(t *testing.T) {
 		t.Fatalf("renderDocumentMarkdown returned error: %v", err)
 	}
 	for _, want := range []string{
-		"행렬 $A=(a_ij)$에서 $a_ij$가 다음과 같을 때",
+		"행렬 A에서 다음 식을 보자.",
+		"$A=(a_ij)$",
 		"$$\n\\begin{pmatrix} x & y \\\\ 2 & 1 \\end{pmatrix} \\begin{pmatrix} x & 0 \\\\ y & x \\end{pmatrix} = 2 \\begin{pmatrix} 1 & 0 \\\\ 3 & 0 \\end{pmatrix}\n$$",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("markdown missing %q: %s", want, out)
+		}
+	}
+}
+
+func TestNormalizeDocumentResponseJSONTrimsMathFields(t *testing.T) {
+	raw := `{
+	  "pages": [
+	    {
+	      "page_index": 1,
+	      "elements": [
+	        { "math_inline": "  x+y  " },
+	        { "math_block": "  \\begin{pmatrix}1\\end{pmatrix}  " }
+	      ]
+	    }
+	  ]
+	}`
+
+	out, err := normalizeDocumentResponseJSON(raw)
+	if err != nil {
+		t.Fatalf("normalizeDocumentResponseJSON returned error: %v", err)
+	}
+	got := string(out)
+	for _, want := range []string{`"math_inline": "x+y"`, `"math_block": "\\begin{pmatrix}1\\end{pmatrix}"`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("normalized JSON missing %q: %s", want, got)
 		}
 	}
 }
