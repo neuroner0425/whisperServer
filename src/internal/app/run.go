@@ -179,6 +179,7 @@ func Run() {
 	e.GET("/api/storage", apiStorageJSONHandler)
 	e.GET("/api/jobs/:job_id", apiJobDetailJSONHandler)
 	e.GET("/api/jobs/:job_id/audio", apiJobAudioHandler)
+	e.GET("/api/jobs/:job_id/pdf", apiJobPDFHandler)
 	e.POST("/api/jobs/:job_id/retry", apiRetryJobJSONHandler)
 	e.POST("/api/jobs/:job_id/retranscribe", apiRetranscribeJobJSONHandler)
 	e.POST("/api/jobs/:job_id/refine", apiRefineJobJSONHandler)

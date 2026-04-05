@@ -51,6 +51,9 @@ func apiJobDetailJSONHandler(c echo.Context) error {
 					payload["text"] = string(b)
 					payload["download_text_url"] = "/download/" + jobID
 					payload["download_document_json_url"] = "/download/" + jobID + "/document-json"
+					if store.HasJobBlob(jobID, store.BlobKindPDFOriginal) {
+						payload["original_pdf_url"] = "/api/jobs/" + jobID + "/pdf"
+					}
 					payload["can_refine"] = false
 				}
 			}
@@ -104,6 +107,25 @@ func apiJobAudioHandler(c echo.Context) error {
 	res.Header().Set("Content-Type", "audio/mp4")
 	res.Header().Set("Accept-Ranges", "bytes")
 	http.ServeContent(res, req, "audio.m4a", time.Time{}, bytes.NewReader(audio))
+	return nil
+}
+
+func apiJobPDFHandler(c echo.Context) error {
+	_, _, err := requireOwnedJobOrNotFound(c, false)
+	if err != nil {
+		return err
+	}
+	jobID := strings.TrimSpace(c.Param("job_id"))
+	pdfBytes, err := store.LoadJobBlob(jobID, store.BlobKindPDFOriginal)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "PDF를 찾을 수 없습니다.")
+	}
+	res := c.Response()
+	req := c.Request()
+	res.Header().Set("Content-Disposition", `inline; filename="document.pdf"`)
+	res.Header().Set("Content-Type", "application/pdf")
+	res.Header().Set("Accept-Ranges", "bytes")
+	http.ServeContent(res, req, "document.pdf", time.Time{}, bytes.NewReader(pdfBytes))
 	return nil
 }
 

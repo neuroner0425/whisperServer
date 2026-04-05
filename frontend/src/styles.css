@@ -1426,6 +1426,85 @@ textarea.dark-input:focus {
   min-height: 0;
 }
 
+.pdf-reading-layout {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.pdf-reading-layout.compare {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.pdf-source-panel {
+  padding: 16px;
+  overflow: auto;
+  min-height: 70vh;
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.pdf-source-panel canvas {
+  max-width: 100%;
+  height: auto !important;
+  border-radius: 4px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.pdf-viewer-loading {
+  color: var(--text-muted);
+}
+
+.pdf-page-indicator {
+  min-width: 92px;
+  text-align: right;
+  color: var(--text-muted);
+}
+
+.pdf-page-shell {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  padding: 6px 0;
+}
+
+.pdf-page-shell.active {
+  outline: 1px solid rgba(138, 180, 248, 0.32);
+  outline-offset: 8px;
+  border-radius: 8px;
+}
+
+.compare-text-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.compare-page-section {
+  padding: 4px 0 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+}
+
+.compare-page-section.active {
+  background: rgba(138, 180, 248, 0.08);
+  border-radius: 8px;
+  padding: 12px;
+  margin: -8px;
+}
+
+.compare-page-section:focus-visible {
+  outline: 1px solid rgba(138, 180, 248, 0.52);
+  outline-offset: 4px;
+  border-radius: 8px;
+}
+
 .markdown-panel {
   white-space: normal;
   line-height: 1.55;
@@ -1504,6 +1583,25 @@ textarea.dark-input:focus {
   font-size: 1.02em;
 }
 
+.markdown-panel .katex-display {
+  text-align: left;
+  margin: 0 0 10px;
+}
+
+.markdown-panel .katex-display > .katex {
+  text-align: left;
+}
+
+@media (max-width: 1100px) {
+  .pdf-reading-layout.compare {
+    grid-template-columns: 1fr;
+  }
+
+  .pdf-source-panel {
+    min-height: 50vh;
+  }
+}
+
 .alert {
   padding: 14px 16px;
   border-radius: 8px;
@@ -1541,6 +1639,22 @@ textarea.dark-input:focus {
   padding: 40px 20px;
   text-align: center;
   color: var(--text-muted);
+}
+
+.app-error-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+}
+
+.app-error-card {
+  width: min(640px, 100%);
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--bg-elevated);
 }
 
 .pagination {

@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Navigate, RouterProvider, createBrowserRouter } from 'react-router-dom'
 
+import { AppErrorPage } from './AppErrorPage'
 import { AppShell } from './AppShell'
 import { AuthPage } from './features/auth/AuthPage'
 import { FilesPage } from './features/files/FilesPage'
@@ -15,14 +16,17 @@ const router = createBrowserRouter([
   {
     path: '/auth/login',
     element: <AuthPage mode="login" />,
+    errorElement: <AppErrorPage />,
   },
   {
     path: '/auth/join',
     element: <AuthPage mode="signup" />,
+    errorElement: <AppErrorPage />,
   },
   {
     path: '/',
     element: <AppShell />,
+    errorElement: <AppErrorPage />,
     children: [
       { path: '/', element: <Navigate replace to="/files/home" /> },
       { path: '/files/home', element: <FilesPage key="files-home" viewMode="home" /> },
@@ -37,6 +41,7 @@ const router = createBrowserRouter([
   {
     path: '*',
     element: <Navigate replace to="/files/home" />,
+    errorElement: <AppErrorPage />,
   },
 ])
 

@@ -1,4 +1,4 @@
-import type { JobDetailResponse } from './types'
+import type { DocumentResponse, JobDetailResponse } from './types'
 
 type JobActionResponse = {
   job_id: string
@@ -123,4 +123,21 @@ export async function rerefineJob(jobId: string) {
     throw new Error(message)
   }
   return (await response.json()) as JobActionResponse
+}
+
+export async function fetchDocumentJSON(url: string, signal?: AbortSignal): Promise<DocumentResponse> {
+  const response = await fetch(url, {
+    headers: {
+      Accept: 'application/json',
+    },
+    signal,
+  })
+  if (response.status === 401) {
+    window.location.href = '/auth/login'
+    throw new Error('인증이 필요합니다.')
+  }
+  if (!response.ok) {
+    throw new Error(`Failed to load document json (${response.status})`)
+  }
+  return (await response.json()) as DocumentResponse
 }

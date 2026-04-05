@@ -32,6 +32,12 @@
                 "text": {
                   "type": "string"
                 },
+                "math_inline": {
+                  "type": "string"
+                },
+                "math_block": {
+                  "type": "string"
+                },
                 "img": {
                   "type": "object",
                   "properties": {
