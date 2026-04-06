@@ -106,7 +106,7 @@ func (r *Runtime) RefineTranscript(rawText, description string) (string, error) 
 	clientCount := len(r.clients)
 	r.mu.Unlock()
 	if clientCount == 0 {
-		return "", errors.New("Gemini API is not configured")
+		return "", errors.New("gemini api is not configured")
 	}
 
 	prompt := ""
@@ -416,7 +416,7 @@ func (r *Runtime) ExtractDocumentChunk(ctx context.Context, chunk worker.Documen
 	clientCount := len(r.clients)
 	r.mu.Unlock()
 	if clientCount == 0 {
-		return nil, errors.New("Gemini API is not configured")
+		return nil, errors.New("gemini api is not configured")
 	}
 
 	systemPrompt, err := r.documentSystemPrompt()

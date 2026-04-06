@@ -6,8 +6,6 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v4"
-
-	"whisperserver/src/internal/routes"
 	"whisperserver/src/internal/service"
 )
 
@@ -31,7 +29,7 @@ func (h UploadHandlers) PostHTML() echo.HandlerFunc {
 		}
 		u, ok := h.CurrentUser(c)
 		if !ok || u == nil {
-			return c.Redirect(http.StatusSeeOther, routes.Login)
+			return c.Redirect(http.StatusSeeOther, loginPath)
 		}
 
 		fileHeader, err := c.FormFile("file")
@@ -40,20 +38,20 @@ func (h UploadHandlers) PostHTML() echo.HandlerFunc {
 		}
 
 		jobID, _, err := h.Svc.Create(service.UploadCreateRequest{
-			OwnerID:          u.ID,
-			DisplayName:      c.FormValue("display_name"),
-			Description:      c.FormValue("description"),
-			ClientUploadID:   c.FormValue("client_upload_id"),
-			FolderID:         h.normalizeFolderID(c.FormValue("folder_id")),
-			RefineRequested:  h.truthy(c.FormValue("refine")),
-			SelectedTags:     h.parseSelectedTags(c),
-			SingleTag:        c.FormValue("tag"),
-			FileHeader:       fileHeader,
+			OwnerID:         u.ID,
+			DisplayName:     c.FormValue("display_name"),
+			Description:     c.FormValue("description"),
+			ClientUploadID:  c.FormValue("client_upload_id"),
+			FolderID:        h.normalizeFolderID(c.FormValue("folder_id")),
+			RefineRequested: h.truthy(c.FormValue("refine")),
+			SelectedTags:    h.parseSelectedTags(c),
+			SingleTag:       c.FormValue("tag"),
+			FileHeader:      fileHeader,
 		})
 		if err != nil {
 			return h.toEchoError(err)
 		}
-		return c.Redirect(http.StatusSeeOther, routes.Job(jobID))
+		return c.Redirect(http.StatusSeeOther, jobPath(jobID))
 	}
 }
 
@@ -74,15 +72,15 @@ func (h UploadHandlers) PostJSON() echo.HandlerFunc {
 		}
 
 		jobID, filename, err := h.Svc.Create(service.UploadCreateRequest{
-			OwnerID:          u.ID,
-			DisplayName:      c.FormValue("display_name"),
-			Description:      c.FormValue("description"),
-			ClientUploadID:   c.FormValue("client_upload_id"),
-			FolderID:         h.normalizeFolderID(c.FormValue("folder_id")),
-			RefineRequested:  h.truthy(c.FormValue("refine")),
-			SelectedTags:     h.parseSelectedTags(c),
-			SingleTag:        c.FormValue("tag"),
-			FileHeader:       fileHeader,
+			OwnerID:         u.ID,
+			DisplayName:     c.FormValue("display_name"),
+			Description:     c.FormValue("description"),
+			ClientUploadID:  c.FormValue("client_upload_id"),
+			FolderID:        h.normalizeFolderID(c.FormValue("folder_id")),
+			RefineRequested: h.truthy(c.FormValue("refine")),
+			SelectedTags:    h.parseSelectedTags(c),
+			SingleTag:       c.FormValue("tag"),
+			FileHeader:      fileHeader,
 		})
 		if err != nil {
 			return h.toEchoError(err)
@@ -92,7 +90,7 @@ func (h UploadHandlers) PostJSON() echo.HandlerFunc {
 		return c.JSON(http.StatusOK, map[string]string{
 			"job_id":           jobID,
 			"filename":         filename,
-			"job_url":          routes.Job(jobID),
+			"job_url":          jobPath(jobID),
 			"client_upload_id": clientUploadID,
 		})
 	}
@@ -127,4 +125,3 @@ func (h UploadHandlers) toEchoError(err error) error {
 	}
 	return echo.NewHTTPError(http.StatusInternalServerError, "업로드 처리 실패")
 }
-

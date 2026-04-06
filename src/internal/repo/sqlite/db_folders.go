@@ -1,30 +1,12 @@
-package store
+package sqlite
 
 import (
 	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
-	"whisperserver/src/internal/model"
+	model "whisperserver/src/internal/domain"
 )
-
-func DeleteFoldersByOwner(ownerID string, folderIDs []string) error {
-	if dbConn == nil {
-		return fmt.Errorf("db is not initialized")
-	}
-	if len(folderIDs) == 0 {
-		return nil
-	}
-	for _, id := range folderIDs {
-		if strings.TrimSpace(id) == "" {
-			continue
-		}
-		if _, err := dbConn.Exec(`DELETE FROM folders WHERE owner_id = ? AND id = ?`, ownerID, id); err != nil {
-			return err
-		}
-	}
-	return nil
-}
 
 func DeleteTrashedFoldersByOwner(ownerID string) error {
 	if dbConn == nil {

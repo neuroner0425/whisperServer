@@ -1,11 +1,11 @@
-package store
+package sqlite
 
 import (
 	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
-	"whisperserver/src/internal/model"
+	model "whisperserver/src/internal/domain"
 )
 
 func CreateUser(loginID, email, passwordHash string) error {

@@ -9,20 +9,20 @@ import (
 	"strings"
 	"time"
 
-	"whisperserver/src/internal/model"
+	model "whisperserver/src/internal/domain"
 )
 
 type UploadCreateRequest struct {
 	OwnerID string
 
 	// Form fields
-	DisplayName    string
-	Description    string
-	ClientUploadID string
-	FolderID       string
+	DisplayName     string
+	Description     string
+	ClientUploadID  string
+	FolderID        string
 	RefineRequested bool
-	SelectedTags   []string
-	SingleTag      string
+	SelectedTags    []string
+	SingleTag       string
 
 	FileHeader *multipart.FileHeader
 }
@@ -34,9 +34,9 @@ type UploadServiceDeps struct {
 	SortedExts     func() []string
 
 	// Tag/Folder validation + side effects
-	ListTagNamesByOwner      func(string) (map[string]struct{}, error)
-	GetFolderByID            func(ownerID, folderID string) (*model.Folder, error)
-	TouchFolderAndAncestors  func(ownerID, folderID string) error
+	ListTagNamesByOwner     func(string) (map[string]struct{}, error)
+	GetFolderByID           func(ownerID, folderID string) (*model.Folder, error)
+	TouchFolderAndAncestors func(ownerID, folderID string) error
 
 	// IO
 	SaveUploadWithLimit func(*multipart.FileHeader, string, int64, int64) (int64, error)
@@ -379,4 +379,3 @@ func (s *UploadService) finalizeUploadedPDF(jobID, tempPath string) {
 		d.Logf("[UPLOAD] queued pdf job_id=%s", jobID)
 	}
 }
-

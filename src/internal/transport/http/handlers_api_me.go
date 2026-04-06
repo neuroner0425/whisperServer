@@ -47,4 +47,3 @@ func displayName(u User) string {
 	}
 	return u.Email
 }
-

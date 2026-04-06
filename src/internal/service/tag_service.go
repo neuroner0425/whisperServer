@@ -4,14 +4,14 @@ import (
 	"net/http"
 	"strings"
 
-	"whisperserver/src/internal/model"
+	model "whisperserver/src/internal/domain"
 )
 
 type TagServiceDeps struct {
-	ListTagsByOwner      func(ownerID string) ([]model.Tag, error)
-	UpsertTag            func(ownerID, name, desc string) error
-	DeleteTag            func(ownerID, name string) error
-	ListTagNamesByOwner  func(ownerID string) (map[string]struct{}, error)
+	ListTagsByOwner     func(ownerID string) ([]model.Tag, error)
+	UpsertTag           func(ownerID, name, desc string) error
+	DeleteTag           func(ownerID, name string) error
+	ListTagNamesByOwner func(ownerID string) (map[string]struct{}, error)
 }
 
 type TagService struct {
@@ -91,4 +91,3 @@ func (s *TagService) ValidateOwnedTags(ownerID string, tags []string) ([]string,
 	}
 	return validated, nil
 }
-

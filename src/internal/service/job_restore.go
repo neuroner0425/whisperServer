@@ -1,6 +1,6 @@
 package service
 
-import "whisperserver/src/internal/model"
+import model "whisperserver/src/internal/domain"
 
 // ResumeRestoredJob best-effort resumes work for a restored job based on which blobs exist.
 func ResumeRestoredJob(

@@ -3,8 +3,6 @@ package httptransport
 import (
 	"net/url"
 	"strings"
-
-	"whisperserver/src/internal/routes"
 )
 
 // SafeReturnPath ensures we only redirect to a same-origin path.
@@ -12,18 +10,17 @@ import (
 func SafeReturnPath(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || strings.ContainsAny(raw, "\r\n") {
-		return routes.FilesHome
+		return filesHomePath
 	}
 	u, err := url.Parse(raw)
 	if err != nil || u.IsAbs() || u.Host != "" {
-		return routes.FilesHome
+		return filesHomePath
 	}
 	if !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") {
-		return routes.FilesHome
+		return filesHomePath
 	}
 	if u.Path == "" {
-		u.Path = routes.FilesHome
+		u.Path = filesHomePath
 	}
 	return u.RequestURI()
 }
-

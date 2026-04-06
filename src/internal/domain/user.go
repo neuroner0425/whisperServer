@@ -1,4 +1,4 @@
-package model
+package domain
 
 type UserRecord struct {
 	ID           string

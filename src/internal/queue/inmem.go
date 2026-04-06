@@ -57,4 +57,3 @@ func (q *Inmem) Close() {
 		q.mu.Unlock()
 	})
 }
-

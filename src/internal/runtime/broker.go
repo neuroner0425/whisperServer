@@ -1,4 +1,4 @@
-package events
+package runtime
 
 import (
 	"encoding/json"
@@ -69,4 +69,3 @@ func (b *Broker) Notify(userID, eventType string, payload map[string]any) {
 		}
 	}
 }
-

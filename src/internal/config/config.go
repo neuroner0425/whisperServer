@@ -20,24 +20,24 @@ type Config struct {
 
 	Port string
 
-	MaxUploadSizeMB      int
-	UploadRateLimitKBPS  int
-	JobTimeoutSec        int
-	SplitTaskQueues      bool
-	GeminiModel          string
-	GeminiAPIKeys        []string
-	JWTSecret            []byte
-	JWTIssuer            string
-	JWTExpiryHours       int
-	AuthCookieSecure     bool
-	PDFMaxPages          int
-	PDFMaxPagesPerReq    int
-	PDFRenderDPI         int
-	PDFBatchTimeoutSec   int
-	PDFMaxImageBytes     int64
-	PDFContextMaxChars   int
-	PDFToolPDFInfo       string
-	PDFToolPDFToPPM      string
+	MaxUploadSizeMB     int
+	UploadRateLimitKBPS int
+	JobTimeoutSec       int
+	SplitTaskQueues     bool
+	GeminiModel         string
+	GeminiAPIKeys       []string
+	JWTSecret           []byte
+	JWTIssuer           string
+	JWTExpiryHours      int
+	AuthCookieSecure    bool
+	PDFMaxPages         int
+	PDFMaxPagesPerReq   int
+	PDFRenderDPI        int
+	PDFBatchTimeoutSec  int
+	PDFMaxImageBytes    int64
+	PDFContextMaxChars  int
+	PDFToolPDFInfo      string
+	PDFToolPDFToPPM     string
 }
 
 type rawValues map[string][]string
@@ -301,4 +301,3 @@ func (v rawValues) list(key string) []string {
 	}
 	return out
 }
-

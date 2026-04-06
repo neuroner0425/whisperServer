@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"testing"
 
-	"whisperserver/src/internal/model"
+	model "whisperserver/src/internal/domain"
 )
 
 func TestFolderService_Require_NotFound(t *testing.T) {

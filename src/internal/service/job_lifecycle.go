@@ -4,17 +4,17 @@ import (
 	"strings"
 	"time"
 
-	"whisperserver/src/internal/store"
+	store "whisperserver/src/internal/repo/sqlite"
 )
 
 type JobLifecycleDeps struct {
-	Now            func() time.Time
-	CancelJob      func(string)
-	RemoveTempWav  func(string)
-	SetJobFields   func(string, map[string]any)
-	DeleteJobBlob  func(string, string)
+	Now              func() time.Time
+	CancelJob        func(string)
+	RemoveTempWav    func(string)
+	SetJobFields     func(string, map[string]any)
+	DeleteJobBlob    func(string, string)
 	ListJobBlobKinds func(string) ([]string, error)
-	Notify         func(userID, eventType string, payload map[string]any)
+	Notify           func(userID, eventType string, payload map[string]any)
 
 	// Status names are still user-visible strings in the current codebase.
 	StatusPending string

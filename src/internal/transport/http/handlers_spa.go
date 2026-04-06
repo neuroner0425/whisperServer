@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 	"os"
-	"strings"
 
 	"github.com/labstack/echo/v4"
 )
@@ -47,8 +46,10 @@ func RedirectFilesToHomeHandler(c echo.Context) error {
 func RedirectJobsToRootHandler(c echo.Context) error {
 	return c.Redirect(http.StatusMovedPermanently, "/files/home")
 }
-func SPAUploadPageHandler(c echo.Context) error { return c.Redirect(http.StatusSeeOther, "/files/root") }
-func SPATagsPageHandler(c echo.Context) error   { return c.Redirect(http.StatusSeeOther, "/files/home") }
+func SPAUploadPageHandler(c echo.Context) error {
+	return c.Redirect(http.StatusSeeOther, "/files/root")
+}
+func SPATagsPageHandler(c echo.Context) error { return c.Redirect(http.StatusSeeOther, "/files/home") }
 
 func SPAJobPageHandler(c echo.Context) error {
 	target := "/file/" + c.Param("job_id")
@@ -76,8 +77,12 @@ func LegacyFilesPageRedirectHandler(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, target)
 }
 
-func LegacyTrashRedirectHandler(c echo.Context) error { return c.Redirect(http.StatusSeeOther, "/files/trash") }
-func LegacyTagsRedirectHandler(c echo.Context) error  { return c.Redirect(http.StatusSeeOther, "/files/home") }
+func LegacyTrashRedirectHandler(c echo.Context) error {
+	return c.Redirect(http.StatusSeeOther, "/files/trash")
+}
+func LegacyTagsRedirectHandler(c echo.Context) error {
+	return c.Redirect(http.StatusSeeOther, "/files/home")
+}
 
 func SPAFilesPageHandler(spaIndex echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error { return spaIndex(c) }
@@ -86,19 +91,3 @@ func SPAFilesPageHandler(spaIndex echo.HandlerFunc) echo.HandlerFunc {
 func SPATrashPageHandler(spaIndex echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error { return spaIndex(c) }
 }
-
-// Kept for parity with previous behavior.
-func LegacyFilesRedirectAliasHandler(c echo.Context) error {
-	// Old /files/home, /files/root, /files/folders/:folder_id are already served as SPA routes.
-	// This exists only as a name placeholder if we need it later.
-	return c.Redirect(http.StatusSeeOther, "/files/home")
-}
-
-func CleanPathQuery(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || strings.ContainsAny(raw, "\r\n") {
-		return ""
-	}
-	return raw
-}
-

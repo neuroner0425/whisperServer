@@ -25,4 +25,3 @@ func toEchoHTTPError(err error, fallbackStatus int, fallbackMessage string) erro
 	}
 	return echo.NewHTTPError(fallbackStatus, fallbackMessage)
 }
-

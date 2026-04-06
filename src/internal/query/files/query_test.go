@@ -3,7 +3,7 @@ package files
 import (
 	"testing"
 
-	"whisperserver/src/internal/model"
+	model "whisperserver/src/internal/domain"
 )
 
 func TestBuildJobRowsForUserFiltersAndMapsFolder(t *testing.T) {
@@ -14,7 +14,12 @@ func TestBuildJobRowsForUserFiltersAndMapsFolder(t *testing.T) {
 				"j2": {OwnerID: "u1", Filename: "Other.mp3", FileType: "mp3", FolderID: "f2", UploadedAt: "1", UploadedTS: 5},
 			}
 		},
-		UploadedTS: func(id string) float64 { if id == "j1" { return 10 }; return 5 },
+		UploadedTS: func(id string) float64 {
+			if id == "j1" {
+				return 10
+			}
+			return 5
+		},
 		ListAllFoldersByOwner: func(userID string, trashed bool) ([]model.Folder, error) {
 			return []model.Folder{{ID: "f1", Name: "Folder A"}, {ID: "f2", Name: "Folder B"}}, nil
 		},

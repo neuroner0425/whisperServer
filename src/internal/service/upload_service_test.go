@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"whisperserver/src/internal/model"
+	model "whisperserver/src/internal/domain"
 )
 
 func TestUploadService_Create_AudioHappyPath(t *testing.T) {
@@ -28,8 +28,8 @@ func TestUploadService_Create_AudioHappyPath(t *testing.T) {
 		AllowedFile:    func(string) bool { return true },
 		SortedExts:     func() []string { return []string{".mp3"} },
 
-		ListTagNamesByOwner: func(string) (map[string]struct{}, error) { return map[string]struct{}{}, nil },
-		GetFolderByID:       func(string, string) (*model.Folder, error) { return &model.Folder{}, nil },
+		ListTagNamesByOwner:     func(string) (map[string]struct{}, error) { return map[string]struct{}{}, nil },
+		GetFolderByID:           func(string, string) (*model.Folder, error) { return &model.Folder{}, nil },
 		TouchFolderAndAncestors: func(string, string) error { return nil },
 
 		SaveUploadWithLimit: func(_ *multipart.FileHeader, dst string, _ int64, _ int64) (int64, error) {
@@ -57,7 +57,7 @@ func TestUploadService_Create_AudioHappyPath(t *testing.T) {
 			addedJobID = id
 			addedJob = j
 		},
-		SetJobFields: func(string, map[string]any) { setFieldsCalls++ },
+		SetJobFields:      func(string, map[string]any) { setFieldsCalls++ },
 		EnqueueTranscribe: func(id string) { enqueuedID = id },
 
 		TmpFolder:           tmp,
@@ -144,8 +144,8 @@ func TestUploadService_Create_PDFHappyPath(t *testing.T) {
 		BlobKindAudioAAC:    "aac",
 		BlobKindPDFOriginal: "pdf",
 
-		AddJob: func(string, *model.Job) {},
-		SetJobFields: func(string, map[string]any) {},
+		AddJob:            func(string, *model.Job) {},
+		SetJobFields:      func(string, map[string]any) {},
 		EnqueuePDFExtract: func(id string) { enqueuedID = id },
 
 		TmpFolder:           tmp,

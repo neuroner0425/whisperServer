@@ -1,10 +1,10 @@
-package store
+package sqlite
 
 import (
 	"database/sql"
 	"fmt"
 
-	"whisperserver/src/internal/model"
+	model "whisperserver/src/internal/domain"
 )
 
 func LoadJobs() (map[string]*model.Job, error) {

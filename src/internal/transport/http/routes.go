@@ -17,80 +17,80 @@ type Handlers struct {
 	LogoutPost echo.HandlerFunc
 
 	// SPA / redirects
-	RootRedirect                 echo.HandlerFunc
-	RedirectFilesToHome          echo.HandlerFunc
-	RedirectJobsToRoot           echo.HandlerFunc
-	LegacyFilesPageRedirect      echo.HandlerFunc
-	LegacyTrashRedirect          echo.HandlerFunc
-	LegacyTagsRedirect           echo.HandlerFunc
-	SPAIndex                     echo.HandlerFunc
-	SPAFilesPage                 echo.HandlerFunc
-	SPATagsPage                  echo.HandlerFunc
-	SPATrashPage                 echo.HandlerFunc
-	SPAUploadPage                echo.HandlerFunc
-	SPAJobPage                   echo.HandlerFunc
-	SPALoginPage                 echo.HandlerFunc
-	SPASignupPage                echo.HandlerFunc
+	RootRedirect            echo.HandlerFunc
+	RedirectFilesToHome     echo.HandlerFunc
+	RedirectJobsToRoot      echo.HandlerFunc
+	LegacyFilesPageRedirect echo.HandlerFunc
+	LegacyTrashRedirect     echo.HandlerFunc
+	LegacyTagsRedirect      echo.HandlerFunc
+	SPAIndex                echo.HandlerFunc
+	SPAFilesPage            echo.HandlerFunc
+	SPATagsPage             echo.HandlerFunc
+	SPATrashPage            echo.HandlerFunc
+	SPAUploadPage           echo.HandlerFunc
+	SPAJobPage              echo.HandlerFunc
+	SPALoginPage            echo.HandlerFunc
+	SPASignupPage           echo.HandlerFunc
 
 	// Upload / jobs pages / status / downloads
-	UploadPostHTML           echo.HandlerFunc
-	JobsUpdates              echo.HandlerFunc
-	Status                   echo.HandlerFunc
-	Download                 echo.HandlerFunc
-	DownloadRefined          echo.HandlerFunc
-	DownloadDocumentJSON     echo.HandlerFunc
-	BatchDownload            echo.HandlerFunc
-	BatchDelete              echo.HandlerFunc
-	BatchMove                echo.HandlerFunc
-	CreateTagHTML            echo.HandlerFunc
-	DeleteTagHTML            echo.HandlerFunc
-	CreateFolderHTML         echo.HandlerFunc
-	TrashFolderHTML          echo.HandlerFunc
-	RestoreFolderHTML        echo.HandlerFunc
-	RenameFolderHTML         echo.HandlerFunc
-	MoveFolderHTML           echo.HandlerFunc
-	TrashJobHTML             echo.HandlerFunc
-	RestoreJobHTML           echo.HandlerFunc
-	RenameJobHTML            echo.HandlerFunc
-	UpdateJobTagsHTML        echo.HandlerFunc
-	RefineRetryHTML          echo.HandlerFunc
+	UploadPostHTML       echo.HandlerFunc
+	JobsUpdates          echo.HandlerFunc
+	Status               echo.HandlerFunc
+	Download             echo.HandlerFunc
+	DownloadRefined      echo.HandlerFunc
+	DownloadDocumentJSON echo.HandlerFunc
+	BatchDownload        echo.HandlerFunc
+	BatchDelete          echo.HandlerFunc
+	BatchMove            echo.HandlerFunc
+	CreateTagHTML        echo.HandlerFunc
+	DeleteTagHTML        echo.HandlerFunc
+	CreateFolderHTML     echo.HandlerFunc
+	TrashFolderHTML      echo.HandlerFunc
+	RestoreFolderHTML    echo.HandlerFunc
+	RenameFolderHTML     echo.HandlerFunc
+	MoveFolderHTML       echo.HandlerFunc
+	TrashJobHTML         echo.HandlerFunc
+	RestoreJobHTML       echo.HandlerFunc
+	RenameJobHTML        echo.HandlerFunc
+	UpdateJobTagsHTML    echo.HandlerFunc
+	RefineRetryHTML      echo.HandlerFunc
 
 	// Infra
-	Healthz  echo.HandlerFunc
-	Metrics  echo.HandlerFunc
+	Healthz echo.HandlerFunc
+	Metrics echo.HandlerFunc
 
 	// API
-	APIMe                  echo.HandlerFunc
-	APIEvents              echo.HandlerFunc
-	APIAuthSignup          echo.HandlerFunc
-	APIAuthLogin           echo.HandlerFunc
-	APIAuthLogout          echo.HandlerFunc
-	APIFiles               echo.HandlerFunc
-	APIStorage             echo.HandlerFunc
-	APIJobDetail           echo.HandlerFunc
-	APIJobAudio            echo.HandlerFunc
-	APIJobPDF              echo.HandlerFunc
-	APIRetryJob            echo.HandlerFunc
-	APIRetranscribeJob     echo.HandlerFunc
-	APIRefineJob           echo.HandlerFunc
-	APIRerefineJob         echo.HandlerFunc
-	APITagsList            echo.HandlerFunc
-	APITagsCreate          echo.HandlerFunc
-	APITagsDelete          echo.HandlerFunc
-	APIUpdateJobTags       echo.HandlerFunc
-	APITrashList           echo.HandlerFunc
-	APITrashClear          echo.HandlerFunc
-	APITrashJobsDelete     echo.HandlerFunc
-	APIRestoreJob          echo.HandlerFunc
-	APIRestoreFolder       echo.HandlerFunc
-	APIBatchMove           echo.HandlerFunc
-	APIDownloadFolder      echo.HandlerFunc
-	APIUpload              echo.HandlerFunc
-	APICreateFolder        echo.HandlerFunc
-	APIRenameFolder        echo.HandlerFunc
-	APITrashFolder         echo.HandlerFunc
-	APIRenameJob           echo.HandlerFunc
-	APITrashJob            echo.HandlerFunc
+	APIMe              echo.HandlerFunc
+	APIEvents          echo.HandlerFunc
+	APIAuthSignup      echo.HandlerFunc
+	APIAuthLogin       echo.HandlerFunc
+	APIAuthLogout      echo.HandlerFunc
+	APIFiles           echo.HandlerFunc
+	APIStorage         echo.HandlerFunc
+	APIJobDetail       echo.HandlerFunc
+	APIJobAudio        echo.HandlerFunc
+	APIJobPDF          echo.HandlerFunc
+	APIRetryJob        echo.HandlerFunc
+	APIRetranscribeJob echo.HandlerFunc
+	APIRefineJob       echo.HandlerFunc
+	APIRerefineJob     echo.HandlerFunc
+	APITagsList        echo.HandlerFunc
+	APITagsCreate      echo.HandlerFunc
+	APITagsDelete      echo.HandlerFunc
+	APIUpdateJobTags   echo.HandlerFunc
+	APITrashList       echo.HandlerFunc
+	APITrashClear      echo.HandlerFunc
+	APITrashJobsDelete echo.HandlerFunc
+	APIRestoreJob      echo.HandlerFunc
+	APIRestoreFolder   echo.HandlerFunc
+	APIBatchMove       echo.HandlerFunc
+	APIDownloadFolder  echo.HandlerFunc
+	APIUpload          echo.HandlerFunc
+	APICreateFolder    echo.HandlerFunc
+	APIRenameFolder    echo.HandlerFunc
+	APITrashFolder     echo.HandlerFunc
+	APIRenameJob       echo.HandlerFunc
+	APITrashJob        echo.HandlerFunc
 }
 
 func RegisterRoutes(e *echo.Echo, cfg Config, h Handlers) {
@@ -189,4 +189,3 @@ func RegisterRoutes(e *echo.Echo, cfg Config, h Handlers) {
 	e.GET("/app", h.SPAIndex)
 	e.GET("/app/*", h.SPAIndex)
 }
-

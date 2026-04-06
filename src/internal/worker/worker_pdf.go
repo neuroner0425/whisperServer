@@ -33,9 +33,9 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 		"progress_percent":     0,
 		"phase":                "PDF 준비 중",
 		"processed_page_count": 0,
-			"current_chunk":        0,
-			"resume_available":     false,
-		})
+		"current_chunk":        0,
+		"resume_available":     false,
+	})
 	if w.deps.BlobSvc == nil {
 		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
 		w.deps.IncJobsTotal("failure")
@@ -127,14 +127,14 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 	}
 
 	chunkResults := make([][]byte, 0, totalChunks)
-		if resumeState.LastCompletedChunk > 0 {
-			for i := 1; i <= resumeState.LastCompletedChunk; i++ {
-				b, loadErr := w.deps.BlobSvc.Load(jobID, pdfChunkJSONKind(i))
-				if loadErr != nil {
-					return loadErr
-				}
-				chunkResults = append(chunkResults, b)
+	if resumeState.LastCompletedChunk > 0 {
+		for i := 1; i <= resumeState.LastCompletedChunk; i++ {
+			b, loadErr := w.deps.BlobSvc.Load(jobID, pdfChunkJSONKind(i))
+			if loadErr != nil {
+				return loadErr
 			}
+			chunkResults = append(chunkResults, b)
+		}
 		w.deps.SetJobFields(jobID, map[string]any{
 			"processed_page_count": processedPagesForChunk(resumeState.LastCompletedChunk, len(imagePaths), w.cfg.PDFMaxPagesPerRequest),
 			"current_chunk":        resumeState.LastCompletedChunk,
@@ -214,18 +214,18 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 			return extractErr
 		}
 
-			if err := w.deps.BlobSvc.Save(jobID, pdfChunkJSONKind(idx+1), result); err != nil {
-				return err
-			}
-			if err := w.deps.BlobSvc.Save(jobID, pdfChunkContextKind(idx+1), []byte(contextText)); err != nil {
-				return err
-			}
-			chunkResults = append(chunkResults, result)
-			if err := w.savePDFChunkIndex(jobID, pdfChunkIndex{
-				MaxPagesPerRequest: w.cfg.PDFMaxPagesPerRequest,
-				TotalChunks:        totalChunks,
-				PageCount:          len(imagePaths),
-				LastCompletedChunk: idx + 1,
+		if err := w.deps.BlobSvc.Save(jobID, pdfChunkJSONKind(idx+1), result); err != nil {
+			return err
+		}
+		if err := w.deps.BlobSvc.Save(jobID, pdfChunkContextKind(idx+1), []byte(contextText)); err != nil {
+			return err
+		}
+		chunkResults = append(chunkResults, result)
+		if err := w.savePDFChunkIndex(jobID, pdfChunkIndex{
+			MaxPagesPerRequest: w.cfg.PDFMaxPagesPerRequest,
+			TotalChunks:        totalChunks,
+			PageCount:          len(imagePaths),
+			LastCompletedChunk: idx + 1,
 			UpdatedAtUnix:      time.Now().Unix(),
 		}); err != nil {
 			return err
@@ -254,23 +254,23 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 		"progress_percent": 97,
 	})
 	markdown, err := w.deps.RenderDocumentMarkdown(mergedJSON)
-		if err != nil {
-			w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_detail": "Markdown 생성 실패"})
-			w.deps.IncJobsTotal("failure")
-			return err
-		}
+	if err != nil {
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_detail": "Markdown 생성 실패"})
+		w.deps.IncJobsTotal("failure")
+		return err
+	}
 
-		if err := w.deps.BlobSvc.SaveDocumentJSON(jobID, mergedJSON); err != nil {
-			w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
-			w.deps.IncJobsTotal("failure")
-			return err
-		}
-		if err := w.deps.BlobSvc.SaveDocumentMarkdown(jobID, []byte(markdown)); err != nil {
-			w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
-			w.deps.IncJobsTotal("failure")
-			return err
-		}
-		w.deps.BlobSvc.DeletePreview(jobID)
+	if err := w.deps.BlobSvc.SaveDocumentJSON(jobID, mergedJSON); err != nil {
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+		w.deps.IncJobsTotal("failure")
+		return err
+	}
+	if err := w.deps.BlobSvc.SaveDocumentMarkdown(jobID, []byte(markdown)); err != nil {
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+		w.deps.IncJobsTotal("failure")
+		return err
+	}
+	w.deps.BlobSvc.DeletePreview(jobID)
 
 	completed := time.Now()
 	w.deps.IncJobsTotal("success")

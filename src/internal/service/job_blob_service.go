@@ -3,21 +3,21 @@ package service
 import "net/http"
 
 type JobBlobServiceDeps struct {
-	HasJobBlob  func(jobID, kind string) bool
-	LoadJobBlob func(jobID, kind string) ([]byte, error)
-	SaveJobBlob func(jobID, kind string, b []byte) error
-	DeleteJobBlob func(jobID, kind string)
+	HasJobBlob       func(jobID, kind string) bool
+	LoadJobBlob      func(jobID, kind string) ([]byte, error)
+	SaveJobBlob      func(jobID, kind string, b []byte) error
+	DeleteJobBlob    func(jobID, kind string)
 	ListJobBlobKinds func(jobID string) ([]string, error)
 
-	BlobKindAudioAAC         string
-	BlobKindPreview          string
-	BlobKindPDFOriginal      string
-	BlobKindDocumentJSON     string
-	BlobKindDocumentMarkdown string
+	BlobKindAudioAAC           string
+	BlobKindPreview            string
+	BlobKindPDFOriginal        string
+	BlobKindDocumentJSON       string
+	BlobKindDocumentMarkdown   string
 	BlobKindDocumentChunkIndex string
-	BlobKindTranscript       string
-	BlobKindTranscriptJSON   string
-	BlobKindRefined          string
+	BlobKindTranscript         string
+	BlobKindTranscriptJSON     string
+	BlobKindRefined            string
 }
 
 type JobBlobService struct {
@@ -63,10 +63,6 @@ func (s *JobBlobService) ListKinds(jobID string) ([]string, error) {
 	return s.d.ListJobBlobKinds(jobID)
 }
 
-func (s *JobBlobService) PreviewKind() string {
-	return s.d.BlobKindPreview
-}
-
 func (s *JobBlobService) DocumentChunkIndexKind() string {
 	return s.d.BlobKindDocumentChunkIndex
 }
@@ -97,10 +93,6 @@ func (s *JobBlobService) HasDocumentMarkdown(jobID string) bool {
 
 func (s *JobBlobService) LoadDocumentMarkdown(jobID string) ([]byte, error) {
 	return s.Load(jobID, s.d.BlobKindDocumentMarkdown)
-}
-
-func (s *JobBlobService) HasDocumentJSON(jobID string) bool {
-	return s.Has(jobID, s.d.BlobKindDocumentJSON)
 }
 
 func (s *JobBlobService) LoadDocumentJSON(jobID string) ([]byte, error) {

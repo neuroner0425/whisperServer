@@ -52,4 +52,3 @@ func (p *ProcessingLog) Errf(scope string, err error, format string, args ...any
 	}
 	p.Logf("[ERROR] %s: %s | cause=%v", scope, fmt.Sprintf(format, args...), err)
 }
-

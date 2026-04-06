@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"whisperserver/src/internal/model"
+	model "whisperserver/src/internal/domain"
 )
 
 type FolderServiceDeps struct {
