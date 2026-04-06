@@ -10,6 +10,7 @@ import (
 	"whisperserver/src/internal/service"
 )
 
+// JobMutationHandlers serves rename and trash actions for a single job.
 type JobMutationHandlers struct {
 	CurrentUserOrUnauthorized func(echo.Context) (*User, bool)
 	FolderSvc                 *service.FolderService
@@ -19,6 +20,7 @@ type JobMutationHandlers struct {
 	Errf                      func(scope string, err error, format string, args ...any)
 }
 
+// Rename updates the display filename shown to the user.
 func (h JobMutationHandlers) Rename() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil || h.GetJob == nil || h.SetJobFields == nil {
@@ -52,6 +54,7 @@ func (h JobMutationHandlers) Rename() echo.HandlerFunc {
 	}
 }
 
+// Trash moves the job into the trash view without deleting artifacts.
 func (h JobMutationHandlers) Trash() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil || h.FolderSvc == nil || h.GetJob == nil || h.MarkJobTrashed == nil {

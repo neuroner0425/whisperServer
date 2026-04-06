@@ -8,6 +8,7 @@ import (
 	model "whisperserver/src/internal/domain"
 )
 
+// DeleteTrashedFoldersByOwner permanently removes trashed folders for one user.
 func DeleteTrashedFoldersByOwner(ownerID string) error {
 	if dbConn == nil {
 		return fmt.Errorf("db is not initialized")
@@ -16,6 +17,7 @@ func DeleteTrashedFoldersByOwner(ownerID string) error {
 	return err
 }
 
+// CreateFolder inserts a new folder row and returns its generated ID.
 func CreateFolder(ownerID, name, parentID string) (string, error) {
 	if dbConn == nil {
 		return "", fmt.Errorf("db is not initialized")
@@ -31,6 +33,7 @@ func CreateFolder(ownerID, name, parentID string) (string, error) {
 	return id, err
 }
 
+// ListFoldersByParent lists direct child folders under the requested parent.
 func ListFoldersByParent(ownerID, parentID string, trashed bool) ([]model.Folder, error) {
 	if dbConn == nil {
 		return nil, fmt.Errorf("db is not initialized")
@@ -62,6 +65,7 @@ func ListFoldersByParent(ownerID, parentID string, trashed bool) ([]model.Folder
 	return out, rows.Err()
 }
 
+// ListAllFoldersByOwner lists every folder owned by a user with a shared trash filter.
 func ListAllFoldersByOwner(ownerID string, trashed bool) ([]model.Folder, error) {
 	if dbConn == nil {
 		return nil, fmt.Errorf("db is not initialized")
@@ -90,6 +94,7 @@ func ListAllFoldersByOwner(ownerID string, trashed bool) ([]model.Folder, error)
 	return out, rows.Err()
 }
 
+// GetFolderByID loads one folder row for the given owner.
 func GetFolderByID(ownerID, folderID string) (*model.Folder, error) {
 	if dbConn == nil {
 		return nil, fmt.Errorf("db is not initialized")
@@ -108,6 +113,7 @@ func GetFolderByID(ownerID, folderID string) (*model.Folder, error) {
 	return &f, nil
 }
 
+// SetFolderTrashed toggles trash state for a folder and all of its descendants.
 func SetFolderTrashed(ownerID, folderID string, trashed bool) error {
 	if dbConn == nil {
 		return fmt.Errorf("db is not initialized")
@@ -127,6 +133,7 @@ func SetFolderTrashed(ownerID, folderID string, trashed bool) error {
 	return err
 }
 
+// ListFolderPath walks parent links to build a breadcrumb path.
 func ListFolderPath(ownerID, folderID string) ([]model.Folder, error) {
 	if strings.TrimSpace(folderID) == "" {
 		return nil, nil
@@ -144,6 +151,7 @@ func ListFolderPath(ownerID, folderID string) ([]model.Folder, error) {
 	return path, nil
 }
 
+// RenameFolder updates a folder name and refreshes its timestamp.
 func RenameFolder(ownerID, folderID, newName string) error {
 	if dbConn == nil {
 		return fmt.Errorf("db is not initialized")
@@ -156,6 +164,7 @@ func RenameFolder(ownerID, folderID, newName string) error {
 	return err
 }
 
+// MoveFolder changes the parent folder for an existing folder row.
 func MoveFolder(ownerID, folderID, parentID string) error {
 	if dbConn == nil {
 		return fmt.Errorf("db is not initialized")
@@ -171,6 +180,7 @@ func MoveFolder(ownerID, folderID, parentID string) error {
 	return err
 }
 
+// TouchFolderAndAncestors refreshes timestamps up the folder ancestry chain.
 func TouchFolderAndAncestors(ownerID, folderID string) error {
 	if dbConn == nil {
 		return fmt.Errorf("db is not initialized")
@@ -197,6 +207,7 @@ func TouchFolderAndAncestors(ownerID, folderID string) error {
 	return err
 }
 
+// IsFolderDescendant reports whether one folder exists inside another folder subtree.
 func IsFolderDescendant(ownerID, folderID, maybeDescendantID string) (bool, error) {
 	if dbConn == nil {
 		return false, fmt.Errorf("db is not initialized")

@@ -12,6 +12,7 @@ import (
 	"whisperserver/src/internal/service"
 )
 
+// JobDetailHandlers serves detail payloads and binary assets for a single job.
 type JobDetailHandlers struct {
 	CurrentUserOrUnauthorized func(echo.Context) (*User, bool)
 	CurrentUserName           func(echo.Context) string
@@ -26,6 +27,7 @@ type JobDetailHandlers struct {
 	StatusRefining        string
 }
 
+// DetailJSON returns the job detail model used by the SPA detail screen.
 func (h JobDetailHandlers) DetailJSON() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		disableCache(c)
@@ -43,6 +45,7 @@ func (h JobDetailHandlers) DetailJSON() echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusNotFound, "작업을 찾을 수 없습니다.")
 		}
 
+		// Start with metadata that is always available for the detail page.
 		payload := map[string]any{
 			"job_id":               jobID,
 			"current_user_name":    h.CurrentUserName(c),
@@ -66,6 +69,7 @@ func (h JobDetailHandlers) DetailJSON() echo.HandlerFunc {
 			payload["audio_url"] = "/api/jobs/" + jobID + "/audio"
 		}
 
+		// Expand completed jobs into their final view payload.
 		if job.Status == h.StatusCompleted {
 			if job.FileType == "pdf" {
 				if h.BlobSvc.HasDocumentMarkdown(jobID) {
@@ -111,6 +115,7 @@ func (h JobDetailHandlers) DetailJSON() echo.HandlerFunc {
 			return c.JSON(http.StatusOK, payload)
 		}
 
+		// Refining jobs expose the original transcript as a preview source.
 		if (job.Status == h.StatusRefiningPending || job.Status == h.StatusRefining) && h.BlobSvc.HasTranscript(jobID) {
 			if b, err := h.BlobSvc.LoadTranscript(jobID); err == nil {
 				payload["view"] = "preview"
@@ -122,6 +127,7 @@ func (h JobDetailHandlers) DetailJSON() echo.HandlerFunc {
 	}
 }
 
+// Audio streams the generated AAC file for the requested job.
 func (h JobDetailHandlers) Audio() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil || h.GetJob == nil || h.BlobSvc == nil {
@@ -151,6 +157,7 @@ func (h JobDetailHandlers) Audio() echo.HandlerFunc {
 	}
 }
 
+// PDF streams the original uploaded PDF for the requested job.
 func (h JobDetailHandlers) PDF() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil || h.GetJob == nil || h.BlobSvc == nil {

@@ -1,3 +1,4 @@
+// job_restore.go contains best-effort restore rules for bringing trashed jobs back.
 package service
 
 import model "whisperserver/src/internal/domain"

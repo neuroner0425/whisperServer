@@ -11,6 +11,7 @@ import (
 	intutil "whisperserver/src/internal/util"
 )
 
+// Query builds file-browser row models from runtime snapshots and repository data.
 type Query struct {
 	JobsSnapshot           func() map[string]*model.Job
 	UploadedTS             func(string) float64
@@ -20,6 +21,7 @@ type Query struct {
 	Errf                   func(string, error, string, ...any)
 }
 
+// BuildJobRowsForUser returns folder-scoped job rows for the files browser.
 func (q Query) BuildJobRowsForUser(userID, term, tag, folderID string, trashed bool) []httptransport.JobRow {
 	qNorm := norm.NFC.String(strings.ToLower(term))
 	tag = strings.TrimSpace(tag)
@@ -31,6 +33,7 @@ func (q Query) BuildJobRowsForUser(userID, term, tag, folderID string, trashed b
 		folderMap[f.ID] = f.Name
 	}
 
+	// Combine in-memory job state with persisted blob usage and folder metadata.
 	snapshot := q.JobsSnapshot()
 	sizeMap, _ := q.JobBlobUsageMapByOwner(userID)
 	rows := make([]httptransport.JobRow, 0, len(snapshot))
@@ -82,6 +85,7 @@ func (q Query) BuildJobRowsForUser(userID, term, tag, folderID string, trashed b
 	return rows
 }
 
+// BuildFolderRowsForUser returns child folders for the current folder view.
 func (q Query) BuildFolderRowsForUser(userID, folderID, term string) []httptransport.FolderRow {
 	folderID = strings.TrimSpace(folderID)
 	folders, err := q.ListFoldersByParent(userID, folderID, false)
@@ -102,6 +106,7 @@ func (q Query) BuildFolderRowsForUser(userID, folderID, term string) []httptrans
 	return out
 }
 
+// BuildRecentJobRowsForUser returns recent jobs across every folder.
 func (q Query) BuildRecentJobRowsForUser(userID, term, tag string) []httptransport.JobRow {
 	qNorm := norm.NFC.String(strings.ToLower(strings.TrimSpace(term)))
 	tag = strings.TrimSpace(tag)
@@ -160,6 +165,7 @@ func (q Query) BuildRecentJobRowsForUser(userID, term, tag string) []httptranspo
 	return rows
 }
 
+// RecentFolderRowsForUser returns a small recent-folder set for the home view.
 func (q Query) RecentFolderRowsForUser(userID string) []httptransport.FolderRow {
 	allFolders, _ := q.ListAllFoldersByOwner(userID, false)
 	sort.Slice(allFolders, func(i, j int) bool { return allFolders[i].UpdatedAt > allFolders[j].UpdatedAt })
@@ -175,6 +181,7 @@ func (q Query) RecentFolderRowsForUser(userID string) []httptransport.FolderRow 
 	return out
 }
 
+// containsTag reports whether the exact tag exists in the slice.
 func containsTag(tags []string, target string) bool {
 	for _, t := range tags {
 		if t == target {
@@ -184,6 +191,7 @@ func containsTag(tags []string, target string) bool {
 	return false
 }
 
+// jobDisplayUpdatedAt chooses the most meaningful timestamp for list ordering and display.
 func jobDisplayUpdatedAt(job *model.Job) string {
 	if job == nil {
 		return ""
@@ -197,6 +205,7 @@ func jobDisplayUpdatedAt(job *model.Job) string {
 	return job.UploadedAt
 }
 
+// isJobTrashed guards nil jobs while checking trash state.
 func isJobTrashed(job *model.Job) bool {
 	return job != nil && job.IsTrashed
 }

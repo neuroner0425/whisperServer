@@ -1,3 +1,4 @@
+// upload_service.go owns upload validation, initial job creation, and post-upload handoff.
 package service
 
 import (
@@ -77,6 +78,7 @@ type UploadService struct {
 	d UploadServiceDeps
 }
 
+// NewUploadService builds the upload service and applies default helpers for time/spawn.
 func NewUploadService(d UploadServiceDeps) *UploadService {
 	if d.Now == nil {
 		d.Now = time.Now
@@ -87,9 +89,11 @@ func NewUploadService(d UploadServiceDeps) *UploadService {
 	return &UploadService{d: d}
 }
 
+// Create validates the upload, creates the initial job, and kicks off async finalization.
 func (s *UploadService) Create(req UploadCreateRequest) (jobID string, filename string, err error) {
 	d := s.d
 
+	// Basic request validation before any file IO starts.
 	if strings.TrimSpace(req.OwnerID) == "" {
 		return "", "", NewHTTPError(http.StatusBadRequest, "잘못된 요청입니다.")
 	}
@@ -97,6 +101,7 @@ func (s *UploadService) Create(req UploadCreateRequest) (jobID string, filename 
 		return "", "", NewHTTPError(http.StatusBadRequest, "파일을 선택하세요.")
 	}
 
+	// Validate the declared file type and the optional target folder/tag set.
 	originalFilename := req.FileHeader.Filename
 	if d.AllowedFile == nil || !d.AllowedFile(originalFilename) {
 		exts := []string{}
@@ -190,6 +195,7 @@ func (s *UploadService) Create(req UploadCreateRequest) (jobID string, filename 
 		d.UploadBytesAdd(float64(totalBytes))
 	}
 
+	// Create the initial pending job before the expensive conversion work starts.
 	now := d.Now()
 	job := &model.Job{
 		Status:               d.StatusPending,
@@ -225,6 +231,7 @@ func (s *UploadService) Create(req UploadCreateRequest) (jobID string, filename 
 		d.Logf("[UPLOAD] accepted job_id=%s filename=%s bytes=%d", jobID, displayName, totalBytes)
 	}
 
+	// Hand the heavy conversion work off to a background goroutine after the job exists.
 	if fileType == "pdf" {
 		d.Spawn(func() { s.finalizeUploadedPDF(jobID, tempPath) })
 	} else {
@@ -234,6 +241,7 @@ func (s *UploadService) Create(req UploadCreateRequest) (jobID string, filename 
 	return jobID, displayName, nil
 }
 
+// validateOwnedTags drops unknown tags for the owner before the job is created.
 func (s *UploadService) validateOwnedTags(ownerID string, tags []string) ([]string, error) {
 	d := s.d
 	if d.ListTagNamesByOwner == nil {
@@ -256,6 +264,7 @@ func (s *UploadService) validateOwnedTags(ownerID string, tags []string) ([]stri
 	return validated, nil
 }
 
+// formatSecondsPtr delegates duration formatting while tolerating a missing formatter.
 func (s *UploadService) formatSecondsPtr(v *int) string {
 	if s.d.FormatSecondsPtr == nil {
 		return ""

@@ -1,3 +1,4 @@
+// state_store.go owns the in-memory job snapshot and its derived-field maintenance.
 package runtime
 
 import (
@@ -31,6 +32,7 @@ type stateStore struct {
 	d    stateDeps
 }
 
+// newStateStore builds the in-memory state store with its persistence callbacks.
 func newStateStore(d stateDeps) *stateStore {
 	if d.Now == nil {
 		d.Now = time.Now
@@ -38,6 +40,7 @@ func newStateStore(d stateDeps) *stateStore {
 	return &stateStore{jobs: map[string]*model.Job{}, d: d}
 }
 
+// JobsSnapshot returns a cloned view of the current job map.
 func (s *stateStore) JobsSnapshot() map[string]*model.Job {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -48,6 +51,7 @@ func (s *stateStore) JobsSnapshot() map[string]*model.Job {
 	return out
 }
 
+// Load hydrates the in-memory snapshot from persistent storage.
 func (s *stateStore) Load() {
 	if s == nil || s.d.LoadJobs == nil {
 		return
@@ -67,6 +71,7 @@ func (s *stateStore) Load() {
 	s.mu.Unlock()
 }
 
+// AddJob inserts a new job, derives display fields, and emits a file-change notification.
 func (s *stateStore) AddJob(id string, job *model.Job) {
 	if s == nil {
 		return
@@ -81,6 +86,7 @@ func (s *stateStore) AddJob(id string, job *model.Job) {
 	}
 }
 
+// DeleteJobs removes jobs, cancels running work, and cleans related blobs/temp files.
 func (s *stateStore) DeleteJobs(ids []string) {
 	if s == nil {
 		return
@@ -112,6 +118,7 @@ func (s *stateStore) DeleteJobs(ids []string) {
 	}
 }
 
+// GetJob returns a cloned copy of a single job from the snapshot.
 func (s *stateStore) GetJob(id string) *model.Job {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -119,6 +126,7 @@ func (s *stateStore) GetJob(id string) *model.Job {
 	return job.Clone()
 }
 
+// SetJobFields applies a partial update map to an existing job.
 func (s *stateStore) SetJobFields(id string, fields map[string]any) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -133,6 +141,7 @@ func (s *stateStore) SetJobFields(id string, fields map[string]any) {
 	}
 }
 
+// AppendJobPreviewLine appends a line to the preview text while keeping it bounded.
 func (s *stateStore) AppendJobPreviewLine(id, line string) {
 	line = strings.TrimSpace(line)
 	if line == "" {
@@ -165,6 +174,7 @@ func (s *stateStore) AppendJobPreviewLine(id, line string) {
 	}
 }
 
+// ReplaceJobPreviewText overwrites the preview text in both memory and blob storage.
 func (s *stateStore) ReplaceJobPreviewText(id, text string) {
 	text = strings.TrimSpace(text)
 	s.mu.Lock()
@@ -181,6 +191,7 @@ func (s *stateStore) ReplaceJobPreviewText(id, text string) {
 	}
 }
 
+// UploadedTS returns the uploaded timestamp used by file queries and sorting.
 func (s *stateStore) UploadedTS(id string) float64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -191,6 +202,7 @@ func (s *stateStore) UploadedTS(id string) float64 {
 	return job.UploadedTS
 }
 
+// RemoveTagFromOwnerJobs removes a deleted tag from every job owned by the user.
 func (s *stateStore) RemoveTagFromOwnerJobs(ownerID, tagName string) {
 	if s == nil {
 		return
@@ -229,7 +241,7 @@ func (s *stateStore) RemoveTagFromOwnerJobs(ownerID, tagName string) {
 	}
 }
 
-// MarkSubtreeJobsTrashed mirrors the legacy behavior in app/runtime.go.
+// MarkSubtreeJobsTrashed mirrors folder-trash propagation into all descendant jobs.
 func (s *stateStore) MarkSubtreeJobsTrashed(ownerID string, folderSet map[string]struct{}, normalizeFolderID func(string) string) {
 	if s == nil || ownerID == "" || len(folderSet) == 0 {
 		return
@@ -260,6 +272,7 @@ func (s *stateStore) MarkSubtreeJobsTrashed(ownerID string, folderSet map[string
 	}
 }
 
+// saveLocked persists the current snapshot while the caller still holds the write lock.
 func (s *stateStore) saveLocked() {
 	if s == nil || s.d.SaveJobs == nil {
 		return
@@ -269,6 +282,7 @@ func (s *stateStore) saveLocked() {
 	}
 }
 
+// applyJobFields applies a partial field map while preserving derived fields afterward.
 func applyJobFields(job *model.Job, fields map[string]any) {
 	for k, v := range fields {
 		switch k {
@@ -346,6 +360,7 @@ func applyJobFields(job *model.Job, fields map[string]any) {
 	hydrateJobDerivedFields(job)
 }
 
+// parseJobTimestamp parses the timestamp formats still found in legacy update paths.
 func parseJobTimestamp(value string) float64 {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -360,6 +375,7 @@ func parseJobTimestamp(value string) float64 {
 	return 0
 }
 
+// hydrateJobDerivedFields refreshes derived status, timestamp, and duration display fields.
 func hydrateJobDerivedFields(job *model.Job) {
 	if job == nil {
 		return
@@ -380,6 +396,7 @@ func hydrateJobDerivedFields(job *model.Job) {
 	job.ProgressLabel = deriveJobProgressLabel(job)
 }
 
+// formatJobTimestamp formats unix timestamps into the legacy display format.
 func formatJobTimestamp(ts float64) string {
 	if ts <= 0 {
 		return ""
@@ -387,6 +404,7 @@ func formatJobTimestamp(ts float64) string {
 	return time.Unix(int64(ts), 0).Format("2006-01-02 15:04:05")
 }
 
+// formatDurationSeconds turns an optional second count into the UI duration string.
 func formatDurationSeconds(sec *int) string {
 	if sec == nil {
 		return ""
@@ -394,6 +412,7 @@ func formatDurationSeconds(sec *int) string {
 	return intutil.FormatSeconds(*sec)
 }
 
+// deriveJobDuration computes a wall-clock duration from start and completion timestamps.
 func deriveJobDuration(startedTS, completedTS float64) string {
 	if startedTS <= 0 || completedTS <= 0 || completedTS < startedTS {
 		return ""
@@ -401,6 +420,7 @@ func deriveJobDuration(startedTS, completedTS float64) string {
 	return intutil.FormatSeconds(int(completedTS - startedTS))
 }
 
+// deriveJobProgressLabel picks the most user-friendly progress label for the job.
 func deriveJobProgressLabel(job *model.Job) string {
 	if job == nil {
 		return ""
@@ -411,6 +431,7 @@ func deriveJobProgressLabel(job *model.Job) string {
 	return job.Status
 }
 
+// deriveJobPhase fills a fallback phase label from the job status code.
 func deriveJobPhase(statusCode int) string {
 	switch statusCode {
 	case model.JobStatusRunningCode:

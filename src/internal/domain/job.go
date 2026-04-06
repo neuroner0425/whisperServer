@@ -1,5 +1,6 @@
 package domain
 
+// Job is the aggregate runtime and persisted state for one uploaded item.
 type Job struct {
 	StatusCode           int      `json:"status_code,omitempty"`
 	Status               string   `json:"status,omitempty"`
@@ -37,6 +38,7 @@ type Job struct {
 	ResumeAvailable      bool     `json:"resume_available,omitempty"`
 }
 
+// Clone returns a deep-enough copy for safe in-memory snapshot use.
 func (j *Job) Clone() *Job {
 	if j == nil {
 		return nil
@@ -52,6 +54,7 @@ func (j *Job) Clone() *Job {
 	return &out
 }
 
+// IsRefined reports whether the job has a completed refined result.
 func (j *Job) IsRefined() bool {
 	return j != nil && j.ResultRefined != "" && j.Status == "완료"
 }

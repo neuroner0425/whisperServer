@@ -2,12 +2,12 @@ package httptransport
 
 import "github.com/labstack/echo/v4"
 
+// Config defines transport-level HTTP settings needed to register routes.
 type Config struct {
 	StaticDir string
 }
 
-// Handlers is a wiring-only struct.
-// The goal is to keep the route table in transport while implementations can move later.
+// Handlers collects concrete handler implementations for the shared route table.
 type Handlers struct {
 	// Auth (HTML)
 	LoginGet   echo.HandlerFunc
@@ -93,6 +93,7 @@ type Handlers struct {
 	APITrashJob        echo.HandlerFunc
 }
 
+// RegisterRoutes binds every public endpoint exposed by the backend.
 func RegisterRoutes(e *echo.Echo, cfg Config, h Handlers) {
 	e.Static("/static", cfg.StaticDir)
 

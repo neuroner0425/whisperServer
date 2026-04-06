@@ -7,12 +7,14 @@ import (
 	"path/filepath"
 )
 
+// ProcessingLog writes the long-lived processing log used for operational tracing.
 type ProcessingLog struct {
 	path string
 	file *os.File
 	log  *log.Logger
 }
 
+// NewProcessingLog opens the shared processing log file under the project root.
 func NewProcessingLog(projectRoot string) (*ProcessingLog, error) {
 	p := &ProcessingLog{
 		path: filepath.Join(projectRoot, "log", "processing.log"),
@@ -30,6 +32,7 @@ func NewProcessingLog(projectRoot string) (*ProcessingLog, error) {
 	return p, nil
 }
 
+// Close releases the log file handle.
 func (p *ProcessingLog) Close() {
 	if p == nil || p.file == nil {
 		return
@@ -38,6 +41,7 @@ func (p *ProcessingLog) Close() {
 	p.file = nil
 }
 
+// Logf writes one formatted log line.
 func (p *ProcessingLog) Logf(format string, args ...any) {
 	if p == nil || p.log == nil {
 		return
@@ -45,6 +49,7 @@ func (p *ProcessingLog) Logf(format string, args ...any) {
 	p.log.Printf(format, args...)
 }
 
+// Errf writes one formatted error log line with an optional cause.
 func (p *ProcessingLog) Errf(scope string, err error, format string, args ...any) {
 	if err == nil {
 		p.Logf("[ERROR] %s: %s", scope, fmt.Sprintf(format, args...))

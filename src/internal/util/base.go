@@ -8,6 +8,7 @@ import (
 	"strings"
 )
 
+// AsString normalizes arbitrary values into a printable string.
 func AsString(v any) string {
 	switch t := v.(type) {
 	case string:
@@ -21,6 +22,7 @@ func AsString(v any) string {
 	}
 }
 
+// AsInt normalizes common numeric representations into an int.
 func AsInt(v any) int {
 	switch t := v.(type) {
 	case int:
@@ -55,8 +57,10 @@ func AsInt(v any) int {
 	}
 }
 
+// jsonNumber is the subset of `encoding/json.Number` used by AsInt.
 type jsonNumber interface{ Int64() (int64, error) }
 
+// AsIntPtr returns nil for nil input and otherwise boxes the normalized integer.
 func AsIntPtr(v any) *int {
 	if v == nil {
 		return nil
@@ -65,6 +69,7 @@ func AsIntPtr(v any) *int {
 	return &i
 }
 
+// AsFloat normalizes common numeric representations into a float64.
 func AsFloat(v any) float64 {
 	switch t := v.(type) {
 	case float64:
@@ -81,6 +86,7 @@ func AsFloat(v any) float64 {
 	}
 }
 
+// AsBool normalizes common truthy values into a boolean.
 func AsBool(v any) bool {
 	switch t := v.(type) {
 	case bool:
@@ -98,6 +104,7 @@ func AsBool(v any) bool {
 	}
 }
 
+// Fallback returns the default when the input string is blank.
 func Fallback(s, d string) string {
 	if strings.TrimSpace(s) == "" {
 		return d
@@ -105,11 +112,13 @@ func Fallback(s, d string) string {
 	return s
 }
 
+// Truthy applies the shared HTML-style truthy rules used across the app.
 func Truthy(v string) bool {
 	s := strings.ToLower(strings.TrimSpace(v))
 	return s == "1" || s == "true" || s == "yes" || s == "on"
 }
 
+// AsStringSlice normalizes common slice payloads into trimmed strings.
 func AsStringSlice(v any) []string {
 	switch t := v.(type) {
 	case []string:
@@ -134,6 +143,7 @@ func AsStringSlice(v any) []string {
 	}
 }
 
+// UniqueStringsKeepOrder removes duplicates while preserving the original order.
 func UniqueStringsKeepOrder(in []string) []string {
 	seen := map[string]struct{}{}
 	out := make([]string, 0, len(in))
@@ -153,6 +163,7 @@ func UniqueStringsKeepOrder(in []string) []string {
 
 var tagNameRe = regexp.MustCompile(`^[\p{L}\p{N}_]+$`)
 
+// IsValidTagName enforces the tag naming rules used by the service layer.
 func IsValidTagName(name string) bool {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -164,11 +175,13 @@ func IsValidTagName(name string) bool {
 	return tagNameRe.MatchString(name)
 }
 
+// FileExists reports whether a filesystem path currently exists.
 func FileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
 
+// MustEnsureDirs creates required directories and panics on startup failures.
 func MustEnsureDirs(dirs ...string) {
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0o755); err != nil {

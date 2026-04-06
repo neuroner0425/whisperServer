@@ -9,6 +9,7 @@ import (
 	"whisperserver/src/internal/service"
 )
 
+// FolderMutationHandlers serves folder create, rename, and trash API calls.
 type FolderMutationHandlers struct {
 	CurrentUserOrUnauthorized func(echo.Context) (*User, bool)
 	NotifyFilesChanged        func(string)
@@ -20,6 +21,7 @@ type FolderMutationHandlers struct {
 	Errf func(scope string, err error, format string, args ...any)
 }
 
+// Create adds a new folder under the requested parent.
 func (h FolderMutationHandlers) Create() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil || h.NotifyFilesChanged == nil || h.FolderSvc == nil {
@@ -59,6 +61,7 @@ func (h FolderMutationHandlers) Create() echo.HandlerFunc {
 	}
 }
 
+// Rename changes a folder name while preserving its place in the tree.
 func (h FolderMutationHandlers) Rename() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil || h.NotifyFilesChanged == nil || h.FolderSvc == nil {
@@ -93,6 +96,7 @@ func (h FolderMutationHandlers) Rename() echo.HandlerFunc {
 	}
 }
 
+// Trash marks a folder subtree and its jobs as trashed.
 func (h FolderMutationHandlers) Trash() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil || h.NotifyFilesChanged == nil || h.CollectFolderSubtree == nil || h.MarkSubtreeJobsTrashed == nil || h.FolderSvc == nil {

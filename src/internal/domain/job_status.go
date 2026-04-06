@@ -1,5 +1,6 @@
 package domain
 
+// Canonical job status codes persisted in SQLite and reused across the app.
 const (
 	JobStatusPendingCode         = 10
 	JobStatusRunningCode         = 20
@@ -9,6 +10,7 @@ const (
 	JobStatusFailedCode          = 60
 )
 
+// JobStatusName converts a numeric code into the localized status label.
 func JobStatusName(code int) string {
 	switch code {
 	case JobStatusPendingCode:
@@ -28,6 +30,7 @@ func JobStatusName(code int) string {
 	}
 }
 
+// JobStatusCode converts a localized status label into its numeric code.
 func JobStatusCode(name string) int {
 	switch name {
 	case "작업 대기 중":

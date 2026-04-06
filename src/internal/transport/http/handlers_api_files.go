@@ -8,6 +8,7 @@ import (
 	"whisperserver/src/internal/service"
 )
 
+// FilesHandlers serves the file browser payload consumed by the frontend app.
 type FilesHandlers struct {
 	CurrentUserOrUnauthorized func(echo.Context) (*User, bool)
 	CurrentUserName           func(echo.Context) string
@@ -29,6 +30,7 @@ type FilesHandlers struct {
 	PDFMaxPagesPerReq int
 }
 
+// Handler returns the JSON endpoint for file, folder, and tag filtered listings.
 func (h FilesHandlers) Handler() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		disableCache(c)
@@ -70,6 +72,7 @@ func (h FilesHandlers) Handler() echo.HandlerFunc {
 			}
 		}
 
+		// Build the requested row set for the active view.
 		rows := h.BuildRecentJobRows(u.ID, q, tag)
 		folderItems := []FolderRow{}
 		if view == "explore" {
@@ -79,6 +82,7 @@ func (h FilesHandlers) Handler() echo.HandlerFunc {
 		} else if view == "home" {
 			folderItems = h.RecentFolderRows(u.ID)
 		}
+		// Apply ordering and page slicing before producing a versioned response.
 		h.SortJobRows(rows, sortBy, sortOrder)
 		pagedRows, page, totalPages := h.PaginateRows(rows, page, pageSize)
 		snapshotVersion := h.SnapshotVersion(pagedRows, folderItems, page, pageSize, totalPages, len(rows))
@@ -94,6 +98,7 @@ func (h FilesHandlers) Handler() echo.HandlerFunc {
 			})
 		}
 
+		// Expand surrounding metadata only when the snapshot has changed.
 		allFolders, _ := h.FolderSvc.ListAll(u.ID, false)
 		path, _ := h.FolderSvc.Path(u.ID, folderID)
 		tags, _ := h.TagSvc.List(u.ID)

@@ -10,6 +10,7 @@ import (
 	"whisperserver/src/internal/service"
 )
 
+// MoveHandlers moves jobs and folders between folders in a single request.
 type MoveHandlers struct {
 	CurrentUserOrUnauthorized func(echo.Context) (*User, bool)
 	FolderSvc                 *service.FolderService
@@ -19,6 +20,7 @@ type MoveHandlers struct {
 	Errf                      func(scope string, err error, format string, args ...any)
 }
 
+// BatchMove updates folder placement for the selected jobs and folders.
 func (h MoveHandlers) BatchMove() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil || h.FolderSvc == nil || h.GetJob == nil || h.SetJobFields == nil || h.NotifyFilesChanged == nil {
@@ -43,6 +45,7 @@ func (h MoveHandlers) BatchMove() echo.HandlerFunc {
 			}
 		}
 
+		// Track folders whose aggregate counters or timestamps need refreshing.
 		touchedFolders := map[string]struct{}{}
 		for _, id := range body.JobIDs {
 			job := h.GetJob(id)
@@ -57,6 +60,7 @@ func (h MoveHandlers) BatchMove() echo.HandlerFunc {
 			}
 		}
 
+		// Move folders after jobs so ancestor validation sees the original tree.
 		for _, id := range body.FolderIDs {
 			id = strings.TrimSpace(id)
 			if id == "" || id == targetFolder {

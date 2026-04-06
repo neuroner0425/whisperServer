@@ -1,3 +1,4 @@
+// worker_pdf.go contains the PDF extraction pipeline used by the background worker.
 package worker
 
 import (
@@ -22,7 +23,9 @@ type pdfChunkIndex struct {
 	UpdatedAtUnix      int64 `json:"updated_at_unix"`
 }
 
+// taskExtractPDF renders pages, extracts chunk JSON, merges the document, and saves final blobs.
 func (w *Worker) taskExtractPDF(jobID string) error {
+	// Mark the job as running and load the original PDF blob into a temp workspace.
 	w.deps.Logf("[PDF] start job_id=%s", jobID)
 	started := time.Now()
 	w.deps.SetJobFields(jobID, map[string]any{
@@ -76,6 +79,7 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 		"phase":            "PDF 페이지 변환 중",
 		"progress_percent": 5,
 	})
+	// Validate the page count and render each page into JPEG input for Gemini.
 	pageCount, err := w.deps.CountPDFPages(pdfPath)
 	if err != nil {
 		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_detail": "PDF 페이지 수 확인 실패"})
@@ -143,6 +147,7 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 	}
 
 	var totalRenderedBytes int64
+	// Process the PDF in chunks so large files can resume and respect API limits.
 	for idx := resumeState.LastCompletedChunk; idx < len(chunks); idx++ {
 		if updated := w.deps.GetJob(jobID); updated == nil || updated.IsTrashed {
 			return nil
@@ -237,6 +242,7 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 		})
 	}
 
+	// Merge chunk JSON and render the final markdown output.
 	w.deps.SetJobFields(jobID, map[string]any{
 		"phase":            "문서 병합 중",
 		"progress_percent": 92,

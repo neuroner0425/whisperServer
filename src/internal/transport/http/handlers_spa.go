@@ -8,6 +8,7 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// SPAHandlers serves the built frontend and keeps legacy URLs redirecting to SPA routes.
 type SPAHandlers struct {
 	SPAIndexPath string
 
@@ -15,6 +16,7 @@ type SPAHandlers struct {
 	CurrentUser func(echo.Context) error
 }
 
+// RootRedirectHandler chooses the default landing page based on auth state.
 func (h SPAHandlers) RootRedirectHandler() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUser != nil {
@@ -26,6 +28,7 @@ func (h SPAHandlers) RootRedirectHandler() echo.HandlerFunc {
 	}
 }
 
+// SPAIndexHandler serves the built frontend entrypoint for client-side routing.
 func (h SPAHandlers) SPAIndexHandler() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if _, err := os.Stat(h.SPAIndexPath); err != nil {
@@ -38,19 +41,31 @@ func (h SPAHandlers) SPAIndexHandler() echo.HandlerFunc {
 	}
 }
 
-func SPALoginPageHandler(c echo.Context) error  { return c.Redirect(http.StatusSeeOther, "/auth/login") }
+// SPALoginPageHandler redirects the legacy login route to the SPA route.
+func SPALoginPageHandler(c echo.Context) error { return c.Redirect(http.StatusSeeOther, "/auth/login") }
+
+// SPASignupPageHandler redirects the legacy signup route to the SPA route.
 func SPASignupPageHandler(c echo.Context) error { return c.Redirect(http.StatusSeeOther, "/auth/join") }
+
+// RedirectFilesToHomeHandler keeps the old files root pointing at the SPA home view.
 func RedirectFilesToHomeHandler(c echo.Context) error {
 	return c.Redirect(http.StatusMovedPermanently, "/files/home")
 }
+
+// RedirectJobsToRootHandler keeps the deprecated jobs page pointing at the files view.
 func RedirectJobsToRootHandler(c echo.Context) error {
 	return c.Redirect(http.StatusMovedPermanently, "/files/home")
 }
+
+// SPAUploadPageHandler collapses the old upload page into the files flow.
 func SPAUploadPageHandler(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, "/files/root")
 }
+
+// SPATagsPageHandler preserves the old tags page entrypoint.
 func SPATagsPageHandler(c echo.Context) error { return c.Redirect(http.StatusSeeOther, "/files/home") }
 
+// SPAJobPageHandler rewrites legacy job URLs into the SPA detail route.
 func SPAJobPageHandler(c echo.Context) error {
 	target := "/file/" + c.Param("job_id")
 	if raw := c.QueryString(); raw != "" {
@@ -59,6 +74,7 @@ func SPAJobPageHandler(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, target)
 }
 
+// LegacyFilesPageRedirectHandler maps legacy folder routes into current SPA routes.
 func LegacyFilesPageRedirectHandler(c echo.Context) error {
 	target := "/files/home"
 	switch c.Path() {
@@ -77,17 +93,22 @@ func LegacyFilesPageRedirectHandler(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, target)
 }
 
+// LegacyTrashRedirectHandler maps the old trash page route into the SPA route.
 func LegacyTrashRedirectHandler(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, "/files/trash")
 }
+
+// LegacyTagsRedirectHandler maps the old tags page route into the SPA route.
 func LegacyTagsRedirectHandler(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, "/files/home")
 }
 
+// SPAFilesPageHandler forwards files routes to the shared SPA entrypoint.
 func SPAFilesPageHandler(spaIndex echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error { return spaIndex(c) }
 }
 
+// SPATrashPageHandler forwards trash routes to the shared SPA entrypoint.
 func SPATrashPageHandler(spaIndex echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error { return spaIndex(c) }
 }

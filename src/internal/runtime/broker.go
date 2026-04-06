@@ -1,3 +1,4 @@
+// broker.go contains the in-memory per-user SSE pubsub used by a single process.
 package runtime
 
 import (
@@ -15,10 +16,12 @@ type Broker struct {
 	subscribers map[string]map[chan []byte]struct{}
 }
 
+// NewBroker creates an empty per-user broker.
 func NewBroker() *Broker {
 	return &Broker{subscribers: map[string]map[chan []byte]struct{}{}}
 }
 
+// Subscribe creates a buffered subscriber channel for the given user.
 func (b *Broker) Subscribe(userID string) chan []byte {
 	ch := make(chan []byte, 32)
 	b.mu.Lock()
@@ -30,6 +33,7 @@ func (b *Broker) Subscribe(userID string) chan []byte {
 	return ch
 }
 
+// Unsubscribe removes and closes a previously registered subscriber channel.
 func (b *Broker) Unsubscribe(userID string, ch chan []byte) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -42,6 +46,7 @@ func (b *Broker) Unsubscribe(userID string, ch chan []byte) {
 	close(ch)
 }
 
+// Notify fans an update event out to every subscriber for the user.
 func (b *Broker) Notify(userID, eventType string, payload map[string]any) {
 	if userID == "" {
 		return

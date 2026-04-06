@@ -10,10 +10,12 @@ import (
 	"whisperserver/src/internal/worker"
 )
 
+// normalize trims and bounds nested list depth in document responses.
 func (l *documentList) normalize() {
 	l.Items = normalizeListItems(l.Items, 1)
 }
 
+// normalizeListItems removes blank items and caps nesting depth for rendering.
 func normalizeListItems(items []documentListItem, depth int) []documentListItem {
 	out := make([]documentListItem, 0, len(items))
 	for _, item := range items {
@@ -31,6 +33,7 @@ func normalizeListItems(items []documentListItem, depth int) []documentListItem 
 	return out
 }
 
+// documentElement describes one structured unit extracted from a PDF page.
 type documentElement struct {
 	Header *struct {
 		Level int    `json:"level"`
@@ -52,20 +55,24 @@ type documentElement struct {
 	} `json:"table,omitempty"`
 }
 
+// documentPage groups extracted elements by source page.
 type documentPage struct {
 	PageIndex int               `json:"page_index"`
 	Elements  []documentElement `json:"elements"`
 }
 
+// documentResponse is the structured JSON schema returned by Gemini for PDFs.
 type documentResponse struct {
 	Pages []documentPage `json:"pages"`
 }
 
+// documentList represents a nested ordered or unordered list.
 type documentList struct {
 	Ordered bool               `json:"ordered,omitempty"`
 	Items   []documentListItem `json:"items"`
 }
 
+// documentListItem represents one list item and its optional children.
 type documentListItem struct {
 	Text     string             `json:"text"`
 	Children []documentListItem `json:"children,omitempty"`
@@ -230,6 +237,7 @@ const documentResponseSchemaJSON = `{
   ]
 }`
 
+// buildDocumentChunkPrompt describes the current PDF chunk and prior consistency hints.
 func buildDocumentChunkPrompt(chunk worker.DocumentChunk, consistencyContext string) string {
 	lines := []string{
 		"[Document Batch Info]",
@@ -253,6 +261,7 @@ func buildDocumentChunkPrompt(chunk worker.DocumentChunk, consistencyContext str
 	return strings.Join(lines, "\n")
 }
 
+// parseDocumentResponseSchema loads the JSON schema used for structured PDF extraction.
 func parseDocumentResponseSchema() (*genai.Schema, error) {
 	var schema genai.Schema
 	if err := json.Unmarshal([]byte(documentResponseSchemaJSON), &schema); err != nil {
@@ -261,6 +270,7 @@ func parseDocumentResponseSchema() (*genai.Schema, error) {
 	return &schema, nil
 }
 
+// normalizeDocumentResponseJSON trims Gemini output into a stable pretty-printed form.
 func normalizeDocumentResponseJSON(raw string) ([]byte, error) {
 	var parsed documentResponse
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
@@ -297,6 +307,7 @@ func normalizeDocumentResponseJSON(raw string) ([]byte, error) {
 	return json.MarshalIndent(parsed, "", "  ")
 }
 
+// alignDocumentPageIndexes rewrites page indexes to match the source chunk metadata.
 func alignDocumentPageIndexes(raw []byte, chunk worker.DocumentChunk) ([]byte, error) {
 	var parsed documentResponse
 	if err := json.Unmarshal(raw, &parsed); err != nil {
@@ -310,6 +321,7 @@ func alignDocumentPageIndexes(raw []byte, chunk worker.DocumentChunk) ([]byte, e
 	return json.MarshalIndent(parsed, "", "  ")
 }
 
+// buildConsistencyContext extracts stable headings and terms from previous chunks.
 func buildConsistencyContext(raw []byte, maxChars int) (string, error) {
 	var doc documentResponse
 	if err := json.Unmarshal(raw, &doc); err != nil {

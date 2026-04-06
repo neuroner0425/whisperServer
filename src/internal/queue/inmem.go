@@ -14,6 +14,7 @@ type Inmem struct {
 	closeOnce sync.Once
 }
 
+// NewInmem creates the default in-memory queue used by the current server process.
 func NewInmem(buffer int) *Inmem {
 	if buffer <= 0 {
 		buffer = 256
@@ -23,6 +24,7 @@ func NewInmem(buffer int) *Inmem {
 	}
 }
 
+// Enqueue appends a task unless the queue has already been closed.
 func (q *Inmem) Enqueue(t Task) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -33,6 +35,7 @@ func (q *Inmem) Enqueue(t Task) error {
 	return nil
 }
 
+// Dequeue blocks until a task is available, the queue is closed, or the context ends.
 func (q *Inmem) Dequeue(ctx context.Context) (Task, error) {
 	select {
 	case <-ctx.Done():
@@ -45,10 +48,12 @@ func (q *Inmem) Dequeue(ctx context.Context) (Task, error) {
 	}
 }
 
+// Len reports the buffered task count.
 func (q *Inmem) Len() int {
 	return len(q.ch)
 }
 
+// Close stops future enqueue operations and unblocks waiting consumers.
 func (q *Inmem) Close() {
 	q.closeOnce.Do(func() {
 		q.mu.Lock()
