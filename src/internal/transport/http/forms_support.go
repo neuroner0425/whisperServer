@@ -20,4 +20,3 @@ func ParseSelectedTags(c echo.Context, uniqueStrings func([]string) []string) []
 	}
 	return nil
 }
-

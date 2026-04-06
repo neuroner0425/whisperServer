@@ -11,8 +11,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"whisperserver/src/internal/model"
-	"whisperserver/src/internal/routes"
+	model "whisperserver/src/internal/domain"
 	"whisperserver/src/internal/service"
 )
 
@@ -242,14 +241,14 @@ func (h LegacyJobsHandlers) BatchDownload() echo.HandlerFunc {
 			if h.Errf != nil {
 				h.Errf("legacy.batchDownload.parseForm", err, "request parse failed")
 			}
-			return c.Redirect(http.StatusSeeOther, routes.FilesHome)
+			return c.Redirect(http.StatusSeeOther, filesHomePath)
 		}
 		ids := c.Request().PostForm["job_ids"]
 		if len(ids) == 0 {
 			if h.Logf != nil {
 				h.Logf("[BATCH_DOWNLOAD] skipped reason=no selection")
 			}
-			return c.Redirect(http.StatusSeeOther, routes.FilesHome)
+			return c.Redirect(http.StatusSeeOther, filesHomePath)
 		}
 
 		buf := bytes.NewBuffer(nil)
@@ -300,7 +299,7 @@ func (h LegacyJobsHandlers) BatchDownload() echo.HandlerFunc {
 			if h.Logf != nil {
 				h.Logf("[BATCH_DOWNLOAD] skipped reason=no downloadable results selected=%d", len(ids))
 			}
-			return c.Redirect(http.StatusSeeOther, routes.FilesHome)
+			return c.Redirect(http.StatusSeeOther, filesHomePath)
 		}
 		if h.Logf != nil {
 			h.Logf("[BATCH_DOWNLOAD] success selected=%d added=%d", len(ids), added)

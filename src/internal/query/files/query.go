@@ -6,18 +6,18 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
-	"whisperserver/src/internal/model"
+	model "whisperserver/src/internal/domain"
 	"whisperserver/src/internal/transport/http"
 	intutil "whisperserver/src/internal/util"
 )
 
 type Query struct {
-	JobsSnapshot         func() map[string]*model.Job
-	UploadedTS           func(string) float64
-	ListAllFoldersByOwner func(string, bool) ([]model.Folder, error)
+	JobsSnapshot           func() map[string]*model.Job
+	UploadedTS             func(string) float64
+	ListAllFoldersByOwner  func(string, bool) ([]model.Folder, error)
 	JobBlobUsageMapByOwner func(string) (map[string]int64, error)
-	ListFoldersByParent  func(string, string, bool) ([]model.Folder, error)
-	Errf                 func(string, error, string, ...any)
+	ListFoldersByParent    func(string, string, bool) ([]model.Folder, error)
+	Errf                   func(string, error, string, ...any)
 }
 
 func (q Query) BuildJobRowsForUser(userID, term, tag, folderID string, trashed bool) []httptransport.JobRow {

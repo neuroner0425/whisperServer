@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -38,16 +37,6 @@ func AllowedFile(name string, allowedExtensions map[string]struct{}) bool {
 	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), ".")
 	_, ok := allowedExtensions[ext]
 	return ok
-}
-
-func SecureFilename(name string, secureRe *regexp.Regexp) string {
-	base := filepath.Base(name)
-	base = strings.ReplaceAll(base, " ", "_")
-	base = secureRe.ReplaceAllString(base, "_")
-	if base == "" || base == "." || base == ".." {
-		return "file"
-	}
-	return base
 }
 
 func SaveUploadWithLimit(h *multipart.FileHeader, dst string, maxBytes int64, chunkSize int, bytesPerSec int64) (int64, error) {

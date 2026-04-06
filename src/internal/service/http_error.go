@@ -17,4 +17,3 @@ func (e *HTTPError) Error() string {
 func NewHTTPError(status int, message string) *HTTPError {
 	return &HTTPError{Status: status, Message: message}
 }
-

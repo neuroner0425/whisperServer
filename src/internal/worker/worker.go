@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"whisperserver/src/internal/model"
+	model "whisperserver/src/internal/domain"
 	intwhisper "whisperserver/src/internal/integrations/whisper"
 	"whisperserver/src/internal/queue"
 	"whisperserver/src/internal/service"
@@ -53,13 +53,13 @@ type DocumentChunk struct {
 }
 
 type Deps struct {
-	GetJob                  func(string) *model.Job
-	SetJobFields            func(string, map[string]any)
-	AppendJobPreviewLine    func(string, string)
-	ReplaceJobPreviewText   func(string, string)
-	BlobSvc                 *service.JobBlobService
-	ConvertToWav            func(string, string) error
-	WhisperRunner           interface {
+	GetJob                func(string) *model.Job
+	SetJobFields          func(string, map[string]any)
+	AppendJobPreviewLine  func(string, string)
+	ReplaceJobPreviewText func(string, string)
+	BlobSvc               *service.JobBlobService
+	ConvertToWav          func(string, string) error
+	WhisperRunner         interface {
 		RunFromBlob(context.Context, string, []byte, *int) (intwhisper.RunResult, error)
 	}
 	HasGeminiConfigured     func() bool
@@ -410,26 +410,26 @@ func (w *Worker) taskTranscribe(jobID string) error {
 		w.deps.Errf("transcribe.runWhisper", err, "job_id=%s", jobID)
 		_ = os.Remove(wavPath)
 		return err
-		}
-		if updated := w.deps.GetJob(jobID); updated == nil || updated.IsTrashed {
-			return nil
-		}
+	}
+	if updated := w.deps.GetJob(jobID); updated == nil || updated.IsTrashed {
+		return nil
+	}
 
-		if err := w.deps.BlobSvc.SaveTranscript(jobID, []byte(runResult.TimelineText)); err != nil {
+	if err := w.deps.BlobSvc.SaveTranscript(jobID, []byte(runResult.TimelineText)); err != nil {
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+		w.deps.IncJobsTotal("failure")
+		w.deps.Errf("transcribe.saveTranscriptBlob", err, "job_id=%s", jobID)
+		return err
+	}
+	if len(runResult.TranscriptJSON) > 0 {
+		if err := w.deps.BlobSvc.SaveTranscriptJSON(jobID, runResult.TranscriptJSON); err != nil {
 			w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
 			w.deps.IncJobsTotal("failure")
-			w.deps.Errf("transcribe.saveTranscriptBlob", err, "job_id=%s", jobID)
+			w.deps.Errf("transcribe.saveTranscriptJSONBlob", err, "job_id=%s", jobID)
 			return err
 		}
-		if len(runResult.TranscriptJSON) > 0 {
-			if err := w.deps.BlobSvc.SaveTranscriptJSON(jobID, runResult.TranscriptJSON); err != nil {
-				w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
-				w.deps.IncJobsTotal("failure")
-				w.deps.Errf("transcribe.saveTranscriptJSONBlob", err, "job_id=%s", jobID)
-				return err
-			}
-		}
-		w.deps.BlobSvc.DeletePreview(jobID)
+	}
+	w.deps.BlobSvc.DeletePreview(jobID)
 
 	completed := time.Now()
 	w.deps.IncJobsTotal("success")

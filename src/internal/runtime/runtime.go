@@ -3,33 +3,30 @@ package runtime
 import (
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
-	"whisperserver/src/internal/events"
-	"whisperserver/src/internal/model"
-	"whisperserver/src/internal/state"
+	model "whisperserver/src/internal/domain"
 	"whisperserver/src/internal/worker"
 )
 
 type Config struct {
-	TmpFolder            string
-	Now                  func() time.Time
-	LoadJobs             func() (map[string]*model.Job, error)
-	SaveJobs             func(map[string]*model.Job) error
-	DeleteJobBlobs       func(string)
-	SaveJobBlob          func(string, string, []byte) error
+	TmpFolder             string
+	Now                   func() time.Time
+	LoadJobs              func() (map[string]*model.Job, error)
+	SaveJobs              func(map[string]*model.Job) error
+	DeleteJobBlobs        func(string)
+	SaveJobBlob           func(string, string, []byte) error
 	ListAllFoldersByOwner func(string, bool) ([]model.Folder, error)
-	GetFolderByID        func(string, string) (*model.Folder, error)
-	SetFolderTrashed     func(string, string, bool) error
-	Notify               func(string, string, map[string]any)
-	Errf                 func(string, error, string, ...any)
+	GetFolderByID         func(string, string) (*model.Folder, error)
+	SetFolderTrashed      func(string, string, bool) error
+	Notify                func(string, string, map[string]any)
+	Errf                  func(string, error, string, ...any)
 }
 
 type Runtime struct {
-	state  *state.State
-	broker *events.Broker
+	state  *stateStore
+	broker *Broker
 	worker *worker.Worker
 
 	tmpFolder             string
@@ -39,7 +36,7 @@ type Runtime struct {
 }
 
 func New(cfg Config) *Runtime {
-	broker := events.NewBroker()
+	broker := NewBroker()
 	rt := &Runtime{
 		broker:                broker,
 		tmpFolder:             cfg.TmpFolder,
@@ -47,7 +44,7 @@ func New(cfg Config) *Runtime {
 		getFolderByID:         cfg.GetFolderByID,
 		setFolderTrashed:      cfg.SetFolderTrashed,
 	}
-	rt.state = state.New(state.Deps{
+	rt.state = newStateStore(stateDeps{
 		Now:            cfg.Now,
 		LoadJobs:       cfg.LoadJobs,
 		SaveJobs:       cfg.SaveJobs,
@@ -61,7 +58,7 @@ func New(cfg Config) *Runtime {
 	return rt
 }
 
-func (r *Runtime) Broker() *events.Broker { return r.broker }
+func (r *Runtime) Broker() *Broker { return r.broker }
 
 func (r *Runtime) SetWorker(w *worker.Worker) { r.worker = w }
 
@@ -179,36 +176,3 @@ func (r *Runtime) AppendJobPreviewLine(id, line string) { r.state.AppendJobPrevi
 func (r *Runtime) ReplaceJobPreviewText(id, text string) { r.state.ReplaceJobPreviewText(id, text) }
 
 func (r *Runtime) UploadedTS(id string) float64 { return r.state.UploadedTS(id) }
-
-var (
-	previewTimelineRe = regexp.MustCompile(`^\s*\[\d{2}:\d{2}:\d{2}(?:\.\d+)?\s*-->\s*\d{2}:\d{2}:\d{2}(?:\.\d+)?\]\s*`)
-	previewBracketRe  = regexp.MustCompile(`^\s*\[[^\]]+\]\s*`)
-)
-
-func SanitizePreviewLine(line string) string {
-	line = strings.TrimSpace(line)
-	if line == "" || line == `""` || line == `''` {
-		return ""
-	}
-	line = previewTimelineRe.ReplaceAllString(line, "")
-	line = previewBracketRe.ReplaceAllString(line, "")
-	line = strings.TrimSpace(line)
-	if line == "" || line == `""` || line == `''` {
-		return ""
-	}
-	return line
-}
-
-func SanitizePreviewText(text string) string {
-	if strings.TrimSpace(text) == "" {
-		return ""
-	}
-	lines := strings.Split(text, "\n")
-	out := make([]string, 0, len(lines))
-	for _, line := range lines {
-		if s := SanitizePreviewLine(line); s != "" {
-			out = append(out, s)
-		}
-	}
-	return strings.Join(out, "\n")
-}

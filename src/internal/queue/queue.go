@@ -26,4 +26,3 @@ type Queue interface {
 	Len() int
 	Close()
 }
-

@@ -67,4 +67,3 @@ func (h SSEHandlers) EventsHandler() echo.HandlerFunc {
 		}
 	}
 }
-

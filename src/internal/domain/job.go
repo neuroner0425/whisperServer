@@ -1,4 +1,4 @@
-package model
+package domain
 
 type Job struct {
 	StatusCode           int      `json:"status_code,omitempty"`

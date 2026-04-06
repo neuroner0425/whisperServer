@@ -36,9 +36,9 @@ type documentElement struct {
 		Level int    `json:"level"`
 		Text  string `json:"text"`
 	} `json:"header,omitempty"`
-	Text       string   `json:"text,omitempty"`
-	MathInline string   `json:"math_inline,omitempty"`
-	MathBlock  string   `json:"math_block,omitempty"`
+	Text       string        `json:"text,omitempty"`
+	MathInline string        `json:"math_inline,omitempty"`
+	MathBlock  string        `json:"math_block,omitempty"`
 	List       *documentList `json:"list,omitempty"`
 	Img        *struct {
 		Title       string `json:"title"`
@@ -67,8 +67,8 @@ type documentList struct {
 }
 
 type documentListItem struct {
-	Text     string               `json:"text"`
-	Children []documentListItem   `json:"children,omitempty"`
+	Text     string             `json:"text"`
+	Children []documentListItem `json:"children,omitempty"`
 }
 
 var (

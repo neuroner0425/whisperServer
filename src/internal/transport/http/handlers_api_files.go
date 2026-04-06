@@ -5,8 +5,6 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v4"
-
-	"whisperserver/src/internal/routes"
 	"whisperserver/src/internal/service"
 )
 
@@ -120,8 +118,8 @@ func (h FilesHandlers) Handler() echo.HandlerFunc {
 			"total_items":       len(rows),
 			"version":           snapshotVersion,
 			"links": map[string]string{
-				"legacy_root": routes.FilesRoot,
-				"legacy_home": routes.FilesHome,
+				"legacy_root": filesRootPath,
+				"legacy_home": filesHomePath,
 			},
 			"upload_limits": map[string]any{
 				"pdf_max_pages":             h.PDFMaxPages,

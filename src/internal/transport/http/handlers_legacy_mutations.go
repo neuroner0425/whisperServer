@@ -6,8 +6,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"whisperserver/src/internal/model"
-	"whisperserver/src/internal/routes"
+	model "whisperserver/src/internal/domain"
 	"whisperserver/src/internal/service"
 )
 
@@ -22,8 +21,8 @@ import (
 type LegacyMutationHandlers struct {
 	CurrentUser func(echo.Context) (*User, bool)
 
-	GetJob       func(string) *model.Job
-	SetJobFields func(string, map[string]any)
+	GetJob         func(string) *model.Job
+	SetJobFields   func(string, map[string]any)
 	MarkJobTrashed func(string)
 
 	FolderSvc *service.FolderService
@@ -54,13 +53,13 @@ func (h LegacyMutationHandlers) BatchDelete() echo.HandlerFunc {
 		}
 		u, ok := h.CurrentUser(c)
 		if !ok || u == nil {
-			return c.Redirect(http.StatusSeeOther, routes.Login)
+			return c.Redirect(http.StatusSeeOther, loginPath)
 		}
 		if err := c.Request().ParseForm(); err != nil {
 			if h.Errf != nil {
 				h.Errf("legacy.batchDelete.parseForm", err, "request parse failed")
 			}
-			return c.Redirect(http.StatusSeeOther, routes.FilesHome)
+			return c.Redirect(http.StatusSeeOther, filesHomePath)
 		}
 		jobIDs := c.Request().PostForm["job_ids"]
 		folderIDs := c.Request().PostForm["folder_ids"]
@@ -68,7 +67,7 @@ func (h LegacyMutationHandlers) BatchDelete() echo.HandlerFunc {
 			if h.Logf != nil {
 				h.Logf("[BATCH_DELETE] skipped reason=no selection")
 			}
-			return c.Redirect(http.StatusSeeOther, routes.FilesHome)
+			return c.Redirect(http.StatusSeeOther, filesHomePath)
 		}
 
 		touchedFolders := map[string]struct{}{}
@@ -110,7 +109,7 @@ func (h LegacyMutationHandlers) BatchDelete() echo.HandlerFunc {
 		if h.Logf != nil {
 			h.Logf("[BATCH_TRASH] success jobs=%d folders=%d subtree=%d", len(ownedJobs), len(folderIDs), len(subtree))
 		}
-		return c.Redirect(http.StatusSeeOther, routes.FilesHome)
+		return c.Redirect(http.StatusSeeOther, filesHomePath)
 	}
 }
 
@@ -121,10 +120,10 @@ func (h LegacyMutationHandlers) BatchMove() echo.HandlerFunc {
 		}
 		u, ok := h.CurrentUser(c)
 		if !ok || u == nil {
-			return c.Redirect(http.StatusSeeOther, routes.Login)
+			return c.Redirect(http.StatusSeeOther, loginPath)
 		}
 		if err := c.Request().ParseForm(); err != nil {
-			return c.Redirect(http.StatusSeeOther, routes.FilesHome)
+			return c.Redirect(http.StatusSeeOther, filesHomePath)
 		}
 		returnTo := SafeReturnPath(c.FormValue("return_to"))
 		targetFolder := strings.TrimSpace(c.FormValue("target_folder_id"))
@@ -196,16 +195,16 @@ func (h LegacyMutationHandlers) CreateTagHTML() echo.HandlerFunc {
 		}
 		u, ok := h.CurrentUser(c)
 		if !ok || u == nil {
-			return c.Redirect(http.StatusSeeOther, routes.Login)
+			return c.Redirect(http.StatusSeeOther, loginPath)
 		}
 		name := strings.TrimSpace(c.FormValue("tag_name"))
 		desc := strings.TrimSpace(c.FormValue("tag_description"))
 		next := strings.TrimSpace(c.FormValue("next"))
 		if next == "" {
-			next = routes.Tags
+			next = tagsPath
 		}
 		if !strings.HasPrefix(next, "/") {
-			next = routes.Upload
+			next = uploadPath
 		}
 		if err := h.TagSvc.Upsert(u.ID, name, desc, h.IsValidTagName); err != nil {
 			if h.Errf != nil {
@@ -227,11 +226,11 @@ func (h LegacyMutationHandlers) DeleteTagHTML() echo.HandlerFunc {
 		}
 		u, ok := h.CurrentUser(c)
 		if !ok || u == nil {
-			return c.Redirect(http.StatusSeeOther, routes.Login)
+			return c.Redirect(http.StatusSeeOther, loginPath)
 		}
 		name := strings.TrimSpace(c.FormValue("tag_name"))
 		if name == "" {
-			return c.Redirect(http.StatusSeeOther, routes.Tags)
+			return c.Redirect(http.StatusSeeOther, tagsPath)
 		}
 		if err := h.TagSvc.Delete(u.ID, name); err != nil {
 			if h.Errf != nil {
@@ -245,7 +244,7 @@ func (h LegacyMutationHandlers) DeleteTagHTML() echo.HandlerFunc {
 		if h.Logf != nil {
 			h.Logf("[TAG] delete owner_id=%s name=%s", u.ID, name)
 		}
-		return c.Redirect(http.StatusSeeOther, routes.Tags)
+		return c.Redirect(http.StatusSeeOther, tagsPath)
 	}
 }
 
@@ -256,7 +255,7 @@ func (h LegacyMutationHandlers) CreateFolderHTML() echo.HandlerFunc {
 		}
 		u, ok := h.CurrentUser(c)
 		if !ok || u == nil {
-			return c.Redirect(http.StatusSeeOther, routes.Login)
+			return c.Redirect(http.StatusSeeOther, loginPath)
 		}
 		name := strings.TrimSpace(c.FormValue("folder_name"))
 		parentID := strings.TrimSpace(c.FormValue("parent_id"))
@@ -279,9 +278,9 @@ func (h LegacyMutationHandlers) CreateFolderHTML() echo.HandlerFunc {
 			h.Errf("legacy.folder.createTouchParent", err, "owner_id=%s folder_id=%s parent_id=%s", u.ID, id, parentID)
 		}
 		if parentID == "" {
-			return c.Redirect(http.StatusSeeOther, routes.FilesRoot)
+			return c.Redirect(http.StatusSeeOther, filesRootPath)
 		}
-		return c.Redirect(http.StatusSeeOther, routes.FilesFolder(parentID))
+		return c.Redirect(http.StatusSeeOther, filesFolderPath(parentID))
 	}
 }
 
@@ -292,7 +291,7 @@ func (h LegacyMutationHandlers) RenameFolderHTML() echo.HandlerFunc {
 		}
 		u, ok := h.CurrentUser(c)
 		if !ok || u == nil {
-			return c.Redirect(http.StatusSeeOther, routes.Login)
+			return c.Redirect(http.StatusSeeOther, loginPath)
 		}
 		folderID := strings.TrimSpace(c.Param("folder_id"))
 		newName := strings.TrimSpace(c.FormValue("new_name"))
@@ -308,9 +307,9 @@ func (h LegacyMutationHandlers) RenameFolderHTML() echo.HandlerFunc {
 			parentID = strings.TrimSpace(f.ParentID)
 		}
 		if parentID == "" {
-			return c.Redirect(http.StatusSeeOther, routes.FilesRoot)
+			return c.Redirect(http.StatusSeeOther, filesRootPath)
 		}
-		return c.Redirect(http.StatusSeeOther, routes.FilesFolder(parentID))
+		return c.Redirect(http.StatusSeeOther, filesFolderPath(parentID))
 	}
 }
 
@@ -321,7 +320,7 @@ func (h LegacyMutationHandlers) MoveFolderHTML() echo.HandlerFunc {
 		}
 		u, ok := h.CurrentUser(c)
 		if !ok || u == nil {
-			return c.Redirect(http.StatusSeeOther, routes.Login)
+			return c.Redirect(http.StatusSeeOther, loginPath)
 		}
 		folderID := strings.TrimSpace(c.Param("folder_id"))
 		targetParent := strings.TrimSpace(c.FormValue("target_parent_id"))
@@ -362,9 +361,9 @@ func (h LegacyMutationHandlers) MoveFolderHTML() echo.HandlerFunc {
 			}
 		}
 		if targetParent == "" {
-			return c.Redirect(http.StatusSeeOther, routes.FilesRoot)
+			return c.Redirect(http.StatusSeeOther, filesRootPath)
 		}
-		return c.Redirect(http.StatusSeeOther, routes.FilesFolder(targetParent))
+		return c.Redirect(http.StatusSeeOther, filesFolderPath(targetParent))
 	}
 }
 
@@ -375,7 +374,7 @@ func (h LegacyMutationHandlers) TrashFolderHTML() echo.HandlerFunc {
 		}
 		u, ok := h.CurrentUser(c)
 		if !ok || u == nil {
-			return c.Redirect(http.StatusSeeOther, routes.Login)
+			return c.Redirect(http.StatusSeeOther, loginPath)
 		}
 		folderID := strings.TrimSpace(c.Param("folder_id"))
 		f, _ := h.FolderSvc.Require(u.ID, folderID, true, http.StatusBadRequest, "폴더 삭제 실패")
@@ -389,7 +388,7 @@ func (h LegacyMutationHandlers) TrashFolderHTML() echo.HandlerFunc {
 				h.Errf("legacy.folder.trashTouchParent", err, "owner_id=%s folder_id=%s parent_id=%s", u.ID, folderID, f.ParentID)
 			}
 		}
-		return c.Redirect(http.StatusSeeOther, routes.FilesHome)
+		return c.Redirect(http.StatusSeeOther, filesHomePath)
 	}
 }
 
@@ -400,7 +399,7 @@ func (h LegacyMutationHandlers) RestoreFolderHTML() echo.HandlerFunc {
 		}
 		u, ok := h.CurrentUser(c)
 		if !ok || u == nil {
-			return c.Redirect(http.StatusSeeOther, routes.Login)
+			return c.Redirect(http.StatusSeeOther, loginPath)
 		}
 		folderID := strings.TrimSpace(c.Param("folder_id"))
 		f, err := h.FolderSvc.Restore(u.ID, folderID)
@@ -412,7 +411,7 @@ func (h LegacyMutationHandlers) RestoreFolderHTML() echo.HandlerFunc {
 				h.Errf("legacy.folder.restoreTouchParent", err, "owner_id=%s folder_id=%s parent_id=%s", u.ID, folderID, f.ParentID)
 			}
 		}
-		return c.Redirect(http.StatusSeeOther, routes.Trash)
+		return c.Redirect(http.StatusSeeOther, trashPath)
 	}
 }
 
@@ -423,18 +422,18 @@ func (h LegacyMutationHandlers) TrashJobHTML() echo.HandlerFunc {
 		}
 		u, ok := h.CurrentUser(c)
 		if !ok || u == nil {
-			return c.Redirect(http.StatusSeeOther, routes.Login)
+			return c.Redirect(http.StatusSeeOther, loginPath)
 		}
 		jobID := strings.TrimSpace(c.Param("job_id"))
 		job := h.GetJob(jobID)
 		if job == nil || job.OwnerID != u.ID {
-			return c.Redirect(http.StatusSeeOther, routes.FilesHome)
+			return c.Redirect(http.StatusSeeOther, filesHomePath)
 		}
 		h.MarkJobTrashed(jobID)
 		if err := h.FolderSvc.TouchAncestors(u.ID, job.FolderID); err != nil && h.Errf != nil {
 			h.Errf("legacy.job.trashTouchFolder", err, "owner_id=%s job_id=%s folder_id=%s", u.ID, jobID, job.FolderID)
 		}
-		return c.Redirect(http.StatusSeeOther, routes.FilesHome)
+		return c.Redirect(http.StatusSeeOther, filesHomePath)
 	}
 }
 
@@ -445,12 +444,12 @@ func (h LegacyMutationHandlers) RestoreJobHTML() echo.HandlerFunc {
 		}
 		u, ok := h.CurrentUser(c)
 		if !ok || u == nil {
-			return c.Redirect(http.StatusSeeOther, routes.Login)
+			return c.Redirect(http.StatusSeeOther, loginPath)
 		}
 		jobID := strings.TrimSpace(c.Param("job_id"))
 		job := h.GetJob(jobID)
 		if job == nil || job.OwnerID != u.ID {
-			return c.Redirect(http.StatusSeeOther, routes.Trash)
+			return c.Redirect(http.StatusSeeOther, trashPath)
 		}
 		folderID := h.FolderSvc.EnsureRestored(u.ID, job.FolderID, h.Logf, h.Errf, "legacy.job.restore")
 		h.SetJobFields(jobID, map[string]any{"is_trashed": false, "deleted_at": "", "folder_id": folderID})
@@ -469,7 +468,7 @@ func (h LegacyMutationHandlers) RestoreJobHTML() echo.HandlerFunc {
 		if err := h.FolderSvc.TouchAncestors(u.ID, folderID); err != nil && h.Errf != nil {
 			h.Errf("legacy.job.restoreTouchFolder", err, "owner_id=%s job_id=%s folder_id=%s", u.ID, jobID, folderID)
 		}
-		return c.Redirect(http.StatusSeeOther, routes.Trash)
+		return c.Redirect(http.StatusSeeOther, trashPath)
 	}
 }
 
@@ -480,7 +479,7 @@ func (h LegacyMutationHandlers) RenameJobHTML() echo.HandlerFunc {
 		}
 		u, ok := h.CurrentUser(c)
 		if !ok || u == nil {
-			return c.Redirect(http.StatusSeeOther, routes.Login)
+			return c.Redirect(http.StatusSeeOther, loginPath)
 		}
 		jobID := strings.TrimSpace(c.Param("job_id"))
 		job := h.GetJob(jobID)
@@ -498,7 +497,7 @@ func (h LegacyMutationHandlers) RenameJobHTML() echo.HandlerFunc {
 		if h.Logf != nil {
 			h.Logf("[JOB] rename owner_id=%s job_id=%s new_name=%s", u.ID, jobID, nextName)
 		}
-		return c.Redirect(http.StatusSeeOther, routes.FilesHome)
+		return c.Redirect(http.StatusSeeOther, filesHomePath)
 	}
 }
 
@@ -509,7 +508,7 @@ func (h LegacyMutationHandlers) UpdateJobTagsHTML() echo.HandlerFunc {
 		}
 		u, ok := h.CurrentUser(c)
 		if !ok || u == nil {
-			return c.Redirect(http.StatusSeeOther, routes.Login)
+			return c.Redirect(http.StatusSeeOther, loginPath)
 		}
 		jobID := strings.TrimSpace(c.Param("job_id"))
 		job := h.GetJob(jobID)
@@ -529,7 +528,7 @@ func (h LegacyMutationHandlers) UpdateJobTagsHTML() echo.HandlerFunc {
 		if h.Logf != nil {
 			h.Logf("[TAG] job update job_id=%s owner_id=%s tags=%s", jobID, u.ID, strings.Join(validated, ","))
 		}
-		return c.Redirect(http.StatusSeeOther, routes.Job(jobID))
+		return c.Redirect(http.StatusSeeOther, jobPath(jobID))
 	}
 }
 
@@ -549,4 +548,3 @@ func uniqueStringsKeepOrder(v []string) []string {
 	}
 	return out
 }
-

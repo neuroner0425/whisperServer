@@ -52,4 +52,3 @@ func TestSPAIndexHandlerReturnsUnavailableWhenBuildMissing(t *testing.T) {
 		t.Fatalf("expected %d, got %d", http.StatusServiceUnavailable, rec.Code)
 	}
 }
-

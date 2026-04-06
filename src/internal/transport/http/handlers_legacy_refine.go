@@ -6,8 +6,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"whisperserver/src/internal/model"
-	"whisperserver/src/internal/routes"
+	model "whisperserver/src/internal/domain"
 	"whisperserver/src/internal/service"
 )
 
@@ -35,7 +34,7 @@ func (h LegacyRefineHandlers) RetryHTML() echo.HandlerFunc {
 		u, ok := h.CurrentUser(c)
 		if !ok || u == nil {
 			// Middleware should have handled redirects; keep behavior conservative.
-			return c.Redirect(http.StatusSeeOther, routes.Login)
+			return c.Redirect(http.StatusSeeOther, loginPath)
 		}
 		jobID := strings.TrimSpace(c.Param("job_id"))
 		job := h.GetJob(jobID)
@@ -61,6 +60,6 @@ func (h LegacyRefineHandlers) RetryHTML() echo.HandlerFunc {
 		if h.Logf != nil {
 			h.Logf("[REFINE_RETRY] queued job_id=%s", jobID)
 		}
-		return c.Redirect(http.StatusSeeOther, routes.Job(jobID))
+		return c.Redirect(http.StatusSeeOther, jobPath(jobID))
 	}
 }

@@ -3,7 +3,7 @@ package service
 import (
 	"testing"
 
-	"whisperserver/src/internal/model"
+	model "whisperserver/src/internal/domain"
 )
 
 func TestResumeRestoredJob_PDFQueuesExtract(t *testing.T) {
@@ -116,4 +116,3 @@ func TestResumeRestoredJob_TranscriptQueuesRefineWhenEnabled(t *testing.T) {
 		t.Fatalf("expected status refining_pending, got %v", status)
 	}
 }
-

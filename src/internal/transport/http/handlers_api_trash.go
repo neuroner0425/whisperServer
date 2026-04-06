@@ -6,7 +6,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"whisperserver/src/internal/model"
+	model "whisperserver/src/internal/domain"
 	"whisperserver/src/internal/service"
 )
 

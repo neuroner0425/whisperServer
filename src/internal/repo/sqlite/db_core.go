@@ -1,4 +1,4 @@
-package store
+package sqlite
 
 import (
 	"database/sql"
@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"whisperserver/src/internal/model"
+	model "whisperserver/src/internal/domain"
 
 	_ "modernc.org/sqlite"
 )

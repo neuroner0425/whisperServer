@@ -11,10 +11,10 @@ func TestJobLifecycle_ResetForTranscribe(t *testing.T) {
 	deleted := []string{}
 	var setFields map[string]any
 	s := NewJobLifecycle(JobLifecycleDeps{
-		Now:         func() time.Time { return time.Unix(123, 0) },
-		CancelJob:   func(string) {},
+		Now:           func() time.Time { return time.Unix(123, 0) },
+		CancelJob:     func(string) {},
 		RemoveTempWav: func(string) {},
-		SetJobFields: func(_ string, fields map[string]any) { setFields = fields },
+		SetJobFields:  func(_ string, fields map[string]any) { setFields = fields },
 		DeleteJobBlob: func(_ string, kind string) { deleted = append(deleted, kind) },
 		StatusPending: "작업 대기 중",
 	})
@@ -74,7 +74,7 @@ func TestJobLifecycle_ClearPDFProcessingBlobs(t *testing.T) {
 func TestJobLifecycle_MarkTrashed(t *testing.T) {
 	var setFields map[string]any
 	s := NewJobLifecycle(JobLifecycleDeps{
-		Now:        func() time.Time { return time.Unix(0, 0).UTC() },
+		Now:          func() time.Time { return time.Unix(0, 0).UTC() },
 		SetJobFields: func(_ string, fields map[string]any) { setFields = fields },
 	})
 	s.MarkTrashed("job1")
@@ -88,4 +88,3 @@ func TestJobLifecycle_MarkTrashed(t *testing.T) {
 		t.Fatalf("deleted_at mismatch: %v", got)
 	}
 }
-

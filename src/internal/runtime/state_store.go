@@ -1,15 +1,15 @@
-package state
+package runtime
 
 import (
 	"strings"
 	"sync"
 	"time"
 
-	"whisperserver/src/internal/model"
+	model "whisperserver/src/internal/domain"
 	intutil "whisperserver/src/internal/util"
 )
 
-type Deps struct {
+type stateDeps struct {
 	Now func() time.Time
 
 	LoadJobs       func() (map[string]*model.Job, error)
@@ -25,20 +25,20 @@ type Deps struct {
 
 // State owns the in-memory job snapshot and persists it via store deps.
 // This is still process-local by design.
-type State struct {
+type stateStore struct {
 	mu   sync.RWMutex
 	jobs map[string]*model.Job
-	d    Deps
+	d    stateDeps
 }
 
-func New(d Deps) *State {
+func newStateStore(d stateDeps) *stateStore {
 	if d.Now == nil {
 		d.Now = time.Now
 	}
-	return &State{jobs: map[string]*model.Job{}, d: d}
+	return &stateStore{jobs: map[string]*model.Job{}, d: d}
 }
 
-func (s *State) JobsSnapshot() map[string]*model.Job {
+func (s *stateStore) JobsSnapshot() map[string]*model.Job {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make(map[string]*model.Job, len(s.jobs))
@@ -48,7 +48,7 @@ func (s *State) JobsSnapshot() map[string]*model.Job {
 	return out
 }
 
-func (s *State) Load() {
+func (s *stateStore) Load() {
 	if s == nil || s.d.LoadJobs == nil {
 		return
 	}
@@ -67,7 +67,7 @@ func (s *State) Load() {
 	s.mu.Unlock()
 }
 
-func (s *State) AddJob(id string, job *model.Job) {
+func (s *stateStore) AddJob(id string, job *model.Job) {
 	if s == nil {
 		return
 	}
@@ -81,7 +81,7 @@ func (s *State) AddJob(id string, job *model.Job) {
 	}
 }
 
-func (s *State) DeleteJobs(ids []string) {
+func (s *stateStore) DeleteJobs(ids []string) {
 	if s == nil {
 		return
 	}
@@ -112,14 +112,14 @@ func (s *State) DeleteJobs(ids []string) {
 	}
 }
 
-func (s *State) GetJob(id string) *model.Job {
+func (s *stateStore) GetJob(id string) *model.Job {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	job := s.jobs[id]
 	return job.Clone()
 }
 
-func (s *State) SetJobFields(id string, fields map[string]any) {
+func (s *stateStore) SetJobFields(id string, fields map[string]any) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	job := s.jobs[id]
@@ -133,7 +133,7 @@ func (s *State) SetJobFields(id string, fields map[string]any) {
 	}
 }
 
-func (s *State) AppendJobPreviewLine(id, line string) {
+func (s *stateStore) AppendJobPreviewLine(id, line string) {
 	line = strings.TrimSpace(line)
 	if line == "" {
 		return
@@ -165,7 +165,7 @@ func (s *State) AppendJobPreviewLine(id, line string) {
 	}
 }
 
-func (s *State) ReplaceJobPreviewText(id, text string) {
+func (s *stateStore) ReplaceJobPreviewText(id, text string) {
 	text = strings.TrimSpace(text)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -181,7 +181,7 @@ func (s *State) ReplaceJobPreviewText(id, text string) {
 	}
 }
 
-func (s *State) UploadedTS(id string) float64 {
+func (s *stateStore) UploadedTS(id string) float64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	job := s.jobs[id]
@@ -191,7 +191,7 @@ func (s *State) UploadedTS(id string) float64 {
 	return job.UploadedTS
 }
 
-func (s *State) RemoveTagFromOwnerJobs(ownerID, tagName string) {
+func (s *stateStore) RemoveTagFromOwnerJobs(ownerID, tagName string) {
 	if s == nil {
 		return
 	}
@@ -230,7 +230,7 @@ func (s *State) RemoveTagFromOwnerJobs(ownerID, tagName string) {
 }
 
 // MarkSubtreeJobsTrashed mirrors the legacy behavior in app/runtime.go.
-func (s *State) MarkSubtreeJobsTrashed(ownerID string, folderSet map[string]struct{}, normalizeFolderID func(string) string) {
+func (s *stateStore) MarkSubtreeJobsTrashed(ownerID string, folderSet map[string]struct{}, normalizeFolderID func(string) string) {
 	if s == nil || ownerID == "" || len(folderSet) == 0 {
 		return
 	}
@@ -260,7 +260,7 @@ func (s *State) MarkSubtreeJobsTrashed(ownerID string, folderSet map[string]stru
 	}
 }
 
-func (s *State) saveLocked() {
+func (s *stateStore) saveLocked() {
 	if s == nil || s.d.SaveJobs == nil {
 		return
 	}

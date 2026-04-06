@@ -11,8 +11,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"golang.org/x/crypto/bcrypt"
 
-	"whisperserver/src/internal/routes"
-	"whisperserver/src/internal/store"
+	store "whisperserver/src/internal/repo/sqlite"
 )
 
 const (
@@ -57,15 +56,15 @@ func (a *Auth) Middleware(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		p := c.Path()
 		if strings.HasPrefix(c.Request().URL.Path, "/static/") ||
-			p == routes.Login ||
-			p == routes.Signup ||
+			p == "/login" ||
+			p == "/signup" ||
 			p == "/healthz" ||
 			strings.HasPrefix(c.Request().URL.Path, "/auth/login") ||
 			strings.HasPrefix(c.Request().URL.Path, "/auth/join") ||
 			strings.HasPrefix(c.Request().URL.Path, "/api/auth/") {
 			return next(c)
 		}
-		if c.Request().Method == http.MethodPost && (p == routes.Login || p == routes.Signup) {
+		if c.Request().Method == http.MethodPost && (p == "/login" || p == "/signup") {
 			return next(c)
 		}
 
@@ -181,14 +180,14 @@ func normalizeLoginID(s string) string {
 
 func validateLoginID(s string) error {
 	if len(s) < 3 {
-		return errors.New("아이디는 3자 이상이어야 합니다.")
+		return errors.New("아이디는 3자 이상이어야 합니다")
 	}
 	return nil
 }
 
 func validatePassword(pw string) error {
 	if len(pw) < 8 {
-		return errors.New("비밀번호는 8자 이상이어야 합니다.")
+		return errors.New("비밀번호는 8자 이상이어야 합니다")
 	}
 	return nil
 }
@@ -203,14 +202,6 @@ func hashPassword(pw string) (string, error) {
 
 func verifyPassword(hash, pw string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(pw)) == nil
-}
-
-func (a *Auth) LoginGetHandler(c echo.Context) error {
-	return c.Render(http.StatusOK, "auth_login.html", map[string]any{"Error": ""})
-}
-
-func (a *Auth) SignupGetHandler(c echo.Context) error {
-	return c.Render(http.StatusOK, "auth_signup.html", map[string]any{"Error": ""})
 }
 
 func (a *Auth) SignupPostHandler(c echo.Context) error {
@@ -235,7 +226,7 @@ func (a *Auth) SignupPostHandler(c echo.Context) error {
 	if err := store.CreateUser(loginID, email, hash); err != nil {
 		return c.Render(http.StatusBadRequest, "auth_signup.html", map[string]any{"Error": "이미 존재하는 아이디 또는 이메일입니다."})
 	}
-	return c.Redirect(http.StatusSeeOther, routes.Login)
+	return c.Redirect(http.StatusSeeOther, "/login")
 }
 
 func (a *Auth) LoginPostHandler(c echo.Context) error {
@@ -255,12 +246,12 @@ func (a *Auth) LoginPostHandler(c echo.Context) error {
 		return c.Render(http.StatusInternalServerError, "auth_login.html", map[string]any{"Error": "로그인 처리 중 오류가 발생했습니다."})
 	}
 	a.setAuthCookie(c, tok)
-	return c.Redirect(http.StatusSeeOther, routes.Root)
+	return c.Redirect(http.StatusSeeOther, "/")
 }
 
 func (a *Auth) LogoutPostHandler(c echo.Context) error {
 	a.clearAuthCookie(c)
-	return c.Redirect(http.StatusSeeOther, routes.Login)
+	return c.Redirect(http.StatusSeeOther, "/login")
 }
 
 func (a *Auth) SignupJSONHandler(c echo.Context) error {

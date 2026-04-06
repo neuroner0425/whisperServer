@@ -8,8 +8,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"whisperserver/src/internal/model"
-	"whisperserver/src/internal/routes"
+	model "whisperserver/src/internal/domain"
 	"whisperserver/src/internal/service"
 )
 
@@ -106,7 +105,7 @@ func (h JobDetailHandlers) DetailJSON() echo.HandlerFunc {
 					}
 				}
 			}
-			payload["download_url"] = routes.Job(jobID)
+			payload["download_url"] = jobPath(jobID)
 			payload["download_text_url"] = "/download/" + jobID
 			payload["download_refined_url"] = "/download/" + jobID + "/refined"
 			return c.JSON(http.StatusOK, payload)

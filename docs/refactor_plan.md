@@ -42,13 +42,25 @@
   - temp wav cleanup
   - subtree trash helper
 - 파일/폴더 조회 row builder를 `internal/query/files`로 이동
-- markdown 렌더링을 `internal/format/markdown`으로 이동
 
 ### Cleanup
 
 - `internal/app` 비움
+- `internal/model`을 `internal/domain`으로 정리
+- `internal/store`를 `internal/repo/sqlite`로 정리
+- `internal/events`, `internal/state`를 `internal/runtime`으로 흡수
+- `internal/view`를 `internal/server`로 흡수
+- `internal/routes`를 `internal/transport/http`로 흡수
 - `internal/server/storage.go`, `internal/server/http_common.go`, `internal/server/job_rows.go`, `internal/server/transport_rows_adapter.go` 제거
 - `internal/server/globals.go`를 `status.go`, `paths.go`, `metrics.go`, `types.go`로 분리
+- 미사용 코드 제거
+  - auth GET page handlers
+  - markdown formatter 패키지
+  - preview sanitizer
+  - folder owner delete helper
+  - SPA alias/query helper
+  - secure filename helper
+  - 사용되지 않던 server wrapper 함수/regex
 
 ### Tests Added
 
@@ -57,7 +69,6 @@
 - `internal/integrations/whisper/runtime_test.go`
 - `internal/runtime/runtime_test.go`
 - `internal/query/files/query_test.go`
-- `internal/format/markdown/render_test.go`
 
 ## Current End State
 
@@ -71,7 +82,8 @@
 
 ## Remaining Work
 
-남은 작업은 구조 분리보다 유지보수 단계다.
+구조 리팩터링 기준으로는 남은 필수 작업이 없다.
+이후 작업은 선택적 유지보수 성격이다.
 
 1. 테스트 확대
    - `transport/http` route/handler smoke test 보강
@@ -81,7 +93,6 @@
    - 현재 구조가 바뀔 때 `docs/architecture.md`를 함께 갱신
 
 3. 선택적 추가 정리
-   - `internal/server/runtime.go`의 facade를 더 줄일지 검토
    - `internal/util` 중 외부 도구 실행 성격이 강한 코드를 `internal/tools`로 옮길지 검토
 
 ## Verification

@@ -5,15 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"whisperserver/src/internal/model"
+	model "whisperserver/src/internal/domain"
 )
-
-func TestSanitizePreviewText(t *testing.T) {
-	got := SanitizePreviewText("[00:00:01 --> 00:00:03] hello\n[meta] world\n''")
-	if got != "hello\nworld" {
-		t.Fatalf("unexpected preview text: %q", got)
-	}
-}
 
 func TestCollectFolderSubtree(t *testing.T) {
 	rt := New(Config{
