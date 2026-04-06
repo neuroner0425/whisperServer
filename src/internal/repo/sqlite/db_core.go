@@ -13,6 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// Blob kind constants define the persisted binary payloads attached to a job.
 const (
 	BlobKindAudioAAC           = "audio_aac"
 	BlobKindWav                = "wav"
@@ -32,6 +33,7 @@ var (
 	errorf = func(string, error, string, ...any) {}
 )
 
+// ConfigureLogging wires repository logging callbacks used by all SQLite helpers.
 func ConfigureLogging(info func(string, ...any), err func(string, error, string, ...any)) {
 	if info != nil {
 		logf = info
@@ -41,6 +43,7 @@ func ConfigureLogging(info func(string, ...any), err func(string, error, string,
 	}
 }
 
+// Init opens the SQLite database, applies pragmas, and ensures the schema is ready.
 func Init(projectRoot string) error {
 	runDir := filepath.Join(projectRoot, ".run")
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
@@ -65,6 +68,7 @@ func Init(projectRoot string) error {
 		return err
 	}
 
+	// Apply base tables first, then run compatibility migrations for older installs.
 	for _, s := range schemaStatements() {
 		if _, err := db.Exec(s); err != nil {
 			_ = db.Close()
@@ -97,6 +101,7 @@ func Init(projectRoot string) error {
 	return nil
 }
 
+// Close releases the shared SQLite connection.
 func Close() {
 	if dbConn != nil {
 		_ = dbConn.Close()
@@ -104,6 +109,7 @@ func Close() {
 	}
 }
 
+// schemaStatements returns the base schema created for a fresh database.
 func schemaStatements() []string {
 	return []string{
 		`CREATE TABLE IF NOT EXISTS status_codes (
@@ -164,6 +170,7 @@ func schemaStatements() []string {
 	}
 }
 
+// ensureJobsSchema migrates older job tables into the current normalized shape.
 func ensureJobsSchema(db *sql.DB) error {
 	if err := ensureStatusCodes(db); err != nil {
 		return err
@@ -204,6 +211,7 @@ func ensureJobsSchema(db *sql.DB) error {
 		{name: "progress_label", definition: `ALTER TABLE jobs ADD COLUMN progress_label TEXT NOT NULL DEFAULT ''`},
 	}
 
+	// Add columns defensively so upgrades work across many legacy versions.
 	for _, column := range jobColumns {
 		exists, err := columnExists(db, "jobs", column.name)
 		if err != nil {
@@ -223,6 +231,7 @@ func ensureJobsSchema(db *sql.DB) error {
 	return normalizeJobsSchema(db)
 }
 
+// columnExists reports whether a table already contains the named column.
 func columnExists(db *sql.DB, tableName, columnName string) (bool, error) {
 	rows, err := db.Query(fmt.Sprintf(`PRAGMA table_info(%s)`, tableName))
 	if err != nil {
@@ -249,6 +258,7 @@ func columnExists(db *sql.DB, tableName, columnName string) (bool, error) {
 	return false, rows.Err()
 }
 
+// ensureStatusCodes seeds the canonical status code table.
 func ensureStatusCodes(db *sql.DB) error {
 	statements := []string{
 		`INSERT INTO status_codes(code, name) VALUES (10, '작업 대기 중') ON CONFLICT(code) DO UPDATE SET name=excluded.name`,

@@ -1,3 +1,4 @@
+// tag_service.go contains tag validation and mutation rules shared by handlers.
 package service
 
 import (
@@ -18,10 +19,12 @@ type TagService struct {
 	d TagServiceDeps
 }
 
+// NewTagService builds the tag service from repo callbacks.
 func NewTagService(d TagServiceDeps) *TagService {
 	return &TagService{d: d}
 }
 
+// List returns every tag owned by the user.
 func (s *TagService) List(ownerID string) ([]model.Tag, error) {
 	if s.d.ListTagsByOwner == nil {
 		return nil, NewHTTPError(http.StatusServiceUnavailable, "서비스를 사용할 수 없습니다.")
@@ -33,6 +36,7 @@ func (s *TagService) List(ownerID string) ([]model.Tag, error) {
 	return tags, nil
 }
 
+// Upsert validates and creates or updates a tag.
 func (s *TagService) Upsert(ownerID, name, desc string, isValidName func(string) bool) error {
 	name = strings.TrimSpace(name)
 	desc = strings.TrimSpace(desc)
@@ -51,6 +55,7 @@ func (s *TagService) Upsert(ownerID, name, desc string, isValidName func(string)
 	return nil
 }
 
+// Delete removes a tag by name.
 func (s *TagService) Delete(ownerID, name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -65,6 +70,7 @@ func (s *TagService) Delete(ownerID, name string) error {
 	return nil
 }
 
+// ValidateOwnedTags keeps only tags that exist for the current owner.
 func (s *TagService) ValidateOwnedTags(ownerID string, tags []string) ([]string, error) {
 	if s.d.ListTagNamesByOwner == nil {
 		return nil, NewHTTPError(http.StatusServiceUnavailable, "서비스를 사용할 수 없습니다.")

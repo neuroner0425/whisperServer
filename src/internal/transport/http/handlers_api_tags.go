@@ -10,6 +10,7 @@ import (
 	"whisperserver/src/internal/service"
 )
 
+// TagsHandlers manages tag CRUD and job-tag assignments for the API.
 type TagsHandlers struct {
 	CurrentUserOrUnauthorized func(echo.Context) (*User, bool)
 	TagSvc                    *service.TagService
@@ -24,6 +25,7 @@ type TagsHandlers struct {
 	Errf func(string, error, string, ...any)
 }
 
+// List returns every tag owned by the current user.
 func (h TagsHandlers) List() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil || h.TagSvc == nil {
@@ -44,6 +46,7 @@ func (h TagsHandlers) List() echo.HandlerFunc {
 	}
 }
 
+// Create upserts a tag definition for the current user.
 func (h TagsHandlers) Create() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil || h.TagSvc == nil || h.IsValidTagName == nil {
@@ -76,6 +79,7 @@ func (h TagsHandlers) Create() echo.HandlerFunc {
 	}
 }
 
+// Delete removes a tag and optionally detaches it from existing jobs.
 func (h TagsHandlers) Delete() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil || h.TagSvc == nil {
@@ -102,6 +106,7 @@ func (h TagsHandlers) Delete() echo.HandlerFunc {
 	}
 }
 
+// UpdateJobTags replaces the tag set on a single job.
 func (h TagsHandlers) UpdateJobTags() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil || h.TagSvc == nil || h.GetJob == nil || h.SetJobFields == nil {

@@ -10,6 +10,7 @@ import (
 	"whisperserver/src/internal/service"
 )
 
+// TrashHandlers serves trash listing, restore, and permanent deletion flows.
 type TrashHandlers struct {
 	CurrentUserOrUnauthorized func(echo.Context) (*User, bool)
 	FolderSvc                 *service.FolderService
@@ -35,6 +36,7 @@ type TrashHandlers struct {
 	Errf func(string, error, string, ...any)
 }
 
+// List returns trashed jobs together with trashed folders for the current user.
 func (h TrashHandlers) List() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil || h.FolderSvc == nil || h.BuildJobRowsForUser == nil {
@@ -53,6 +55,7 @@ func (h TrashHandlers) List() echo.HandlerFunc {
 	}
 }
 
+// RestoreJob restores a trashed job and resumes pending work when needed.
 func (h TrashHandlers) RestoreJob() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil || h.FolderSvc == nil || h.BlobSvc == nil || h.GetJob == nil || h.SetJobFields == nil {
@@ -68,6 +71,7 @@ func (h TrashHandlers) RestoreJob() echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusNotFound, "작업을 찾을 수 없습니다.")
 		}
 
+		// Restore the folder chain first so the job can return to a valid location.
 		folderID := h.FolderSvc.EnsureRestored(u.ID, job.FolderID, h.Logf, h.Errf, "api.job.restore")
 		updates := map[string]any{"is_trashed": false, "deleted_at": "", "folder_id": folderID}
 		h.SetJobFields(jobID, updates)
@@ -91,6 +95,7 @@ func (h TrashHandlers) RestoreJob() echo.HandlerFunc {
 	}
 }
 
+// RestoreFolder restores a trashed folder and notifies the file browser.
 func (h TrashHandlers) RestoreFolder() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil || h.NotifyFilesChanged == nil || h.FolderSvc == nil {
@@ -115,6 +120,7 @@ func (h TrashHandlers) RestoreFolder() echo.HandlerFunc {
 	}
 }
 
+// Clear permanently removes every trashed job and folder owned by the user.
 func (h TrashHandlers) Clear() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil || h.FolderSvc == nil || h.JobsSnapshot == nil || h.DeleteJobsFn == nil || h.NotifyFilesChanged == nil {
@@ -125,6 +131,7 @@ func (h TrashHandlers) Clear() echo.HandlerFunc {
 			return nil
 		}
 
+		// Collect job IDs from the in-memory snapshot before deleting blobs and rows.
 		snapshot := h.JobsSnapshot()
 		toDelete := make([]string, 0)
 		for id, job := range snapshot {
@@ -144,6 +151,7 @@ func (h TrashHandlers) Clear() echo.HandlerFunc {
 	}
 }
 
+// DeleteTrashJobs permanently deletes only the selected trashed jobs.
 func (h TrashHandlers) DeleteTrashJobs() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil || h.JobsSnapshot == nil || h.DeleteJobsFn == nil || h.NotifyFilesChanged == nil {

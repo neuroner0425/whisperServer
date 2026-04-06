@@ -1,3 +1,4 @@
+// job_blob_service.go wraps blob persistence behind a small task/result-oriented API.
 package service
 
 import "net/http"
@@ -24,10 +25,12 @@ type JobBlobService struct {
 	d JobBlobServiceDeps
 }
 
+// NewJobBlobService builds the blob service from repo callbacks and blob kind constants.
 func NewJobBlobService(d JobBlobServiceDeps) *JobBlobService {
 	return &JobBlobService{d: d}
 }
 
+// Has reports whether a blob kind exists for the job.
 func (s *JobBlobService) Has(jobID, kind string) bool {
 	if s == nil || s.d.HasJobBlob == nil {
 		return false
@@ -35,6 +38,7 @@ func (s *JobBlobService) Has(jobID, kind string) bool {
 	return s.d.HasJobBlob(jobID, kind)
 }
 
+// Load fetches a blob by job id and kind.
 func (s *JobBlobService) Load(jobID, kind string) ([]byte, error) {
 	if s == nil || s.d.LoadJobBlob == nil {
 		return nil, NewHTTPError(http.StatusServiceUnavailable, "서비스를 사용할 수 없습니다.")
@@ -42,6 +46,7 @@ func (s *JobBlobService) Load(jobID, kind string) ([]byte, error) {
 	return s.d.LoadJobBlob(jobID, kind)
 }
 
+// Save persists a blob by job id and kind.
 func (s *JobBlobService) Save(jobID, kind string, b []byte) error {
 	if s == nil || s.d.SaveJobBlob == nil {
 		return NewHTTPError(http.StatusServiceUnavailable, "서비스를 사용할 수 없습니다.")
@@ -49,6 +54,7 @@ func (s *JobBlobService) Save(jobID, kind string, b []byte) error {
 	return s.d.SaveJobBlob(jobID, kind, b)
 }
 
+// Delete removes a blob by job id and kind.
 func (s *JobBlobService) Delete(jobID, kind string) {
 	if s == nil || s.d.DeleteJobBlob == nil {
 		return
@@ -56,6 +62,7 @@ func (s *JobBlobService) Delete(jobID, kind string) {
 	s.d.DeleteJobBlob(jobID, kind)
 }
 
+// ListKinds returns every persisted blob kind for the job.
 func (s *JobBlobService) ListKinds(jobID string) ([]string, error) {
 	if s == nil || s.d.ListJobBlobKinds == nil {
 		return nil, NewHTTPError(http.StatusServiceUnavailable, "서비스를 사용할 수 없습니다.")

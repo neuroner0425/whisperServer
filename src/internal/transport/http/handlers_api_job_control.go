@@ -8,6 +8,7 @@ import (
 	model "whisperserver/src/internal/domain"
 )
 
+// JobControlHandlers exposes retry and refine actions for existing jobs.
 type JobControlHandlers struct {
 	CurrentUserOrUnauthorized func(echo.Context) (*User, bool)
 	GetJob                    func(string) *model.Job
@@ -35,6 +36,7 @@ type JobControlHandlers struct {
 	BlobPDFOriginal string
 }
 
+// Retry requeues a failed job using the artifact appropriate for its file type.
 func (h JobControlHandlers) Retry() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil || h.GetJob == nil || h.HasJobBlob == nil ||
@@ -56,6 +58,7 @@ func (h JobControlHandlers) Retry() echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusBadRequest, "실패한 작업만 재시도할 수 있습니다.")
 		}
 
+		// PDF jobs restart document extraction from the preserved original file.
 		if job.FileType == "pdf" {
 			if !h.HasJobBlob(jobID, h.BlobPDFOriginal) {
 				return echo.NewHTTPError(http.StatusBadRequest, "재시도할 PDF가 없습니다.")
@@ -65,6 +68,7 @@ func (h JobControlHandlers) Retry() echo.HandlerFunc {
 			return c.JSON(http.StatusOK, map[string]string{"job_id": jobID, "status": "retried"})
 		}
 
+		// Audio and video jobs restart transcription from the normalized AAC blob.
 		if !h.HasJobBlob(jobID, h.BlobAudioAAC) {
 			return echo.NewHTTPError(http.StatusBadRequest, "재시도할 오디오가 없습니다.")
 		}
@@ -74,6 +78,7 @@ func (h JobControlHandlers) Retry() echo.HandlerFunc {
 	}
 }
 
+// Retranscribe restarts a completed job from its source artifact.
 func (h JobControlHandlers) Retranscribe() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil || h.GetJob == nil || h.HasJobBlob == nil ||
@@ -95,6 +100,7 @@ func (h JobControlHandlers) Retranscribe() echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusBadRequest, "완료된 작업만 전사를 다시 시작할 수 있습니다.")
 		}
 
+		// PDF reprocessing rebuilds page extraction from the original upload.
 		if job.FileType == "pdf" {
 			if !h.HasJobBlob(jobID, h.BlobPDFOriginal) {
 				return echo.NewHTTPError(http.StatusBadRequest, "문서를 다시 시작할 PDF가 없습니다.")
@@ -112,6 +118,7 @@ func (h JobControlHandlers) Retranscribe() echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusBadRequest, "전사를 다시 시작할 오디오가 없습니다.")
 		}
 
+		// If a refined result exists, queue refinement again after transcription finishes.
 		shouldRefineAfterTranscribe := h.HasJobBlob(jobID, h.BlobRefined)
 		h.ResetForTranscribe(jobID, shouldRefineAfterTranscribe)
 		h.EnqueueTranscribe(jobID)
@@ -123,6 +130,7 @@ func (h JobControlHandlers) Retranscribe() echo.HandlerFunc {
 	}
 }
 
+// Refine schedules Gemini refinement for a completed transcript.
 func (h JobControlHandlers) Refine() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil || h.GetJob == nil || h.HasJobBlob == nil ||
@@ -165,6 +173,7 @@ func (h JobControlHandlers) Refine() echo.HandlerFunc {
 	}
 }
 
+// Rerefine discards the current refined blob and schedules refinement again.
 func (h JobControlHandlers) Rerefine() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil || h.GetJob == nil || h.HasJobBlob == nil ||

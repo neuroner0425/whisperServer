@@ -1,3 +1,4 @@
+// storage_service.go exposes storage usage queries used by the storage page API.
 package service
 
 import "net/http"
@@ -16,10 +17,12 @@ type StorageService struct {
 	d StorageServiceDeps
 }
 
+// NewStorageService builds the storage service from repo callbacks.
 func NewStorageService(d StorageServiceDeps) *StorageService {
 	return &StorageService{d: d}
 }
 
+// UsageByOwner returns aggregated blob usage for every job owned by the user.
 func (s *StorageService) UsageByOwner(ownerID string) ([]JobBlobUsage, error) {
 	if s == nil || s.d.ListJobBlobUsageByOwner == nil {
 		return nil, NewHTTPError(http.StatusServiceUnavailable, "서비스를 사용할 수 없습니다.")

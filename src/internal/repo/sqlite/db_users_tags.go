@@ -8,6 +8,7 @@ import (
 	model "whisperserver/src/internal/domain"
 )
 
+// CreateUser inserts a new user row with a generated internal ID.
 func CreateUser(loginID, email, passwordHash string) error {
 	if dbConn == nil {
 		return fmt.Errorf("db is not initialized")
@@ -17,6 +18,7 @@ func CreateUser(loginID, email, passwordHash string) error {
 	return err
 }
 
+// FindUserByIdentifier loads a user by email or login ID.
 func FindUserByIdentifier(identifier string) (*model.UserRecord, error) {
 	if dbConn == nil {
 		return nil, fmt.Errorf("db is not initialized")
@@ -31,6 +33,7 @@ func FindUserByIdentifier(identifier string) (*model.UserRecord, error) {
 	return &u, nil
 }
 
+// UpsertTag inserts or updates a tag definition for one owner.
 func UpsertTag(ownerID, name, description string) error {
 	if dbConn == nil {
 		return fmt.Errorf("db is not initialized")
@@ -42,6 +45,7 @@ func UpsertTag(ownerID, name, description string) error {
 	return err
 }
 
+// ListTagsByOwner returns every tag owned by the user.
 func ListTagsByOwner(ownerID string) ([]model.Tag, error) {
 	if dbConn == nil {
 		return nil, fmt.Errorf("db is not initialized")
@@ -63,6 +67,7 @@ func ListTagsByOwner(ownerID string) ([]model.Tag, error) {
 	return out, rows.Err()
 }
 
+// ListTagNamesByOwner returns tag names as a set for validation.
 func ListTagNamesByOwner(ownerID string) (map[string]struct{}, error) {
 	tags, err := ListTagsByOwner(ownerID)
 	if err != nil {
@@ -75,6 +80,7 @@ func ListTagNamesByOwner(ownerID string) (map[string]struct{}, error) {
 	return out, nil
 }
 
+// GetTagDescriptionsByNames returns descriptions for the requested tag names.
 func GetTagDescriptionsByNames(ownerID string, names []string) (map[string]string, error) {
 	if dbConn == nil {
 		return nil, fmt.Errorf("db is not initialized")
@@ -95,6 +101,7 @@ func GetTagDescriptionsByNames(ownerID string, names []string) (map[string]strin
 	return out, nil
 }
 
+// DeleteTag removes one tag definition for the owner.
 func DeleteTag(ownerID, name string) error {
 	if dbConn == nil {
 		return fmt.Errorf("db is not initialized")

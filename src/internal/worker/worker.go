@@ -1,3 +1,4 @@
+// worker.go contains the shared queue loops and audio/refine worker orchestration.
 package worker
 
 import (
@@ -94,6 +95,7 @@ type Worker struct {
 	cancelMap       map[string]context.CancelFunc
 }
 
+// New builds the worker with its queues and cancellation bookkeeping.
 func New(cfg Config, deps Deps) *Worker {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Worker{
@@ -108,6 +110,7 @@ func New(cfg Config, deps Deps) *Worker {
 	}
 }
 
+// Start launches the configured worker loops exactly once.
 func (w *Worker) Start() {
 	w.once.Do(func() {
 		if w.cfg.SplitTaskQueues {
@@ -121,6 +124,7 @@ func (w *Worker) Start() {
 	})
 }
 
+// Close cancels the worker context and closes the active queues.
 func (w *Worker) Close() {
 	if w.cancel != nil {
 		w.cancel()
@@ -133,6 +137,7 @@ func (w *Worker) Close() {
 	w.taskQueue.Close()
 }
 
+// EnqueueTranscribe queues an audio transcription task.
 func (w *Worker) EnqueueTranscribe(jobID string) {
 	t := queue.Task{JobID: jobID, Kind: queue.TaskAudioTranscribe}
 	if w.cfg.SplitTaskQueues {
@@ -144,6 +149,7 @@ func (w *Worker) EnqueueTranscribe(jobID string) {
 	w.setQueueLen()
 }
 
+// EnqueueRefine queues a transcript refine task.
 func (w *Worker) EnqueueRefine(jobID string) {
 	t := queue.Task{JobID: jobID, Kind: queue.TaskAudioRefine}
 	if w.cfg.SplitTaskQueues {
@@ -155,6 +161,7 @@ func (w *Worker) EnqueueRefine(jobID string) {
 	w.setQueueLen()
 }
 
+// EnqueuePDFExtract queues a PDF extraction task.
 func (w *Worker) EnqueuePDFExtract(jobID string) {
 	t := queue.Task{JobID: jobID, Kind: queue.TaskPDFExtract}
 	if w.cfg.SplitTaskQueues {
@@ -166,6 +173,7 @@ func (w *Worker) EnqueuePDFExtract(jobID string) {
 	w.setQueueLen()
 }
 
+// RequeuePending rebuilds the worker queues from the persisted snapshot on startup.
 func (w *Worker) RequeuePending(jobs map[string]*model.Job) {
 	for id, job := range jobs {
 		if job == nil || job.IsTrashed {
@@ -186,6 +194,7 @@ func (w *Worker) RequeuePending(jobs map[string]*model.Job) {
 	}
 }
 
+// Cancel cancels the currently running job task if it has an active cancel func.
 func (w *Worker) Cancel(jobID string) {
 	w.cancelMu.Lock()
 	cancel := w.cancelMap[jobID]
@@ -195,6 +204,7 @@ func (w *Worker) Cancel(jobID string) {
 	}
 }
 
+// setCancel stores or removes the cancel func for the active job.
 func (w *Worker) setCancel(jobID string, cancel context.CancelFunc) {
 	w.cancelMu.Lock()
 	defer w.cancelMu.Unlock()
@@ -205,6 +215,7 @@ func (w *Worker) setCancel(jobID string, cancel context.CancelFunc) {
 	w.cancelMap[jobID] = cancel
 }
 
+// setQueueLen updates the observable queue length metric.
 func (w *Worker) setQueueLen() {
 	if w.deps.SetQueueLength == nil {
 		return
@@ -216,6 +227,7 @@ func (w *Worker) setQueueLen() {
 	w.deps.SetQueueLength(float64(w.taskQueue.Len()))
 }
 
+// workerLoop runs the single shared queue mode.
 func (w *Worker) workerLoop() {
 	for {
 		t, err := w.taskQueue.Dequeue(w.ctx)
@@ -231,6 +243,7 @@ func (w *Worker) workerLoop() {
 	}
 }
 
+// transcribeWorkerLoop runs the transcribe queue in split-queue mode.
 func (w *Worker) transcribeWorkerLoop() {
 	for {
 		t, err := w.transcribeQueue.Dequeue(w.ctx)
@@ -246,6 +259,7 @@ func (w *Worker) transcribeWorkerLoop() {
 	}
 }
 
+// refineWorkerLoop runs the refine/pdf queue in split-queue mode.
 func (w *Worker) refineWorkerLoop() {
 	for {
 		t, err := w.refineQueue.Dequeue(w.ctx)

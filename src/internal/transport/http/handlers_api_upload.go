@@ -9,6 +9,7 @@ import (
 	"whisperserver/src/internal/service"
 )
 
+// UploadHandlers accepts file uploads from both the legacy form and the JSON API.
 type UploadHandlers struct {
 	// Auth
 	CurrentUser               func(echo.Context) (*User, bool) // for HTML redirects
@@ -22,6 +23,7 @@ type UploadHandlers struct {
 	Svc *service.UploadService
 }
 
+// PostHTML handles the legacy multipart form flow and redirects to the job page.
 func (h UploadHandlers) PostHTML() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUser == nil || h.Svc == nil {
@@ -37,6 +39,7 @@ func (h UploadHandlers) PostHTML() echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusBadRequest, "파일이 없습니다.")
 		}
 
+		// Translate raw form fields into the service request model.
 		jobID, _, err := h.Svc.Create(service.UploadCreateRequest{
 			OwnerID:         u.ID,
 			DisplayName:     c.FormValue("display_name"),
@@ -55,6 +58,7 @@ func (h UploadHandlers) PostHTML() echo.HandlerFunc {
 	}
 }
 
+// PostJSON handles uploads from the SPA and returns the created job payload.
 func (h UploadHandlers) PostJSON() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil || h.Svc == nil {
@@ -71,6 +75,7 @@ func (h UploadHandlers) PostJSON() echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusBadRequest, "파일이 없습니다.")
 		}
 
+		// The JSON API shares the same service flow as the legacy upload form.
 		jobID, filename, err := h.Svc.Create(service.UploadCreateRequest{
 			OwnerID:         u.ID,
 			DisplayName:     c.FormValue("display_name"),
@@ -96,6 +101,7 @@ func (h UploadHandlers) PostJSON() echo.HandlerFunc {
 	}
 }
 
+// parseSelectedTags delegates tag parsing when the caller provides a shared helper.
 func (h UploadHandlers) parseSelectedTags(c echo.Context) []string {
 	if h.ParseSelectedTags == nil {
 		return nil
@@ -103,6 +109,7 @@ func (h UploadHandlers) parseSelectedTags(c echo.Context) []string {
 	return h.ParseSelectedTags(c)
 }
 
+// truthy normalizes HTML checkbox-style values into a boolean.
 func (h UploadHandlers) truthy(v string) bool {
 	if h.Truthy != nil {
 		return h.Truthy(v)
@@ -111,6 +118,7 @@ func (h UploadHandlers) truthy(v string) bool {
 	return v == "1" || v == "true" || v == "on" || v == "yes" || v == "y"
 }
 
+// normalizeFolderID trims or delegates folder ID normalization.
 func (h UploadHandlers) normalizeFolderID(v string) string {
 	if h.NormalizeFolderID != nil {
 		return h.NormalizeFolderID(v)
@@ -118,6 +126,7 @@ func (h UploadHandlers) normalizeFolderID(v string) string {
 	return strings.TrimSpace(v)
 }
 
+// toEchoError converts service-layer HTTP errors into Echo errors.
 func (h UploadHandlers) toEchoError(err error) error {
 	var httpErr *service.HTTPError
 	if errors.As(err, &httpErr) && httpErr != nil {

@@ -1,3 +1,4 @@
+// job_lifecycle.go centralizes job state resets and blob cleanup rules.
 package service
 
 import (
@@ -24,6 +25,7 @@ type JobLifecycle struct {
 	d JobLifecycleDeps
 }
 
+// NewJobLifecycle builds the lifecycle helper with sensible defaults.
 func NewJobLifecycle(d JobLifecycleDeps) *JobLifecycle {
 	if d.Now == nil {
 		d.Now = time.Now
@@ -31,6 +33,7 @@ func NewJobLifecycle(d JobLifecycleDeps) *JobLifecycle {
 	return &JobLifecycle{d: d}
 }
 
+// NotifyFilesChanged emits the standard file-list invalidation event for a user.
 func (s *JobLifecycle) NotifyFilesChanged(userID string) {
 	if s == nil || s.d.Notify == nil {
 		return
@@ -38,6 +41,7 @@ func (s *JobLifecycle) NotifyFilesChanged(userID string) {
 	s.d.Notify(userID, "files.changed", nil)
 }
 
+// ResetForTranscribe clears previous results before an audio job is queued again.
 func (s *JobLifecycle) ResetForTranscribe(jobID string, refineEnabled bool) {
 	if s == nil {
 		return
@@ -72,6 +76,7 @@ func (s *JobLifecycle) ResetForTranscribe(jobID string, refineEnabled bool) {
 	s.deleteJobBlob(jobID, store.BlobKindRefined)
 }
 
+// ResetForPDF clears previous document results before a PDF job is queued again.
 func (s *JobLifecycle) ResetForPDF(jobID string) {
 	if s == nil {
 		return
@@ -108,6 +113,7 @@ func (s *JobLifecycle) ResetForPDF(jobID string) {
 	s.ClearPDFProcessingBlobs(jobID)
 }
 
+// PrepareForPDFRetry clears failure state while preserving resumable PDF progress blobs.
 func (s *JobLifecycle) PrepareForPDFRetry(jobID string) {
 	if s == nil {
 		return
@@ -135,6 +141,7 @@ func (s *JobLifecycle) PrepareForPDFRetry(jobID string) {
 	s.deleteJobBlob(jobID, store.BlobKindPreview)
 }
 
+// ClearPDFProcessingBlobs removes chunk/intermediate blobs created during PDF extraction.
 func (s *JobLifecycle) ClearPDFProcessingBlobs(jobID string) {
 	s.deleteJobBlob(jobID, store.BlobKindPreview)
 	s.deleteJobBlob(jobID, store.BlobKindDocumentJSON)
@@ -155,6 +162,7 @@ func (s *JobLifecycle) ClearPDFProcessingBlobs(jobID string) {
 	}
 }
 
+// MarkTrashed updates the job fields needed when a job moves to trash.
 func (s *JobLifecycle) MarkTrashed(jobID string) {
 	if s == nil {
 		return
@@ -173,6 +181,7 @@ func (s *JobLifecycle) MarkTrashed(jobID string) {
 	}
 }
 
+// deleteJobBlob hides the nil checks around blob deletion.
 func (s *JobLifecycle) deleteJobBlob(jobID, kind string) {
 	if s == nil || s.d.DeleteJobBlob == nil {
 		return

@@ -46,6 +46,7 @@ type LegacyMutationHandlers struct {
 	Errf func(string, error, string, ...any)
 }
 
+// BatchDelete handles the old multi-select trash form flow.
 func (h LegacyMutationHandlers) BatchDelete() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUser == nil || h.GetJob == nil || h.SetJobFields == nil || h.MarkJobTrashed == nil || h.FolderSvc == nil || h.CollectFolderSubtree == nil || h.MarkSubtreeJobsTrashed == nil {
@@ -70,6 +71,7 @@ func (h LegacyMutationHandlers) BatchDelete() echo.HandlerFunc {
 			return c.Redirect(http.StatusSeeOther, filesHomePath)
 		}
 
+		// Resolve owned jobs first so the redirect flow never exposes partial validation errors.
 		touchedFolders := map[string]struct{}{}
 		ownedJobs := make([]string, 0, len(jobIDs))
 		for _, id := range jobIDs {
@@ -86,6 +88,7 @@ func (h LegacyMutationHandlers) BatchDelete() echo.HandlerFunc {
 			h.MarkJobTrashed(id)
 		}
 
+		// Folder deletes fan out to every nested job via the collected subtree.
 		subtree := h.CollectFolderSubtree(u.ID, folderIDs, true)
 		h.MarkSubtreeJobsTrashed(u.ID, subtree)
 
@@ -113,6 +116,7 @@ func (h LegacyMutationHandlers) BatchDelete() echo.HandlerFunc {
 	}
 }
 
+// BatchMove handles the old multi-select move form flow.
 func (h LegacyMutationHandlers) BatchMove() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUser == nil || h.FolderSvc == nil || h.GetJob == nil || h.SetJobFields == nil {
@@ -188,6 +192,7 @@ func (h LegacyMutationHandlers) BatchMove() echo.HandlerFunc {
 	}
 }
 
+// CreateTagHTML upserts a tag through the legacy form flow.
 func (h LegacyMutationHandlers) CreateTagHTML() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUser == nil || h.TagSvc == nil || h.IsValidTagName == nil {
@@ -219,6 +224,7 @@ func (h LegacyMutationHandlers) CreateTagHTML() echo.HandlerFunc {
 	}
 }
 
+// DeleteTagHTML removes a tag through the legacy form flow.
 func (h LegacyMutationHandlers) DeleteTagHTML() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUser == nil || h.TagSvc == nil {
@@ -248,6 +254,7 @@ func (h LegacyMutationHandlers) DeleteTagHTML() echo.HandlerFunc {
 	}
 }
 
+// CreateFolderHTML creates a folder through the legacy form flow.
 func (h LegacyMutationHandlers) CreateFolderHTML() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUser == nil || h.FolderSvc == nil {
@@ -284,6 +291,7 @@ func (h LegacyMutationHandlers) CreateFolderHTML() echo.HandlerFunc {
 	}
 }
 
+// RenameFolderHTML renames a folder and redirects back to its parent view.
 func (h LegacyMutationHandlers) RenameFolderHTML() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUser == nil || h.FolderSvc == nil {
@@ -313,6 +321,7 @@ func (h LegacyMutationHandlers) RenameFolderHTML() echo.HandlerFunc {
 	}
 }
 
+// MoveFolderHTML changes a folder parent through the legacy form flow.
 func (h LegacyMutationHandlers) MoveFolderHTML() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUser == nil || h.FolderSvc == nil {
@@ -367,6 +376,7 @@ func (h LegacyMutationHandlers) MoveFolderHTML() echo.HandlerFunc {
 	}
 }
 
+// TrashFolderHTML moves a folder subtree into the trash.
 func (h LegacyMutationHandlers) TrashFolderHTML() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUser == nil || h.FolderSvc == nil || h.CollectFolderSubtree == nil || h.MarkSubtreeJobsTrashed == nil {
@@ -392,6 +402,7 @@ func (h LegacyMutationHandlers) TrashFolderHTML() echo.HandlerFunc {
 	}
 }
 
+// RestoreFolderHTML restores a trashed folder from the legacy trash page.
 func (h LegacyMutationHandlers) RestoreFolderHTML() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUser == nil || h.FolderSvc == nil {
@@ -415,6 +426,7 @@ func (h LegacyMutationHandlers) RestoreFolderHTML() echo.HandlerFunc {
 	}
 }
 
+// TrashJobHTML trashes a single job from the legacy UI.
 func (h LegacyMutationHandlers) TrashJobHTML() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUser == nil || h.FolderSvc == nil || h.GetJob == nil || h.MarkJobTrashed == nil {
@@ -437,6 +449,7 @@ func (h LegacyMutationHandlers) TrashJobHTML() echo.HandlerFunc {
 	}
 }
 
+// RestoreJobHTML restores a single job from the legacy trash page.
 func (h LegacyMutationHandlers) RestoreJobHTML() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUser == nil || h.FolderSvc == nil || h.BlobSvc == nil || h.GetJob == nil || h.SetJobFields == nil {
@@ -472,6 +485,7 @@ func (h LegacyMutationHandlers) RestoreJobHTML() echo.HandlerFunc {
 	}
 }
 
+// RenameJobHTML renames a single job from the legacy UI.
 func (h LegacyMutationHandlers) RenameJobHTML() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUser == nil || h.GetJob == nil || h.SetJobFields == nil {
@@ -501,6 +515,7 @@ func (h LegacyMutationHandlers) RenameJobHTML() echo.HandlerFunc {
 	}
 }
 
+// UpdateJobTagsHTML replaces job tags using legacy form fields.
 func (h LegacyMutationHandlers) UpdateJobTagsHTML() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUser == nil || h.TagSvc == nil || h.GetJob == nil || h.SetJobFields == nil {
@@ -532,6 +547,7 @@ func (h LegacyMutationHandlers) UpdateJobTagsHTML() echo.HandlerFunc {
 	}
 }
 
+// uniqueStringsKeepOrder removes duplicates while preserving the first occurrence.
 func uniqueStringsKeepOrder(v []string) []string {
 	out := make([]string, 0, len(v))
 	seen := map[string]struct{}{}

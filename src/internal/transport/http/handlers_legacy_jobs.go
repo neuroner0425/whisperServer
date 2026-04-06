@@ -46,6 +46,7 @@ type LegacyJobsHandlers struct {
 	Errf func(string, error, string, ...any)
 }
 
+// Updates returns the legacy list payload polled by older pages.
 func (h LegacyJobsHandlers) Updates() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		disableCache(c)
@@ -78,6 +79,7 @@ func (h LegacyJobsHandlers) Updates() echo.HandlerFunc {
 			view = "explore"
 		}
 
+		// Rebuild the same list and folder payload shape expected by the old UI.
 		rows := h.BuildRecentJobRows(u.ID, q, tag)
 		folderItems := []FolderRow{}
 		if view == "explore" {
@@ -103,6 +105,7 @@ func (h LegacyJobsHandlers) Updates() echo.HandlerFunc {
 			})
 		}
 
+		// Expand folder metadata only when the client version is stale.
 		allFolders, _ := h.FolderSvc.ListAll(u.ID, false)
 		path, _ := h.FolderSvc.Path(u.ID, folderID)
 
@@ -119,6 +122,7 @@ func (h LegacyJobsHandlers) Updates() echo.HandlerFunc {
 	}
 }
 
+// Status returns lightweight progress fields for the legacy polling loop.
 func (h LegacyJobsHandlers) Status() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil || h.GetJob == nil {
@@ -148,24 +152,28 @@ func (h LegacyJobsHandlers) Status() echo.HandlerFunc {
 	}
 }
 
+// Download returns the default downloadable result for the job.
 func (h LegacyJobsHandlers) Download() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		return h.downloadVariant(c, "default")
 	}
 }
 
+// DownloadRefined returns the refined JSON result for the job.
 func (h LegacyJobsHandlers) DownloadRefined() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		return h.downloadVariant(c, "refined")
 	}
 }
 
+// DownloadDocumentJSON returns the structured document JSON result for PDFs.
 func (h LegacyJobsHandlers) DownloadDocumentJSON() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		return h.downloadVariant(c, "document_json")
 	}
 }
 
+// downloadVariant centralizes legacy result download behavior across variants.
 func (h LegacyJobsHandlers) downloadVariant(c echo.Context, variant string) error {
 	if h.CurrentUserOrUnauthorized == nil || h.GetJob == nil || h.BlobSvc == nil {
 		return c.NoContent(http.StatusServiceUnavailable)
@@ -184,6 +192,7 @@ func (h LegacyJobsHandlers) downloadVariant(c echo.Context, variant string) erro
 		return echo.NewHTTPError(http.StatusNotFound, "다운로드할 결과가 없습니다.")
 	}
 
+	// Resolve the blob and filename suffix for the requested variant.
 	var (
 		b        []byte
 		suffix   string
@@ -228,6 +237,7 @@ func (h LegacyJobsHandlers) downloadVariant(c echo.Context, variant string) erro
 	return c.Blob(http.StatusOK, mimeType, b)
 }
 
+// BatchDownload bundles selected completed jobs into a zip archive.
 func (h LegacyJobsHandlers) BatchDownload() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil || h.GetJob == nil || h.BlobSvc == nil {
@@ -251,6 +261,7 @@ func (h LegacyJobsHandlers) BatchDownload() echo.HandlerFunc {
 			return c.Redirect(http.StatusSeeOther, filesHomePath)
 		}
 
+		// Build the archive entirely in memory because the legacy flow is request scoped.
 		buf := bytes.NewBuffer(nil)
 		zw := zip.NewWriter(buf)
 		added := 0
@@ -310,6 +321,7 @@ func (h LegacyJobsHandlers) BatchDownload() echo.HandlerFunc {
 	}
 }
 
+// fallback returns a non-empty string for legacy status payloads.
 func fallback(v, def string) string {
 	if strings.TrimSpace(v) == "" {
 		return def

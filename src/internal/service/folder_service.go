@@ -1,3 +1,4 @@
+// folder_service.go contains folder-focused business rules shared by HTTP handlers.
 package service
 
 import (
@@ -25,14 +26,17 @@ type FolderService struct {
 	d FolderServiceDeps
 }
 
+// NewFolderService builds the folder service from repo callbacks.
 func NewFolderService(d FolderServiceDeps) *FolderService {
 	return &FolderService{d: d}
 }
 
+// NormalizeID trims folder ids passed from HTTP forms and query strings.
 func (s *FolderService) NormalizeID(v string) string {
 	return strings.TrimSpace(v)
 }
 
+// Require loads a folder and converts lookup failures into user-facing HTTP errors.
 func (s *FolderService) Require(ownerID, folderID string, allowTrashed bool, statusCode int, message string) (*model.Folder, error) {
 	folderID = strings.TrimSpace(folderID)
 	if folderID == "" {
@@ -57,6 +61,7 @@ func (s *FolderService) Require(ownerID, folderID string, allowTrashed bool, sta
 	return f, nil
 }
 
+// Create validates the name and creates a folder under the optional parent id.
 func (s *FolderService) Create(ownerID, name, parentID string) (string, error) {
 	name = strings.TrimSpace(name)
 	parentID = strings.TrimSpace(parentID)
@@ -73,6 +78,7 @@ func (s *FolderService) Create(ownerID, name, parentID string) (string, error) {
 	return id, nil
 }
 
+// Rename validates and renames an existing folder.
 func (s *FolderService) Rename(ownerID, folderID, newName string) error {
 	folderID = strings.TrimSpace(folderID)
 	newName = strings.TrimSpace(newName)
@@ -91,6 +97,7 @@ func (s *FolderService) Rename(ownerID, folderID, newName string) error {
 	return nil
 }
 
+// Trash moves a folder into the trashed state.
 func (s *FolderService) Trash(ownerID, folderID string) error {
 	folderID = strings.TrimSpace(folderID)
 	if folderID == "" {
@@ -105,6 +112,7 @@ func (s *FolderService) Trash(ownerID, folderID string) error {
 	return nil
 }
 
+// Restore restores a trashed folder and returns the refreshed folder record.
 func (s *FolderService) Restore(ownerID, folderID string) (*model.Folder, error) {
 	folderID = strings.TrimSpace(folderID)
 	if folderID == "" {
@@ -123,6 +131,7 @@ func (s *FolderService) Restore(ownerID, folderID string) (*model.Folder, error)
 	return f, nil
 }
 
+// Move changes the parent folder for an existing folder.
 func (s *FolderService) Move(ownerID, folderID, parentID string) error {
 	folderID = strings.TrimSpace(folderID)
 	parentID = strings.TrimSpace(parentID)
@@ -138,6 +147,7 @@ func (s *FolderService) Move(ownerID, folderID, parentID string) error {
 	return nil
 }
 
+// IsDescendant asks the repo whether a folder is inside another folder's subtree.
 func (s *FolderService) IsDescendant(ownerID, folderID, maybeDescendantID string) (bool, error) {
 	if s.d.IsFolderDescendant == nil {
 		return false, NewHTTPError(http.StatusServiceUnavailable, "서비스를 사용할 수 없습니다.")
@@ -145,6 +155,7 @@ func (s *FolderService) IsDescendant(ownerID, folderID, maybeDescendantID string
 	return s.d.IsFolderDescendant(ownerID, folderID, maybeDescendantID)
 }
 
+// TouchAncestors bumps the folder tree timestamps after a mutation.
 func (s *FolderService) TouchAncestors(ownerID, folderID string) error {
 	folderID = strings.TrimSpace(folderID)
 	if folderID == "" {
@@ -156,6 +167,7 @@ func (s *FolderService) TouchAncestors(ownerID, folderID string) error {
 	return s.d.TouchFolderAndAncestors(ownerID, folderID)
 }
 
+// ListAll returns every folder for the owner in the selected trash state.
 func (s *FolderService) ListAll(ownerID string, trashed bool) ([]model.Folder, error) {
 	if s.d.ListAllFoldersByOwner == nil {
 		return nil, NewHTTPError(http.StatusServiceUnavailable, "서비스를 사용할 수 없습니다.")
@@ -167,6 +179,7 @@ func (s *FolderService) ListAll(ownerID string, trashed bool) ([]model.Folder, e
 	return folders, nil
 }
 
+// Path returns the folder breadcrumb path for the supplied folder id.
 func (s *FolderService) Path(ownerID, folderID string) ([]model.Folder, error) {
 	if s.d.ListFolderPath == nil {
 		return nil, NewHTTPError(http.StatusServiceUnavailable, "서비스를 사용할 수 없습니다.")
@@ -178,6 +191,7 @@ func (s *FolderService) Path(ownerID, folderID string) ([]model.Folder, error) {
 	return path, nil
 }
 
+// DeleteTrashed removes every trashed folder owned by the user.
 func (s *FolderService) DeleteTrashed(ownerID string) error {
 	if s.d.DeleteTrashedFoldersByOwner == nil {
 		return NewHTTPError(http.StatusServiceUnavailable, "서비스를 사용할 수 없습니다.")

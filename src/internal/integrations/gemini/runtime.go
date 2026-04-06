@@ -16,6 +16,7 @@ import (
 	"whisperserver/src/internal/worker"
 )
 
+// Config defines Gemini-specific runtime settings and callbacks.
 type Config struct {
 	Model                         string
 	APIKeys                       []string
@@ -26,6 +27,7 @@ type Config struct {
 	Errf                          func(scope string, err error, format string, args ...any)
 }
 
+// Runtime owns Gemini clients, key rotation, and request helpers.
 type Runtime struct {
 	cfg Config
 	mu  sync.Mutex
@@ -39,6 +41,7 @@ type Runtime struct {
 	documentPromptErr  error
 }
 
+// geminiKeyClient tracks one API key together with cooldown state.
 type geminiKeyClient struct {
 	key           string
 	client        *genai.Client
@@ -48,22 +51,26 @@ type geminiKeyClient struct {
 
 var legacyTimelineLineRe = regexp.MustCompile(`^\[(\d{2}:\d{2}:\d{2})\.(\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2})\.(\d{3})\]\s*(.*)$`)
 
+// New creates a Gemini runtime with lazy client initialization.
 func New(cfg Config) *Runtime {
 	return &Runtime{cfg: cfg}
 }
 
+// logf emits integration logs when a logger is configured.
 func (r *Runtime) logf(format string, args ...any) {
 	if r.cfg.Logf != nil {
 		r.cfg.Logf(format, args...)
 	}
 }
 
+// errf emits integration errors when an error logger is configured.
 func (r *Runtime) errf(scope string, err error, format string, args ...any) {
 	if r.cfg.Errf != nil {
 		r.cfg.Errf(scope, err, format, args...)
 	}
 }
 
+// loadKeys initializes one Gemini client per unique configured API key.
 func (r *Runtime) loadKeys() {
 	r.load.Do(func() {
 		seen := map[string]struct{}{}
@@ -88,6 +95,7 @@ func (r *Runtime) loadKeys() {
 			}
 			r.clients = append(r.clients, geminiKeyClient{key: k, client: c})
 		}
+		// Build clients eagerly so failures are discovered once at startup time.
 		for _, k := range r.cfg.APIKeys {
 			add(k)
 		}
@@ -95,11 +103,13 @@ func (r *Runtime) loadKeys() {
 	})
 }
 
+// HasConfigured reports whether at least one usable Gemini client was created.
 func (r *Runtime) HasConfigured() bool {
 	r.loadKeys()
 	return len(r.clients) > 0
 }
 
+// RefineTranscript sends transcript text to Gemini and rotates across API keys on failure.
 func (r *Runtime) RefineTranscript(rawText, description string) (string, error) {
 	r.loadKeys()
 	r.mu.Lock()
@@ -115,6 +125,7 @@ func (r *Runtime) RefineTranscript(rawText, description string) (string, error) 
 	}
 	prompt += "[Original]\n\"\"\"\n" + normalizeRefineInputText(rawText) + "\n\"\"\"\n"
 
+	// Retry across the client pool while honoring per-key cooldown windows.
 	var lastErr error = errors.New("gemini request failed")
 	maxAttempts := clientCount * 3
 	for attempt := 0; attempt < maxAttempts; attempt++ {
@@ -145,6 +156,7 @@ func (r *Runtime) RefineTranscript(rawText, description string) (string, error) 
 	return "", lastErr
 }
 
+// nextReadyClient returns the next client whose cooldown window has expired.
 func (r *Runtime) nextReadyClient(now time.Time) (int, time.Duration) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -168,6 +180,7 @@ func (r *Runtime) nextReadyClient(now time.Time) (int, time.Duration) {
 	return -1, minWait
 }
 
+// generate performs one refine request using the selected Gemini client.
 func (r *Runtime) generate(idx int, prompt string) (string, error) {
 	r.mu.Lock()
 	if idx < 0 || idx >= len(r.clients) {
@@ -178,6 +191,7 @@ func (r *Runtime) generate(idx int, prompt string) (string, error) {
 	keySuffix := maskedKeySuffix(r.clients[idx].key)
 	r.mu.Unlock()
 
+	// Refinement requests use structured JSON output so later stages can render reliably.
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	responseSchema, err := parseRefineResponseSchema()

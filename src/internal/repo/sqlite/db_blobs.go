@@ -2,12 +2,14 @@ package sqlite
 
 import "fmt"
 
+// JobBlobUsage summarizes per-job blob storage usage.
 type JobBlobUsage struct {
 	JobID     string
 	Bytes     int64
 	BlobCount int
 }
 
+// SaveJobBlob upserts one named blob for a job.
 func SaveJobBlob(jobID, kind string, data []byte) error {
 	if dbConn == nil {
 		return fmt.Errorf("db is not initialized")
@@ -19,6 +21,7 @@ func SaveJobBlob(jobID, kind string, data []byte) error {
 	return err
 }
 
+// LoadJobBlob returns one named blob for a job.
 func LoadJobBlob(jobID, kind string) ([]byte, error) {
 	if dbConn == nil {
 		return nil, fmt.Errorf("db is not initialized")
@@ -31,6 +34,7 @@ func LoadJobBlob(jobID, kind string) ([]byte, error) {
 	return b, nil
 }
 
+// HasJobBlob reports whether a named blob exists for a job.
 func HasJobBlob(jobID, kind string) bool {
 	if dbConn == nil {
 		return false
@@ -43,6 +47,7 @@ func HasJobBlob(jobID, kind string) bool {
 	return n > 0
 }
 
+// DeleteJobBlobs removes every blob attached to a job.
 func DeleteJobBlobs(jobID string) {
 	if dbConn == nil {
 		return
@@ -50,6 +55,7 @@ func DeleteJobBlobs(jobID string) {
 	_, _ = dbConn.Exec(`DELETE FROM job_blobs WHERE job_id = ?`, jobID)
 }
 
+// DeleteJobBlob removes one named blob attached to a job.
 func DeleteJobBlob(jobID, kind string) {
 	if dbConn == nil {
 		return
@@ -57,6 +63,7 @@ func DeleteJobBlob(jobID, kind string) {
 	_, _ = dbConn.Exec(`DELETE FROM job_blobs WHERE job_id = ? AND kind = ?`, jobID, kind)
 }
 
+// ListJobBlobKinds lists every stored blob kind for a job.
 func ListJobBlobKinds(jobID string) ([]string, error) {
 	if dbConn == nil {
 		return nil, fmt.Errorf("db is not initialized")
@@ -78,6 +85,7 @@ func ListJobBlobKinds(jobID string) ([]string, error) {
 	return out, rows.Err()
 }
 
+// ListJobBlobUsageByOwner aggregates blob storage usage for one owner.
 func ListJobBlobUsageByOwner(ownerID string) ([]JobBlobUsage, error) {
 	if dbConn == nil {
 		return nil, fmt.Errorf("db is not initialized")
@@ -107,6 +115,7 @@ func ListJobBlobUsageByOwner(ownerID string) ([]JobBlobUsage, error) {
 	return out, rows.Err()
 }
 
+// JobBlobUsageMapByOwner returns blob usage keyed by job ID.
 func JobBlobUsageMapByOwner(ownerID string) (map[string]int64, error) {
 	items, err := ListJobBlobUsageByOwner(ownerID)
 	if err != nil {

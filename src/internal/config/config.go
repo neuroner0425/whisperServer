@@ -1,3 +1,4 @@
+// config.go loads app.conf values into a typed runtime configuration object.
 package config
 
 import (
@@ -42,6 +43,7 @@ type Config struct {
 
 type rawValues map[string][]string
 
+// Load reads the active config file and converts raw values into a validated Config.
 func Load(projectRoot string) (Config, error) {
 	values, srcPath, err := loadConfigFile(projectRoot)
 	if err != nil {
@@ -103,6 +105,7 @@ func Load(projectRoot string) (Config, error) {
 	return c, nil
 }
 
+// validatePDFValues verifies the numeric PDF-related limits before bootstrap uses them.
 func (c Config) validatePDFValues() error {
 	if c.PDFMaxPages <= 0 {
 		return fmt.Errorf("PDF_MAX_PAGES must be > 0")
@@ -157,6 +160,7 @@ func (c Config) ValidateExternalTools() error {
 	return nil
 }
 
+// loadConfigFile loads app.conf or app.conf.default and keeps repeated values by key.
 func loadConfigFile(projectRoot string) (rawValues, string, error) {
 	userPath := filepath.Join(projectRoot, "app.conf")
 	defaultPath := filepath.Join(projectRoot, "app.conf.default")
@@ -217,6 +221,7 @@ func loadConfigFile(projectRoot string) (rawValues, string, error) {
 	return values, targetPath, nil
 }
 
+// string returns the last configured scalar value for a key.
 func (v rawValues) string(key string) string {
 	vals := v[key]
 	if len(vals) == 0 {
@@ -237,6 +242,7 @@ func (v rawValues) string(key string) string {
 	return s
 }
 
+// int parses the last configured value for a key as an integer.
 func (v rawValues) int(key string) int {
 	s := v.string(key)
 	if s == "" {
@@ -249,10 +255,12 @@ func (v rawValues) int(key string) int {
 	return i
 }
 
+// bool parses the last configured value for a key as a boolean.
 func (v rawValues) bool(key string) bool {
 	return intutil.Truthy(v.string(key))
 }
 
+// list parses the last configured value for a key as a string list.
 func (v rawValues) list(key string) []string {
 	raw := v[key]
 	if len(raw) == 0 {

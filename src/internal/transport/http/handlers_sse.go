@@ -8,11 +8,13 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// SSEBroker is the runtime event source used by the `/api/events` stream.
 type SSEBroker interface {
 	Subscribe(userID string) chan []byte
 	Unsubscribe(userID string, ch chan []byte)
 }
 
+// SSEHandlers exposes the job/file event stream consumed by the frontend.
 type SSEHandlers struct {
 	Broker SSEBroker
 
@@ -20,6 +22,7 @@ type SSEHandlers struct {
 	CurrentUserOrUnauthorized func(echo.Context) (userID string, ok bool)
 }
 
+// EventsHandler opens an SSE stream and forwards broker messages to the client.
 func (h SSEHandlers) EventsHandler() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.Broker == nil || h.CurrentUserOrUnauthorized == nil {
@@ -38,6 +41,7 @@ func (h SSEHandlers) EventsHandler() echo.HandlerFunc {
 		res.Header().Set("X-Accel-Buffering", "no")
 		res.WriteHeader(http.StatusOK)
 
+		// Subscribe after headers are committed so the client can start reading immediately.
 		sub := h.Broker.Subscribe(userID)
 		defer h.Broker.Unsubscribe(userID, sub)
 
@@ -49,6 +53,7 @@ func (h SSEHandlers) EventsHandler() echo.HandlerFunc {
 		ticker := time.NewTicker(25 * time.Second)
 		defer ticker.Stop()
 
+		// Keep the connection alive with periodic comments between real events.
 		for {
 			select {
 			case <-req.Context().Done():

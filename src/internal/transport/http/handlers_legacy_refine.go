@@ -10,6 +10,7 @@ import (
 	"whisperserver/src/internal/service"
 )
 
+// LegacyRefineHandlers preserves the old HTML refine-retry endpoint.
 type LegacyRefineHandlers struct {
 	CurrentUser func(echo.Context) (*User, bool) // redirects happen in middleware already
 
@@ -26,6 +27,7 @@ type LegacyRefineHandlers struct {
 	Logf func(string, ...any)
 }
 
+// RetryHTML queues refinement and redirects back to the legacy job page.
 func (h LegacyRefineHandlers) RetryHTML() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUser == nil || h.GetJob == nil || h.BlobSvc == nil || h.SetJobFields == nil || h.EnqueueRefine == nil || h.HasGeminiConfigured == nil {

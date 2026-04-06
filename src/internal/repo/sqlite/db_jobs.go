@@ -7,6 +7,7 @@ import (
 	model "whisperserver/src/internal/domain"
 )
 
+// LoadJobs hydrates the in-memory job snapshot from SQLite rows and blobs.
 func LoadJobs() (map[string]*model.Job, error) {
 	if dbConn == nil {
 		return map[string]*model.Job{}, fmt.Errorf("db is not initialized")
@@ -71,6 +72,7 @@ func LoadJobs() (map[string]*model.Job, error) {
 			v := int(mediaDurationSeconds.Int64)
 			job.MediaDurationSeconds = &v
 		}
+		// Pull frequently needed blob-derived fields into the snapshot for fast runtime access.
 		if preview, previewErr := LoadJobBlob(id, BlobKindPreview); previewErr == nil {
 			job.PreviewText = string(preview)
 		}
@@ -85,6 +87,7 @@ func LoadJobs() (map[string]*model.Job, error) {
 	return out, rows.Err()
 }
 
+// SaveJobs persists the entire in-memory snapshot back into SQLite.
 func SaveJobs(snapshot map[string]*model.Job) (err error) {
 	if dbConn == nil {
 		return fmt.Errorf("db is not initialized")
@@ -117,6 +120,7 @@ func SaveJobs(snapshot map[string]*model.Job) (err error) {
 		return err
 	}
 
+	// Upsert current jobs first, then remove rows no longer present in memory.
 	seen := map[string]struct{}{}
 	for id, job := range snapshot {
 		if _, execErr := tx.Exec(`

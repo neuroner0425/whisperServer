@@ -15,10 +15,13 @@ import (
 	"time"
 )
 
+// ErrUploadTooLarge reports that a streamed upload exceeded the configured limit.
 var ErrUploadTooLarge = errors.New("upload too large")
 
+// wavTranscriptionFilter is the default ffmpeg filter chain used before Whisper.
 const wavTranscriptionFilter = "highpass=f=80,lowpass=f=7000,dynaudnorm=f=150:g=15:p=0.95:m=10,alimiter=limit=0.95"
 
+// DetectFileType classifies uploads using only their filename extension.
 func DetectFileType(name string) string {
 	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), ".")
 	switch ext {
@@ -33,12 +36,14 @@ func DetectFileType(name string) string {
 	}
 }
 
+// AllowedFile checks whether the upload extension is explicitly allowed.
 func AllowedFile(name string, allowedExtensions map[string]struct{}) bool {
 	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), ".")
 	_, ok := allowedExtensions[ext]
 	return ok
 }
 
+// SaveUploadWithLimit streams an upload to disk with size and optional rate limits.
 func SaveUploadWithLimit(h *multipart.FileHeader, dst string, maxBytes int64, chunkSize int, bytesPerSec int64) (int64, error) {
 	src, err := h.Open()
 	if err != nil {
@@ -55,6 +60,7 @@ func SaveUploadWithLimit(h *multipart.FileHeader, dst string, maxBytes int64, ch
 	buf := make([]byte, chunkSize)
 	var written int64
 	startedAt := time.Now()
+	// Copy in chunks so size checks and throttling can be enforced incrementally.
 	for {
 		n, readErr := src.Read(buf)
 		if n > 0 {
@@ -82,6 +88,7 @@ func SaveUploadWithLimit(h *multipart.FileHeader, dst string, maxBytes int64, ch
 	return written, nil
 }
 
+// ConvertToWav normalizes arbitrary media into the mono 16k WAV expected by Whisper.
 func ConvertToWav(src, dst string) error {
 	filteredArgs := []string{
 		"-y",
@@ -93,6 +100,7 @@ func ConvertToWav(src, dst string) error {
 		"-af", wavTranscriptionFilter,
 		dst,
 	}
+	// Try the filtered conversion first, then fall back to a plain resample when filters fail.
 	if out, err := runFFmpeg(filteredArgs...); err == nil {
 		return nil
 	} else {
@@ -113,6 +121,7 @@ func ConvertToWav(src, dst string) error {
 	}
 }
 
+// ConvertToAac creates the AAC derivative kept for replay and retries.
 func ConvertToAac(src, dst string) error {
 	cmd := exec.Command(
 		"ffmpeg",
@@ -131,6 +140,7 @@ func ConvertToAac(src, dst string) error {
 	return nil
 }
 
+// runFFmpeg executes ffmpeg and returns trimmed output for logging.
 func runFFmpeg(args ...string) (string, error) {
 	cmd := exec.Command("ffmpeg", args...)
 	out, err := cmd.CombinedOutput()
@@ -141,6 +151,7 @@ func runFFmpeg(args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// GetMediaDuration returns rounded seconds using ffprobe when available.
 func GetMediaDuration(path string) *int {
 	cmd := exec.Command("ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", path)
 	out, err := cmd.Output()
@@ -159,6 +170,7 @@ func GetMediaDuration(path string) *int {
 	return &v
 }
 
+// FormatSecondsPtr renders an optional duration for display.
 func FormatSecondsPtr(sec *int) string {
 	if sec == nil {
 		return "-"
@@ -166,6 +178,7 @@ func FormatSecondsPtr(sec *int) string {
 	return FormatSeconds(*sec)
 }
 
+// FormatSeconds renders a duration in `MM:SS` or `H:MM:SS` form.
 func FormatSeconds(sec int) string {
 	h := sec / 3600
 	r := sec % 3600
@@ -177,6 +190,7 @@ func FormatSeconds(sec int) string {
 	return fmt.Sprintf("%02d:%02d", m, s)
 }
 
+// SortedExts returns allowed extensions in stable order for UI display.
 func SortedExts(allowedExtensions map[string]struct{}) []string {
 	out := make([]string, 0, len(allowedExtensions))
 	for k := range allowedExtensions {
