@@ -11,6 +11,7 @@ import (
 	"whisperserver/src/internal/service"
 )
 
+// StorageHandlers returns per-user storage usage and the largest stored jobs.
 type StorageHandlers struct {
 	CapacityBytes int64
 
@@ -20,6 +21,7 @@ type StorageHandlers struct {
 	FolderSvc                 *service.FolderService
 }
 
+// storageItem is one row in the storage usage response payload.
 type storageItem struct {
 	ID         string `json:"id"`
 	Filename   string `json:"filename"`
@@ -29,6 +31,7 @@ type storageItem struct {
 	SizeBytes  int64  `json:"size_bytes"`
 }
 
+// Handler returns storage usage together with per-job usage rows.
 func (h StorageHandlers) Handler() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		disableCache(c)
@@ -101,6 +104,7 @@ func (h StorageHandlers) Handler() echo.HandlerFunc {
 	}
 }
 
+// storageItemUpdatedAt picks the most relevant timestamp for storage rows.
 func storageItemUpdatedAt(job *model.Job) string {
 	if job == nil {
 		return ""
@@ -114,6 +118,7 @@ func storageItemUpdatedAt(job *model.Job) string {
 	return job.UploadedAt
 }
 
+// maxInt64 returns the larger of two int64 values.
 func maxInt64(a, b int64) int64 {
 	if a > b {
 		return a
@@ -121,6 +126,7 @@ func maxInt64(a, b int64) int64 {
 	return b
 }
 
+// disableCache marks API responses as non-cacheable.
 func disableCache(c echo.Context) {
 	c.Response().Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate")
 	c.Response().Header().Set("Pragma", "no-cache")

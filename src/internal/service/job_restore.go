@@ -19,7 +19,7 @@ func ResumeRestoredJob(
 		return
 	}
 
-	if job.FileType == "pdf" && blob.HasPDFOriginal(jobID) && !blob.HasDocumentMarkdown(jobID) {
+	if job.FileType == "pdf" && blob.HasPDFOriginal(jobID) && !blob.HasDocumentJSON(jobID) {
 		setJobFields(jobID, map[string]any{
 			"status":           statusPending,
 			"phase":            "",
@@ -38,7 +38,7 @@ func ResumeRestoredJob(
 		return
 	}
 
-	if blob.HasAudioAAC(jobID) && !blob.HasTranscript(jobID) {
+	if blob.HasAudioAAC(jobID) && !blob.HasTranscriptJSON(jobID) {
 		setJobFields(jobID, map[string]any{
 			"status":           statusPending,
 			"phase":            "",
@@ -57,7 +57,7 @@ func ResumeRestoredJob(
 		return
 	}
 
-	if blob.HasTranscript(jobID) && !blob.HasRefined(jobID) && job.RefineEnabled {
+	if blob.HasTranscriptJSON(jobID) && !blob.HasRefined(jobID) && job.RefineEnabled {
 		setJobFields(jobID, map[string]any{
 			"status":         statusRefiningPending,
 			"progress_label": "",

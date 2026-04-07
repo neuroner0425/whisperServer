@@ -11,6 +11,7 @@ import (
 	"whisperserver/src/internal/worker"
 )
 
+// Config wires runtime state to persistence, folders, and notifications.
 type Config struct {
 	TmpFolder             string
 	Now                   func() time.Time
@@ -25,6 +26,7 @@ type Config struct {
 	Errf                  func(string, error, string, ...any)
 }
 
+// Runtime owns process-local job state, SSE broadcasting, and queue integration.
 type Runtime struct {
 	state  *stateStore
 	broker *Broker

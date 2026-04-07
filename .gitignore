@@ -13,6 +13,7 @@ app.conf
 coverage.out
 
 bin/
+log/
 server
 whisper/
 static/app/

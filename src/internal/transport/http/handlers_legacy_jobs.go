@@ -201,9 +201,9 @@ func (h LegacyJobsHandlers) downloadVariant(c echo.Context, variant string) erro
 	)
 	switch variant {
 	case "refined":
-		b, err = h.BlobSvc.LoadRefined(jobID)
-		suffix = "_refined.json"
-		mimeType = "application/json; charset=utf-8"
+		b, err = h.BlobSvc.LoadRefinedMarkdown(jobID)
+		suffix = "_refined.md"
+		mimeType = "text/markdown; charset=utf-8"
 	case "document_json":
 		b, err = h.BlobSvc.LoadDocumentJSON(jobID)
 		suffix = "_document.json"
@@ -212,9 +212,11 @@ func (h LegacyJobsHandlers) downloadVariant(c echo.Context, variant string) erro
 		if job.FileType == "pdf" {
 			b, err = h.BlobSvc.LoadDocumentMarkdown(jobID)
 			suffix = "_document.md"
+			mimeType = "text/markdown; charset=utf-8"
 		} else {
-			b, err = h.BlobSvc.LoadTranscript(jobID)
-			suffix = ".txt"
+			b, err = h.BlobSvc.LoadTranscriptMarkdown(jobID)
+			suffix = ".md"
+			mimeType = "text/markdown; charset=utf-8"
 		}
 	}
 	if err != nil {
@@ -284,11 +286,11 @@ func (h LegacyJobsHandlers) BatchDownload() echo.HandlerFunc {
 				suffix = "_document.md"
 				b, err = h.BlobSvc.LoadDocumentMarkdown(id)
 			} else if h.BlobSvc.HasRefined(id) {
-				suffix = "_refined.json"
-				b, err = h.BlobSvc.LoadRefined(id)
+				suffix = "_refined.md"
+				b, err = h.BlobSvc.LoadRefinedMarkdown(id)
 			} else {
-				suffix = ".txt"
-				b, err = h.BlobSvc.LoadTranscript(id)
+				suffix = ".md"
+				b, err = h.BlobSvc.LoadTranscriptMarkdown(id)
 			}
 			if err != nil {
 				continue

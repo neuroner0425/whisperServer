@@ -8,12 +8,14 @@ import (
 	store "whisperserver/src/internal/repo/sqlite"
 )
 
+// JobLifecycleDeps provides runtime and repository hooks for lifecycle resets.
 type JobLifecycleDeps struct {
 	Now              func() time.Time
 	CancelJob        func(string)
 	RemoveTempWav    func(string)
 	SetJobFields     func(string, map[string]any)
 	DeleteJobBlob    func(string, string)
+	DeleteJobJSON    func(string, string)
 	ListJobBlobKinds func(string) ([]string, error)
 	Notify           func(userID, eventType string, payload map[string]any)
 
@@ -21,6 +23,7 @@ type JobLifecycleDeps struct {
 	StatusPending string
 }
 
+// JobLifecycle centralizes job reset and trash-transition behavior.
 type JobLifecycle struct {
 	d JobLifecycleDeps
 }
@@ -71,9 +74,8 @@ func (s *JobLifecycle) ResetForTranscribe(jobID string, refineEnabled bool) {
 		})
 	}
 	s.deleteJobBlob(jobID, store.BlobKindPreview)
-	s.deleteJobBlob(jobID, store.BlobKindTranscript)
-	s.deleteJobBlob(jobID, store.BlobKindTranscriptJSON)
-	s.deleteJobBlob(jobID, store.BlobKindRefined)
+	s.deleteJobJSON(jobID, store.BlobKindTranscriptJSON)
+	s.deleteJobJSON(jobID, store.BlobKindRefined)
 }
 
 // ResetForPDF clears previous document results before a PDF job is queued again.
@@ -144,8 +146,7 @@ func (s *JobLifecycle) PrepareForPDFRetry(jobID string) {
 // ClearPDFProcessingBlobs removes chunk/intermediate blobs created during PDF extraction.
 func (s *JobLifecycle) ClearPDFProcessingBlobs(jobID string) {
 	s.deleteJobBlob(jobID, store.BlobKindPreview)
-	s.deleteJobBlob(jobID, store.BlobKindDocumentJSON)
-	s.deleteJobBlob(jobID, store.BlobKindDocumentMarkdown)
+	s.deleteJobJSON(jobID, store.BlobKindDocumentJSON)
 	s.deleteJobBlob(jobID, store.BlobKindDocumentChunkIndex)
 
 	if s.d.ListJobBlobKinds == nil {
@@ -187,4 +188,11 @@ func (s *JobLifecycle) deleteJobBlob(jobID, kind string) {
 		return
 	}
 	s.d.DeleteJobBlob(jobID, kind)
+}
+
+func (s *JobLifecycle) deleteJobJSON(jobID, kind string) {
+	if s == nil || s.d.DeleteJobJSON == nil {
+		return
+	}
+	s.d.DeleteJobJSON(jobID, kind)
 }

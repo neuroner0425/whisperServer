@@ -15,6 +15,7 @@ import (
 	"whisperserver/src/internal/service"
 )
 
+// FolderDownloadHandlers bundles all completed results from a folder subtree into a zip.
 type FolderDownloadHandlers struct {
 	CurrentUserOrUnauthorized func(echo.Context) (*User, bool)
 	FolderSvc                 *service.FolderService
@@ -25,6 +26,7 @@ type FolderDownloadHandlers struct {
 	StatusCompleted string
 }
 
+// Handler creates and streams the folder result archive on demand.
 func (h FolderDownloadHandlers) Handler() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil || h.FolderSvc == nil || h.BlobSvc == nil || h.JobsSnapshot == nil || h.CollectFolderSubtree == nil {
@@ -65,11 +67,11 @@ func (h FolderDownloadHandlers) Handler() echo.HandlerFunc {
 				suffix = "_document.md"
 				b, err = h.BlobSvc.LoadDocumentMarkdown(id)
 			} else if h.BlobSvc.HasRefined(id) {
-				suffix = "_refined.json"
-				b, err = h.BlobSvc.LoadRefined(id)
+				suffix = "_refined.md"
+				b, err = h.BlobSvc.LoadRefinedMarkdown(id)
 			} else {
-				suffix = ".txt"
-				b, err = h.BlobSvc.LoadTranscript(id)
+				suffix = ".md"
+				b, err = h.BlobSvc.LoadTranscriptMarkdown(id)
 			}
 			if err != nil {
 				continue

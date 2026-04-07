@@ -1,5 +1,6 @@
 package httptransport
 
+// PaginateJobRows slices job rows and normalizes page bounds.
 func PaginateJobRows(rows []JobRow, page, pageSize int) ([]JobRow, int, int) {
 	if pageSize <= 0 {
 		pageSize = 20

@@ -41,6 +41,7 @@ type Config struct {
 	PDFToolPDFToPPM     string
 }
 
+// rawValues is the multi-value representation used while loading config sources.
 type rawValues map[string][]string
 
 // Load reads the active config file and converts raw values into a validated Config.

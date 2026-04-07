@@ -6,6 +6,7 @@ import (
 	intauth "whisperserver/src/internal/auth"
 )
 
+// AuthUser aliases the auth package's user type into the server package.
 type AuthUser = intauth.User
 
 var authRuntime *intauth.Runtime

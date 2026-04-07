@@ -16,6 +16,7 @@ func TestJobLifecycle_ResetForTranscribe(t *testing.T) {
 		RemoveTempWav: func(string) {},
 		SetJobFields:  func(_ string, fields map[string]any) { setFields = fields },
 		DeleteJobBlob: func(_ string, kind string) { deleted = append(deleted, kind) },
+		DeleteJobJSON: func(_ string, kind string) { deleted = append(deleted, kind) },
 		StatusPending: "작업 대기 중",
 	})
 
@@ -32,7 +33,7 @@ func TestJobLifecycle_ResetForTranscribe(t *testing.T) {
 	}
 
 	sort.Strings(deleted)
-	want := []string{"preview", "refined", "transcript", "transcript_json"}
+	want := []string{"preview", "refined", "transcript_json"}
 	sort.Strings(want)
 	if !reflect.DeepEqual(deleted, want) {
 		t.Fatalf("deleted kinds mismatch:\n got=%v\nwant=%v", deleted, want)
@@ -43,6 +44,7 @@ func TestJobLifecycle_ClearPDFProcessingBlobs(t *testing.T) {
 	deleted := []string{}
 	s := NewJobLifecycle(JobLifecycleDeps{
 		DeleteJobBlob: func(_ string, kind string) { deleted = append(deleted, kind) },
+		DeleteJobJSON: func(_ string, kind string) { deleted = append(deleted, kind) },
 		ListJobBlobKinds: func(string) ([]string, error) {
 			return []string{
 				"document_chunk_1",
@@ -56,7 +58,7 @@ func TestJobLifecycle_ClearPDFProcessingBlobs(t *testing.T) {
 	sort.Strings(deleted)
 
 	// Must include fixed kinds plus chunk kinds.
-	wantContains := []string{"document_chunk_1", "document_chunk_2", "document_chunk_index", "document_json", "document_markdown", "preview"}
+	wantContains := []string{"document_chunk_1", "document_chunk_2", "document_chunk_index", "document_json", "preview"}
 	for _, w := range wantContains {
 		found := false
 		for _, d := range deleted {

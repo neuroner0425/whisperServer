@@ -16,6 +16,7 @@ import (
 
 var metricsOnce sync.Once
 
+// Bootstrap is the fully initialized server surface returned to `main`.
 type Bootstrap struct {
 	Echo    *echo.Echo
 	Port    string

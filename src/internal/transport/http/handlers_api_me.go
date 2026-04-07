@@ -7,17 +7,20 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// User is the minimal authenticated user shape shared by transport handlers.
 type User struct {
 	ID      string
 	LoginID string
 	Email   string
 }
 
+// MeHandlers serves the `/api/me` endpoint for the frontend bootstrap.
 type MeHandlers struct {
 	// CurrentUserOrUnauthorized should write 401 JSON on failure.
 	CurrentUserOrUnauthorized func(echo.Context) (*User, bool)
 }
 
+// Handler returns the current authenticated user payload.
 func (h MeHandlers) Handler() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil {
@@ -38,6 +41,7 @@ func (h MeHandlers) Handler() echo.HandlerFunc {
 	}
 }
 
+// displayName derives a user-facing label from login ID or email.
 func displayName(u User) string {
 	if strings.TrimSpace(u.LoginID) != "" {
 		return u.LoginID

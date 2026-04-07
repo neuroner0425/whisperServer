@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+// SortJobRows orders job rows for list responses and legacy pages.
 func SortJobRows(rows []JobRow, sortBy, sortOrder string, uploadedTS func(string) float64) {
 	desc := sortOrder == "desc"
 	switch sortBy {
@@ -35,6 +36,7 @@ func SortJobRows(rows []JobRow, sortBy, sortOrder string, uploadedTS func(string
 	}
 }
 
+// SortFolderRows orders folder rows using the same sort inputs as jobs.
 func SortFolderRows(rows []FolderRow, sortBy, sortOrder string) {
 	desc := sortOrder == "desc"
 	sort.Slice(rows, func(i, j int) bool {
@@ -73,6 +75,7 @@ func SortFolderRows(rows []FolderRow, sortBy, sortOrder string) {
 	})
 }
 
+// JobsSnapshotVersion hashes list payloads so clients can skip unchanged refreshes.
 func JobsSnapshotVersion(jobItems []JobRow, folderItems []FolderRow, page, pageSize, totalPages, totalItems int) string {
 	h := fnv.New64a()
 	fmt.Fprintf(h, "p=%d|ps=%d|tp=%d|ti=%d;", page, pageSize, totalPages, totalItems)

@@ -1,6 +1,6 @@
 # Backend Architecture
 
-기준 시각: 2026-04-06 (KST)
+기준 시각: 2026-04-07 (KST)
 
 이 문서는 현재 코드 기준의 백엔드 구조 설명서다.
 처음 레포지토리를 읽는 개발자가 "어디서 시작해야 하는지", "어떤 패키지가 어떤 책임을 가지는지"를 빠르게 파악하는 것을 목표로 한다.
@@ -126,14 +126,17 @@ src/internal/worker
 
 ### `src/internal/repo/sqlite`
 
-- SQLite + blob persistence 계층.
+- SQLite persistence 계층.
 - 현재 저장소 책임:
   - jobs snapshot
   - users
   - tags
   - folders
-  - blobs
+  - 원본 blob
+  - JSON 결과
+  - runtime artifact metadata/migration
 - 직접 SQL을 다루는 코드는 이 패키지에 둔다.
+- 현재 구조는 `init / schema / migration / repair / maintenance / table-specific repo` 파일로 나뉘어 있다.
 
 ### `src/internal/query/files`
 
@@ -168,11 +171,17 @@ src/internal/worker
 5. 결과는 `repo/sqlite` blob/jobs에 저장된다.
 6. `runtime.Broker`가 SSE 이벤트를 발행한다.
 
+현재 저장 원칙은 다음과 같다.
+
+- 업로드 원본(`audio_aac`, `pdf_original`)은 SQLite blob으로 저장한다.
+- 결과 JSON(`transcript_json`, `refined`, `document_json`)은 `job_json`에 저장한다.
+- preview, document chunk 같은 runtime artifact는 `.run/job_runtime` 아래 파일로 저장한다.
+
 ### 작업 상세 조회
 
 1. `transport/http`가 인증 후 job id를 읽는다.
 2. `runtime.GetJob()`으로 현재 snapshot을 조회한다.
-3. 필요 시 `service.JobBlobService`를 통해 transcript/refined/pdf blob을 읽는다.
+3. 필요 시 `service.JobBlobService`를 통해 원본 blob, 결과 JSON, preview를 읽는다.
 4. 응답 DTO는 `transport/http`에서 최종 JSON으로 조립한다.
 
 ### 폴더/태그/휴지통 변경

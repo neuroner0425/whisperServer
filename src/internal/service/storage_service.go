@@ -3,16 +3,19 @@ package service
 
 import "net/http"
 
+// JobBlobUsage is the service-layer storage usage row for one job.
 type JobBlobUsage struct {
 	JobID     string
 	Bytes     int64
 	BlobCount int
 }
 
+// StorageServiceDeps provides repository callbacks used by storage queries.
 type StorageServiceDeps struct {
 	ListJobBlobUsageByOwner func(ownerID string) ([]JobBlobUsage, error)
 }
 
+// StorageService exposes storage usage queries to HTTP handlers.
 type StorageService struct {
 	d StorageServiceDeps
 }

@@ -19,12 +19,14 @@ const (
 	ctxUserKey     = "auth_user"
 )
 
+// User is the authenticated principal stored in request context.
 type User struct {
 	ID      string
 	LoginID string
 	Email   string
 }
 
+// Claims is the JWT payload issued after a successful login.
 type Claims struct {
 	UserID  string `json:"uid"`
 	LoginID string `json:"login_id,omitempty"`
@@ -32,6 +34,7 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
+// Auth contains JWT configuration and auth-related handlers.
 type Auth struct {
 	jwtSecret        []byte
 	jwtIssuer        string
@@ -41,6 +44,7 @@ type Auth struct {
 	errf             func(string, error, string, ...any)
 }
 
+// NewAuth creates the auth core used by middleware and handlers.
 func NewAuth(jwtSecret []byte, jwtIssuer string, jwtExpiryHours int, authCookieSecure bool, logf func(string, ...any), errf func(string, error, string, ...any)) *Auth {
 	return &Auth{
 		jwtSecret:        jwtSecret,
@@ -80,6 +84,7 @@ func (a *Auth) Middleware(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
+// wantsJSON decides whether auth failures should be rendered as JSON.
 func wantsJSON(c echo.Context) bool {
 	accept := strings.ToLower(c.Request().Header.Get("Accept"))
 	if strings.Contains(accept, "application/json") {
@@ -170,14 +175,17 @@ func (a *Auth) clearAuthCookie(c echo.Context) {
 	})
 }
 
+// normalizeEmail canonicalizes email input before lookup or storage.
 func normalizeEmail(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
+// normalizeLoginID canonicalizes login IDs before lookup or storage.
 func normalizeLoginID(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
+// validateLoginID enforces the current login ID rules.
 func validateLoginID(s string) error {
 	if len(s) < 3 {
 		return errors.New("아이디는 3자 이상이어야 합니다")
@@ -185,6 +193,7 @@ func validateLoginID(s string) error {
 	return nil
 }
 
+// validatePassword enforces the current password rules.
 func validatePassword(pw string) error {
 	if len(pw) < 8 {
 		return errors.New("비밀번호는 8자 이상이어야 합니다")
@@ -192,6 +201,7 @@ func validatePassword(pw string) error {
 	return nil
 }
 
+// hashPassword hashes a plaintext password with bcrypt.
 func hashPassword(pw string) (string, error) {
 	b, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.DefaultCost)
 	if err != nil {
@@ -200,6 +210,7 @@ func hashPassword(pw string) (string, error) {
 	return string(b), nil
 }
 
+// verifyPassword compares a bcrypt hash with plaintext input.
 func verifyPassword(hash, pw string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(pw)) == nil
 }

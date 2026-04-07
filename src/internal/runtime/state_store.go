@@ -10,6 +10,7 @@ import (
 	intutil "whisperserver/src/internal/util"
 )
 
+// stateDeps bundles persistence and side-effect hooks for the state store.
 type stateDeps struct {
 	Now func() time.Time
 

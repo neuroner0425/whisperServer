@@ -13,6 +13,7 @@ import (
 	model "whisperserver/src/internal/domain"
 )
 
+// UploadCreateRequest is the normalized request passed from transport into the upload service.
 type UploadCreateRequest struct {
 	OwnerID string
 
@@ -28,6 +29,7 @@ type UploadCreateRequest struct {
 	FileHeader *multipart.FileHeader
 }
 
+// UploadServiceDeps provides validation, storage, runtime, and side-effect hooks.
 type UploadServiceDeps struct {
 	// Validation
 	DetectFileType func(string) string
@@ -74,6 +76,7 @@ type UploadServiceDeps struct {
 	Spawn    func(func())
 }
 
+// UploadService validates uploads, creates jobs, and schedules follow-up work.
 type UploadService struct {
 	d UploadServiceDeps
 }

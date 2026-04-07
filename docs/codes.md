@@ -1,6 +1,6 @@
 # Code Map
 
-기준 시각: 2026-04-06 (KST)
+기준 시각: 2026-04-07 (KST)
 
 이 문서는 "모든 파일을 기계적으로 나열하는 목록"이 아니라, 처음 레포지토리를 보는 개발자가 어디를 읽어야 하는지 빠르게 판단할 수 있도록 만든 코드 맵이다.
 
@@ -8,11 +8,11 @@
 
 백엔드 기준으로는 아래 순서가 가장 효율적이다.
 
-1. [`src/cmd/server/main.go`](/Users/sh_kim/Library/Mobile Documents/com~apple~CloudDocs/workspace/whisperServer/src/cmd/server/main.go)
-2. [`src/internal/server/run.go`](/Users/sh_kim/Library/Mobile Documents/com~apple~CloudDocs/workspace/whisperServer/src/internal/server/run.go)
-3. [`src/internal/server/bootstrap.go`](/Users/sh_kim/Library/Mobile Documents/com~apple~CloudDocs/workspace/whisperServer/src/internal/server/bootstrap.go)
-4. [`src/internal/server/bootstrap_services.go`](/Users/sh_kim/Library/Mobile Documents/com~apple~CloudDocs/workspace/whisperServer/src/internal/server/bootstrap_services.go)
-5. [`src/internal/transport/http/routes.go`](/Users/sh_kim/Library/Mobile Documents/com~apple~CloudDocs/workspace/whisperServer/src/internal/transport/http/routes.go)
+1. [`src/cmd/server/main.go`](../src/cmd/server/main.go)
+2. [`src/internal/server/run.go`](../src/internal/server/run.go)
+3. [`src/internal/server/bootstrap.go`](../src/internal/server/bootstrap.go)
+4. [`src/internal/server/bootstrap_services.go`](../src/internal/server/bootstrap_services.go)
+5. [`src/internal/transport/http/routes.go`](../src/internal/transport/http/routes.go)
 
 이 다섯 파일을 읽으면 현재 서버가 어떻게 시작되고, 어떤 서비스가 조립되고, 어떤 엔드포인트가 열리는지 전체 그림이 잡힌다.
 
@@ -145,9 +145,17 @@
 
 - 역할: SQLite persistence
 - 주요 파일:
-  - `db_core.go`: DB 초기화, schema, migration, 공통 유틸
+  - `db_init.go`: DB 초기화와 단계별 migration/maintenance orchestration
+  - `db_schema.go`: canonical schema 정의
+  - `db_migration_jobs.go`: jobs/job_tags/job_json 관련 migration
+  - `db_migration_relations.go`: FK 보강과 관계형 schema migration
+  - `db_repair.go`: 깨진 legacy FK 복구
+  - `db_maintenance.go`: one-time maintenance
+  - `db_helpers.go`: 공통 SQL/helper 유틸
   - `db_jobs.go`: jobs snapshot
-  - `db_blobs.go`: blob 저장소
+  - `db_blobs.go`: 원본 blob 저장소와 blob facade
+  - `db_json.go`: JSON 결과 저장소
+  - `db_runtime_artifacts.go`: preview/chunk 같은 runtime artifact 파일 저장소
   - `db_folders.go`: folders
   - `db_users_tags.go`: users, tags
 
@@ -195,15 +203,15 @@
 
 ### 앱 공통
 
-- [`frontend/src/main.tsx`](/Users/sh_kim/Library/Mobile Documents/com~apple~CloudDocs/workspace/whisperServer/frontend/src/main.tsx)
+- [`frontend/src/main.tsx`](../frontend/src/main.tsx)
   - React 진입점과 라우터 초기화
-- [`frontend/src/AppShell.tsx`](/Users/sh_kim/Library/Mobile Documents/com~apple~CloudDocs/workspace/whisperServer/frontend/src/AppShell.tsx)
+- [`frontend/src/AppShell.tsx`](../frontend/src/AppShell.tsx)
   - 인증 이후 공통 레이아웃
-- [`frontend/src/styles.css`](/Users/sh_kim/Library/Mobile Documents/com~apple~CloudDocs/workspace/whisperServer/frontend/src/styles.css)
+- [`frontend/src/styles.css`](../frontend/src/styles.css)
   - 전역 스타일
-- [`frontend/src/usePageTitle.ts`](/Users/sh_kim/Library/Mobile Documents/com~apple~CloudDocs/workspace/whisperServer/frontend/src/usePageTitle.ts)
+- [`frontend/src/usePageTitle.ts`](../frontend/src/usePageTitle.ts)
   - 화면 제목 훅
-- [`frontend/src/AppErrorPage.tsx`](/Users/sh_kim/Library/Mobile Documents/com~apple~CloudDocs/workspace/whisperServer/frontend/src/AppErrorPage.tsx)
+- [`frontend/src/AppErrorPage.tsx`](../frontend/src/AppErrorPage.tsx)
   - 전역 오류 화면
 
 ### 기능별

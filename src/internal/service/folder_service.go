@@ -9,6 +9,7 @@ import (
 	model "whisperserver/src/internal/domain"
 )
 
+// FolderServiceDeps provides repository callbacks used by folder rules.
 type FolderServiceDeps struct {
 	GetFolderByID               func(ownerID, folderID string) (*model.Folder, error)
 	CreateFolder                func(ownerID, name, parentID string) (string, error)
@@ -22,6 +23,7 @@ type FolderServiceDeps struct {
 	DeleteTrashedFoldersByOwner func(ownerID string) error
 }
 
+// FolderService applies folder-specific validation and tree rules.
 type FolderService struct {
 	d FolderServiceDeps
 }

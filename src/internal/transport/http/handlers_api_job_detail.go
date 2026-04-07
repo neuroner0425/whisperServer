@@ -72,10 +72,9 @@ func (h JobDetailHandlers) DetailJSON() echo.HandlerFunc {
 		// Expand completed jobs into their final view payload.
 		if job.Status == h.StatusCompleted {
 			if job.FileType == "pdf" {
-				if h.BlobSvc.HasDocumentMarkdown(jobID) {
-					if b, err := h.BlobSvc.LoadDocumentMarkdown(jobID); err == nil {
+				if h.BlobSvc.HasDocumentJSON(jobID) {
+					if _, err := h.BlobSvc.LoadDocumentJSON(jobID); err == nil {
 						payload["view"] = "result"
-						payload["text"] = string(b)
 						payload["download_text_url"] = "/download/" + jobID
 						payload["download_document_json_url"] = "/download/" + jobID + "/document-json"
 						if h.BlobSvc.HasPDFOriginal(jobID) {
@@ -94,17 +93,19 @@ func (h JobDetailHandlers) DetailJSON() echo.HandlerFunc {
 				if h.BlobSvc.HasRefined(jobID) {
 					if b, err := h.BlobSvc.LoadRefined(jobID); err == nil {
 						payload["view"] = "result"
-						payload["text"] = string(b)
+						payload["result_json"] = string(b)
 						payload["has_refined"] = hasRefined
+						payload["result_kind"] = "refined"
 						payload["variant"] = map[bool]string{true: "original", false: "refined"}[!useRefined]
 					}
 				}
 			} else {
-				if h.BlobSvc.HasTranscript(jobID) {
-					if b, err := h.BlobSvc.LoadTranscript(jobID); err == nil {
+				if h.BlobSvc.HasTranscriptJSON(jobID) {
+					if b, err := h.BlobSvc.LoadTranscriptJSON(jobID); err == nil {
 						payload["view"] = "result"
-						payload["text"] = string(b)
+						payload["result_json"] = string(b)
 						payload["has_refined"] = hasRefined
+						payload["result_kind"] = "transcript_json"
 						payload["variant"] = map[bool]string{true: "original", false: "refined"}[!useRefined]
 					}
 				}
@@ -116,10 +117,10 @@ func (h JobDetailHandlers) DetailJSON() echo.HandlerFunc {
 		}
 
 		// Refining jobs expose the original transcript as a preview source.
-		if (job.Status == h.StatusRefiningPending || job.Status == h.StatusRefining) && h.BlobSvc.HasTranscript(jobID) {
-			if b, err := h.BlobSvc.LoadTranscript(jobID); err == nil {
+		if (job.Status == h.StatusRefiningPending || job.Status == h.StatusRefining) && h.BlobSvc.HasTranscriptJSON(jobID) {
+			if b, err := h.BlobSvc.LoadTranscriptJSON(jobID); err == nil {
 				payload["view"] = "preview"
-				payload["original_text"] = string(b)
+				payload["original_json"] = string(b)
 			}
 		}
 		payload["preview_text"] = job.PreviewText

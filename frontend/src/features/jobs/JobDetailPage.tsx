@@ -195,20 +195,23 @@ export function JobDetailPage() {
     return data.has_refined && data.variant !== 'original' ? data.download_refined_url || data.download_text_url || '' : data.download_text_url || ''
   }, [data])
 
-  const sourceText = useMemo(() => {
+  const transcriptSourceJSON = useMemo(() => {
     if (!data) {
       return ''
     }
-    if (data.view === 'result') {
-      return data.text || ''
+    if (data.view === 'result' && data.result_kind === 'transcript_json') {
+      return data.result_json || ''
     }
     if (data.view === 'preview') {
-      return data.original_text || data.preview_text || ''
+      return data.original_json || ''
     }
-    return data.preview_text || ''
+    return ''
   }, [data])
-  const transcriptSegments = useMemo(() => parseTimelineTranscriptText(sourceText), [sourceText])
-  const refinedParagraphs = useMemo(() => parseRefinedParagraphs(data?.view === 'result' ? data?.text || '' : ''), [data?.text, data?.view])
+  const transcriptSegments = useMemo(() => parseTranscriptSegmentsJSON(transcriptSourceJSON), [transcriptSourceJSON])
+  const refinedParagraphs = useMemo(
+    () => parseRefinedParagraphs(data?.view === 'result' && data?.result_kind === 'refined' ? data?.result_json || '' : ''),
+    [data?.result_json, data?.result_kind, data?.view],
+  )
   const pdfDocumentOptions = useMemo(() => ({ withCredentials: true }), [])
   const pdfPageNumbers = useMemo(() => Array.from({ length: pdfPageCount }, (_, index) => index + 1), [pdfPageCount])
   const activeItems = useMemo(() => {
@@ -221,7 +224,7 @@ export function JobDetailPage() {
       endMs: segment.endMs,
     }))
   }, [data?.variant, refinedParagraphs, transcriptSegments])
-  const fallbackText = useMemo(() => normalizePlainText(sourceText), [sourceText])
+  const fallbackText = useMemo(() => normalizePlainText(data?.preview_text || ''), [data?.preview_text])
   useEffect(() => {
     if (!message && !error) {
       return
@@ -722,50 +725,28 @@ function displayFilename(filename: string) {
   return filename
 }
 
-function parseTimelineTranscriptText(text: string): TimelineSegment[] {
-  if (!text.trim()) {
+function parseTranscriptSegmentsJSON(raw: string): TimelineSegment[] {
+  if (!raw.trim()) {
     return []
   }
-  const lines = text.replace(/\r\n/g, '\n').split('\n')
-  const segments: TimelineSegment[] = []
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index].trim()
-    if (!line) {
-      continue
-    }
-    const normalized = parseTimelineLine(line)
-    if (!normalized) {
-      continue
-    }
-    const { startLabel, endLabel, content } = normalized
-    segments.push({
-      key: `segment-${index}`,
-      startMs: parseTimelineMs(startLabel),
-      endMs: parseTimelineMs(endLabel),
-      timeLabel: `[${startLabel}]`,
-      content,
-    })
-  }
-  return segments
-}
-
-function parseTimelineLine(line: string) {
-  const tempStyle = line.match(/^(\d{2}:\d{2}:\d{2},\d{3})\s*~\s*(\d{2}:\d{2}:\d{2},\d{3})\s*"([\s\S]*)"$/)
-  if (tempStyle) {
-    return {
-      startLabel: tempStyle[1],
-      endLabel: tempStyle[2],
-      content: tempStyle[3].trim(),
-    }
-  }
-  const legacyStyle = line.match(/^\[(\d{2}:\d{2}:\d{2})\.(\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2})\.(\d{3})\]\s*(.*)$/)
-  if (!legacyStyle) {
-    return null
-  }
-  return {
-    startLabel: `${legacyStyle[1]},${legacyStyle[2]}`,
-    endLabel: `${legacyStyle[3]},${legacyStyle[4]}`,
-    content: legacyStyle[5].trim(),
+  try {
+    const parsed = JSON.parse(raw) as { segments?: Array<{ from?: string; to?: string; text?: string }> }
+    return (parsed.segments || [])
+      .map((segment, index) => {
+        const startLabel = normalizeBracketTimestamp(segment.from || '')
+        const endLabel = normalizeBracketTimestamp(segment.to || '')
+        const content = (segment.text || '').trim()
+        return {
+          key: `segment-${index}`,
+          startMs: parseTimelineMs(startLabel),
+          endMs: parseTimelineMs(endLabel),
+          timeLabel: `[${startLabel}]`,
+          content,
+        }
+      })
+      .filter((segment) => segment.content.length > 0)
+  } catch {
+    return []
   }
 }
 

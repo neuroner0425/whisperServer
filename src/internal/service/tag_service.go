@@ -8,6 +8,7 @@ import (
 	model "whisperserver/src/internal/domain"
 )
 
+// TagServiceDeps provides repository callbacks used by tag rules.
 type TagServiceDeps struct {
 	ListTagsByOwner     func(ownerID string) ([]model.Tag, error)
 	UpsertTag           func(ownerID, name, desc string) error
@@ -15,6 +16,7 @@ type TagServiceDeps struct {
 	ListTagNamesByOwner func(ownerID string) (map[string]struct{}, error)
 }
 
+// TagService applies validation and ownership rules to tag mutations.
 type TagService struct {
 	d TagServiceDeps
 }

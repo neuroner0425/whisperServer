@@ -16,6 +16,7 @@ var (
 	loadedConfig config.Config
 )
 
+// ensureConfigLoaded initializes config values on first use.
 func ensureConfigLoaded() error {
 	configOnce.Do(func() {
 		loadedConfig, configErr = config.Load(projectRoot)
@@ -26,6 +27,7 @@ func ensureConfigLoaded() error {
 	return configErr
 }
 
+// initRuntimeConfig loads and validates runtime configuration values.
 func initRuntimeConfig() error {
 	if err := ensureConfigLoaded(); err != nil {
 		return err
@@ -60,6 +62,7 @@ func initRuntimeConfig() error {
 	return nil
 }
 
+// validatePDFConfigValues checks PDF processing limits for invalid values.
 func validatePDFConfigValues() error {
 	if pdfMaxPages <= 0 {
 		return fmt.Errorf("PDF_MAX_PAGES must be > 0")
@@ -91,6 +94,7 @@ func validatePDFConfigValues() error {
 	return nil
 }
 
+// validatePDFTools verifies that required PDF command-line tools are installed.
 func validatePDFTools() error {
 	// Keep this signature stable (tests call it), but use the shared validator.
 	c := config.Config{
@@ -100,6 +104,7 @@ func validatePDFTools() error {
 	return c.ValidateExternalTools()
 }
 
+// appPort resolves the HTTP port from configuration.
 func appPort() (string, error) {
 	if err := ensureConfigLoaded(); err != nil {
 		return "", err
@@ -110,6 +115,7 @@ func appPort() (string, error) {
 	return strings.TrimSpace(loadedConfig.Port), nil
 }
 
+// geminiAPIKeysFromConfig returns the configured Gemini API keys.
 func geminiAPIKeysFromConfig() []string {
 	if err := ensureConfigLoaded(); err != nil {
 		return nil

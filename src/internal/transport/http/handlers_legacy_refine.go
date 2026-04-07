@@ -49,7 +49,7 @@ func (h LegacyRefineHandlers) RetryHTML() echo.HandlerFunc {
 		if !h.HasGeminiConfigured() {
 			return echo.NewHTTPError(http.StatusBadRequest, "정제 기능이 설정되어 있지 않습니다. (GEMINI_API_KEYS 필요)")
 		}
-		if !h.BlobSvc.HasTranscript(jobID) {
+		if !h.BlobSvc.HasTranscriptJSON(jobID) {
 			return echo.NewHTTPError(http.StatusNotFound, "원본 전사 결과를 찾지 못했습니다.")
 		}
 

@@ -362,6 +362,7 @@ func buildConsistencyContext(raw []byte, maxChars int) (string, error) {
 	return truncateConsistencyContext(lines, maxChars), nil
 }
 
+// mergeDocumentJSON concatenates chunk-level document JSON into one response body.
 func mergeDocumentJSON(blobs ...[]byte) ([]byte, error) {
 	merged := documentResponse{Pages: make([]documentPage, 0)}
 	seen := map[int]struct{}{}
@@ -384,6 +385,7 @@ func mergeDocumentJSON(blobs ...[]byte) ([]byte, error) {
 	return json.MarshalIndent(merged, "", "  ")
 }
 
+// renderDocumentMarkdown converts structured document JSON into markdown output.
 func renderDocumentMarkdown(raw []byte) (string, error) {
 	var doc documentResponse
 	if err := json.Unmarshal(raw, &doc); err != nil {
@@ -427,6 +429,7 @@ func renderDocumentMarkdown(raw []byte) (string, error) {
 	return strings.TrimSpace(strings.Join(lines, "\n")), nil
 }
 
+// renderMarkdownTable renders a markdown table from normalized row data.
 func renderMarkdownTable(rows []struct {
 	Cells []string `json:"cells"`
 }) []string {
@@ -446,6 +449,7 @@ func renderMarkdownTable(rows []struct {
 	return out
 }
 
+// renderMarkdownList renders nested markdown list lines.
 func renderMarkdownList(items []documentListItem, ordered bool, depth int) []string {
 	out := make([]string, 0, len(items)*2)
 	for idx, item := range items {
@@ -462,6 +466,7 @@ func renderMarkdownList(items []documentListItem, ordered bool, depth int) []str
 	return out
 }
 
+// appendIfMissing appends a trimmed value when it is unique and capacity allows.
 func appendIfMissing(items []string, value string, max int) []string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -478,6 +483,7 @@ func appendIfMissing(items []string, value string, max int) []string {
 	return append(items, value)
 }
 
+// truncateConsistencyContext bounds the consistency context to the configured size.
 func truncateConsistencyContext(lines []string, maxChars int) string {
 	if maxChars <= 0 {
 		return strings.Join(lines, "\n")
@@ -518,6 +524,7 @@ func truncateConsistencyContext(lines []string, maxChars int) string {
 	return strings.Join(out, "\n")
 }
 
+// formatDocumentTextForMarkdown normalizes text blocks before markdown rendering.
 func formatDocumentTextForMarkdown(text string) string {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -532,6 +539,7 @@ func formatDocumentTextForMarkdown(text string) string {
 	return wrapInlineMathTokens(text)
 }
 
+// shouldRenderAsDisplayMath decides whether a math fragment should become block math.
 func shouldRenderAsDisplayMath(text string) bool {
 	text = strings.TrimSpace(text)
 	if text == "" || hangulRe.MatchString(text) {
@@ -546,6 +554,7 @@ func shouldRenderAsDisplayMath(text string) bool {
 	return strings.Contains(text, "=") || strings.HasPrefix(text, `\begin{`)
 }
 
+// wrapInlineMathTokens wraps inline math-like tokens in markdown math delimiters.
 func wrapInlineMathTokens(text string) string {
 	segments := splitByMathDelimiters(text)
 	for i := range segments {
@@ -566,11 +575,13 @@ func wrapInlineMathTokens(text string) string {
 	return b.String()
 }
 
+// mathSegment is one text or math fragment produced while tokenizing markdown text.
 type mathSegment struct {
 	text   string
 	isMath bool
 }
 
+// splitByMathDelimiters separates text into math and non-math segments.
 func splitByMathDelimiters(text string) []mathSegment {
 	out := make([]mathSegment, 0, 4)
 	for len(text) > 0 {
@@ -594,6 +605,7 @@ func splitByMathDelimiters(text string) []mathSegment {
 	return out
 }
 
+// shouldWrapMathToken decides whether a token should be rendered as inline math.
 func shouldWrapMathToken(token string) bool {
 	if strings.HasPrefix(token, "$") && strings.HasSuffix(token, "$") {
 		return false
@@ -604,6 +616,7 @@ func shouldWrapMathToken(token string) bool {
 	return strings.ContainsAny(token, "_\\^=≠≤≥+-*/&") || containsMathDigitMix(token)
 }
 
+// containsMathDigitMix detects tokens that mix digits with math-like symbols.
 func containsMathDigitMix(token string) bool {
 	hasLetter := false
 	hasDigit := false

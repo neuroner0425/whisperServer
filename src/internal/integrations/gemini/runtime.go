@@ -335,20 +335,24 @@ The provided [Original] text is a result of transcribing lectures or speeches us
 # Output Format
 { "paragraph": [ { "paragraph_summary": "문단 요약 정리", "sentence": [ { "start_time": "[00:00:00,000]", "content": "문장 정제 내용1" } ] } ] }`
 
+// refineResponse is the structured JSON shape requested from Gemini for transcript refinement.
 type refineResponse struct {
 	Paragraph []refineParagraph `json:"paragraph"`
 }
 
+// refineParagraph is one refined paragraph in the Gemini response.
 type refineParagraph struct {
 	ParagraphSummary string           `json:"paragraph_summary"`
 	Sentence         []refineSentence `json:"sentence"`
 }
 
+// refineSentence is one refined sentence aligned to its original timestamp.
 type refineSentence struct {
 	StartTime string `json:"start_time"`
 	Content   string `json:"content"`
 }
 
+// parseRefineResponseSchema loads the JSON schema used for transcript refinement.
 func parseRefineResponseSchema() (*genai.Schema, error) {
 	var schema genai.Schema
 	if err := json.Unmarshal([]byte(refineResponseSchemaJSON), &schema); err != nil {
@@ -357,6 +361,7 @@ func parseRefineResponseSchema() (*genai.Schema, error) {
 	return &schema, nil
 }
 
+// normalizeRefineResponseJSON trims and validates Gemini refine output JSON.
 func normalizeRefineResponseJSON(raw string) (string, error) {
 	var parsed refineResponse
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
@@ -376,6 +381,7 @@ func normalizeRefineResponseJSON(raw string) (string, error) {
 	return string(normalized), nil
 }
 
+// normalizeRefineInputText converts legacy timestamp lines into the current prompt format.
 func normalizeRefineInputText(raw string) string {
 	lines := strings.Split(strings.ReplaceAll(strings.TrimSpace(raw), "\r\n", "\n"), "\n")
 	out := make([]string, 0, len(lines))
@@ -555,6 +561,7 @@ func (r *Runtime) RenderDocumentMarkdown(raw []byte) (string, error) {
 	return renderDocumentMarkdown(raw)
 }
 
+// isRetryableGeminiError classifies transient Gemini failures worth retrying.
 func isRetryableGeminiError(err error) bool {
 	if err == nil {
 		return false
@@ -575,6 +582,7 @@ func isRetryableGeminiError(err error) bool {
 	return false
 }
 
+// maskedKeySuffix returns a safe-to-log suffix for an API key.
 func maskedKeySuffix(k string) string {
 	k = strings.TrimSpace(k)
 	if k == "" {
@@ -586,6 +594,7 @@ func maskedKeySuffix(k string) string {
 	return k[len(k)-4:]
 }
 
+// min returns the smaller of two integers.
 func min(a, b int) int {
 	if a < b {
 		return a

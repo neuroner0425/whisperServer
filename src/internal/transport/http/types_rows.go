@@ -3,6 +3,7 @@ package httptransport
 // Keep field order and types aligned with the legacy httpx types to allow
 // cheap type conversions in wiring code during migration.
 
+// JobRow is the transport-facing list row for one job.
 type JobRow struct {
 	ID              string
 	Filename        string
@@ -24,6 +25,7 @@ type JobRow struct {
 	FolderName      string
 }
 
+// FolderRow is the transport-facing list row for one folder.
 type FolderRow struct {
 	ID        string
 	Name      string

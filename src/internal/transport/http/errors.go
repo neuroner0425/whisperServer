@@ -9,6 +9,7 @@ import (
 	"whisperserver/src/internal/service"
 )
 
+// toEchoHTTPError converts service-layer errors into Echo HTTP errors.
 func toEchoHTTPError(err error, fallbackStatus int, fallbackMessage string) error {
 	if err == nil {
 		return nil
