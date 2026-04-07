@@ -13,6 +13,7 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// Renderer resolves the small set of legacy HTML templates still served by Echo.
 type Renderer struct {
 	templates map[string]*htmpl.Template
 }

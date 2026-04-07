@@ -16,7 +16,7 @@ func LoadJobs() (map[string]*model.Job, error) {
 	rows, err := dbConn.Query(`
 		SELECT
 			id, status_code, filename, file_type, uploaded_ts, media_duration_seconds,
-			description, refine_enabled, owner_id, tags_json, folder_id, is_trashed,
+			description, refine_enabled, owner_id, folder_id, is_trashed,
 			deleted_ts, started_ts, completed_ts, progress_percent
 		FROM jobs
 	`)
@@ -24,6 +24,11 @@ func LoadJobs() (map[string]*model.Job, error) {
 		return nil, err
 	}
 	defer rows.Close()
+
+	jobTags, err := loadAllJobTags(dbConn)
+	if err != nil {
+		return nil, err
+	}
 
 	out := make(map[string]*model.Job)
 	for rows.Next() {
@@ -37,8 +42,7 @@ func LoadJobs() (map[string]*model.Job, error) {
 			description          string
 			refineEnabled        int
 			ownerID              string
-			tagsJSON             string
-			folderID             string
+			folderID             sql.NullString
 			isTrashed            int
 			deletedTS            float64
 			startedTS            float64
@@ -47,7 +51,7 @@ func LoadJobs() (map[string]*model.Job, error) {
 		)
 		if err := rows.Scan(
 			&id, &statusCode, &filename, &fileType, &uploadedTS, &mediaDurationSeconds,
-			&description, &refineEnabled, &ownerID, &tagsJSON, &folderID, &isTrashed,
+			&description, &refineEnabled, &ownerID, &folderID, &isTrashed,
 			&deletedTS, &startedTS, &completedTS, &progressPercent,
 		); err != nil {
 			return nil, err
@@ -60,8 +64,8 @@ func LoadJobs() (map[string]*model.Job, error) {
 			Description:     description,
 			RefineEnabled:   refineEnabled != 0,
 			OwnerID:         ownerID,
-			Tags:            decodeTagsJSON(tagsJSON),
-			FolderID:        folderID,
+			Tags:            jobTags[id],
+			FolderID:        folderID.String,
 			IsTrashed:       isTrashed != 0,
 			DeletedTS:       deletedTS,
 			StartedTS:       startedTS,
@@ -76,10 +80,13 @@ func LoadJobs() (map[string]*model.Job, error) {
 		if preview, previewErr := LoadJobBlob(id, BlobKindPreview); previewErr == nil {
 			job.PreviewText = string(preview)
 		}
-		if HasJobBlob(id, BlobKindTranscript) {
-			job.Result = "db://transcript"
+		if HasJobJSON(id, BlobKindTranscriptJSON) {
+			job.Result = "db://transcript_json"
 		}
-		if HasJobBlob(id, BlobKindRefined) {
+		if HasJobJSON(id, BlobKindDocumentJSON) {
+			job.Result = "db://document_json"
+		}
+		if HasJobJSON(id, BlobKindRefined) {
 			job.ResultRefined = "db://refined"
 		}
 		out[id] = job.Clone()
@@ -121,14 +128,18 @@ func SaveJobs(snapshot map[string]*model.Job) (err error) {
 	}
 
 	// Upsert current jobs first, then remove rows no longer present in memory.
+	tagIDsByOwner, err := loadTagIDsByOwner(tx)
+	if err != nil {
+		return err
+	}
 	seen := map[string]struct{}{}
 	for id, job := range snapshot {
 		if _, execErr := tx.Exec(`
 			INSERT INTO jobs(
 				id, status_code, filename, file_type, uploaded_ts, media_duration_seconds,
-				description, refine_enabled, owner_id, tags_json, folder_id, is_trashed,
+				description, refine_enabled, owner_id, folder_id, is_trashed,
 				deleted_ts, started_ts, completed_ts, progress_percent
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET
 				status_code=excluded.status_code,
 				filename=excluded.filename,
@@ -138,7 +149,6 @@ func SaveJobs(snapshot map[string]*model.Job) (err error) {
 				description=excluded.description,
 				refine_enabled=excluded.refine_enabled,
 				owner_id=excluded.owner_id,
-				tags_json=excluded.tags_json,
 				folder_id=excluded.folder_id,
 				is_trashed=excluded.is_trashed,
 				deleted_ts=excluded.deleted_ts,
@@ -155,8 +165,7 @@ func SaveJobs(snapshot map[string]*model.Job) (err error) {
 			job.Description,
 			boolToInt(job.RefineEnabled),
 			job.OwnerID,
-			encodeTagsJSON(job.Tags),
-			job.FolderID,
+			emptyStringAsNil(job.FolderID),
 			boolToInt(job.IsTrashed),
 			job.DeletedTS,
 			job.StartedTS,
@@ -177,6 +186,84 @@ func SaveJobs(snapshot map[string]*model.Job) (err error) {
 		}
 	}
 
+	if _, err := tx.Exec(`DELETE FROM job_tags`); err != nil {
+		return err
+	}
+	insertTagStmt, err := tx.Prepare(`
+		INSERT INTO job_tags(job_id, tag_id, position, updated_at)
+		VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+	`)
+	if err != nil {
+		return err
+	}
+	defer insertTagStmt.Close()
+	for jobID, job := range snapshot {
+		ownerTags := tagIDsByOwner[job.OwnerID]
+		for i, tag := range job.Tags {
+			tagID := ownerTags[tag]
+			if tagID == "" {
+				continue
+			}
+			if _, err := insertTagStmt.Exec(jobID, tagID, i); err != nil {
+				return err
+			}
+		}
+	}
+
 	err = tx.Commit()
 	return err
+}
+
+func loadAllJobTags(queryer interface {
+	Query(string, ...any) (*sql.Rows, error)
+}) (map[string][]string, error) {
+	rows, err := queryer.Query(`
+		SELECT jt.job_id, t.name
+		FROM job_tags jt
+		JOIN tags t ON t.id = jt.tag_id
+		ORDER BY jt.job_id, jt.position, t.name
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := map[string][]string{}
+	for rows.Next() {
+		var jobID, tagName string
+		if err := rows.Scan(&jobID, &tagName); err != nil {
+			return nil, err
+		}
+		out[jobID] = append(out[jobID], tagName)
+	}
+	return out, rows.Err()
+}
+
+func loadTagIDsByOwner(queryer interface {
+	Query(string, ...any) (*sql.Rows, error)
+}) (map[string]map[string]string, error) {
+	rows, err := queryer.Query(`SELECT owner_id, name, id FROM tags`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]map[string]string{}
+	for rows.Next() {
+		var ownerID, name, id string
+		if err := rows.Scan(&ownerID, &name, &id); err != nil {
+			return nil, err
+		}
+		if out[ownerID] == nil {
+			out[ownerID] = map[string]string{}
+		}
+		out[ownerID][name] = id
+	}
+	return out, rows.Err()
+}
+
+func emptyStringAsNil(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }

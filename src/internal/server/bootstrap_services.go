@@ -17,6 +17,7 @@ import (
 	"whisperserver/src/internal/worker"
 )
 
+// appServices bundles long-lived services and integrations for bootstrap wiring.
 type appServices struct {
 	blobSvc    *service.JobBlobService
 	folderSvc  *service.FolderService
@@ -29,6 +30,7 @@ type appServices struct {
 	whisperRt  *intwhisper.Runtime
 }
 
+// newAppServices constructs the service graph used by HTTP handlers and workers.
 func newAppServices() appServices {
 	runtime := appRuntime
 	blobSvc := service.NewJobBlobService(service.JobBlobServiceDeps{
@@ -37,13 +39,16 @@ func newAppServices() appServices {
 		SaveJobBlob:                store.SaveJobBlob,
 		DeleteJobBlob:              store.DeleteJobBlob,
 		ListJobBlobKinds:           store.ListJobBlobKinds,
+		HasJobJSON:                 store.HasJobJSON,
+		LoadJobJSON:                store.LoadJobJSON,
+		SaveJobJSON:                store.SaveJobJSON,
+		DeleteJobJSON:              store.DeleteJobJSON,
+		ListJobJSONKinds:           store.ListJobJSONKinds,
 		BlobKindAudioAAC:           store.BlobKindAudioAAC,
 		BlobKindPreview:            store.BlobKindPreview,
 		BlobKindPDFOriginal:        store.BlobKindPDFOriginal,
 		BlobKindDocumentJSON:       store.BlobKindDocumentJSON,
-		BlobKindDocumentMarkdown:   store.BlobKindDocumentMarkdown,
 		BlobKindDocumentChunkIndex: store.BlobKindDocumentChunkIndex,
-		BlobKindTranscript:         store.BlobKindTranscript,
 		BlobKindTranscriptJSON:     store.BlobKindTranscriptJSON,
 		BlobKindRefined:            store.BlobKindRefined,
 	})
@@ -87,6 +92,7 @@ func newAppServices() appServices {
 		RemoveTempWav:    runtime.RemoveTempWav,
 		SetJobFields:     runtime.SetJobFields,
 		DeleteJobBlob:    store.DeleteJobBlob,
+		DeleteJobJSON:    store.DeleteJobJSON,
 		ListJobBlobKinds: store.ListJobBlobKinds,
 		Notify:           notify,
 		StatusPending:    statusPending,
@@ -149,6 +155,7 @@ func newAppServices() appServices {
 	return appServices{blobSvc: blobSvc, folderSvc: folderSvc, lifecycle: lifecycle, runtime: runtime, tagSvc: tagSvc, storageSvc: storageSvc, uploadSvc: uploadSvc, geminiRt: geminiRt, whisperRt: whisperRt}
 }
 
+// newAppWorker constructs the background worker with runtime and integration hooks.
 func newAppWorker(blobSvc *service.JobBlobService, geminiRt *intgemini.Runtime, whisperRt *intwhisper.Runtime) *worker.Worker {
 	runtime := appRuntime
 	return worker.New(worker.Config{
@@ -185,7 +192,6 @@ func newAppWorker(blobSvc *service.JobBlobService, geminiRt *intgemini.Runtime, 
 		ExtractDocumentChunk:    geminiRt.ExtractDocumentChunk,
 		BuildConsistencyContext: geminiRt.BuildConsistencyContext,
 		MergeDocumentJSON:       geminiRt.MergeDocumentJSON,
-		RenderDocumentMarkdown:  geminiRt.RenderDocumentMarkdown,
 		UniqueStrings:           intutil.UniqueStringsKeepOrder,
 		GetTagDescriptions:      store.GetTagDescriptionsByNames,
 		Logf:                    procLogf,

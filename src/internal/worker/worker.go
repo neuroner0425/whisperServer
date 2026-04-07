@@ -19,6 +19,7 @@ import (
 	intutil "whisperserver/src/internal/util"
 )
 
+// Config defines worker runtime settings and status labels.
 type Config struct {
 	SplitTaskQueues          bool
 	TmpFolder                string
@@ -38,12 +39,14 @@ type Config struct {
 	StatusFailed             string
 }
 
+// DocumentPageImage is one rendered PDF page passed to Gemini extraction.
 type DocumentPageImage struct {
 	PageIndex int
 	MIMEType  string
 	Data      []byte
 }
 
+// DocumentChunk is one batch of rendered PDF pages sent to Gemini.
 type DocumentChunk struct {
 	ChunkIndex  int
 	TotalChunks int
@@ -53,6 +56,7 @@ type DocumentChunk struct {
 	Images      []DocumentPageImage
 }
 
+// Deps provides runtime, blob, integration, and metric hooks used by the worker.
 type Deps struct {
 	GetJob                func(string) *model.Job
 	SetJobFields          func(string, map[string]any)
@@ -70,7 +74,6 @@ type Deps struct {
 	ExtractDocumentChunk    func(context.Context, DocumentChunk, string) ([]byte, error)
 	BuildConsistencyContext func([]byte) (string, error)
 	MergeDocumentJSON       func(...[]byte) ([]byte, error)
-	RenderDocumentMarkdown  func([]byte) (string, error)
 	UniqueStrings           func([]string) []string
 	GetTagDescriptions      func(string, []string) (map[string]string, error)
 	Logf                    func(string, ...any)
@@ -82,6 +85,7 @@ type Deps struct {
 	ObserveJobDuration      func(float64)
 }
 
+// Worker consumes queued tasks and executes transcription, refine, and PDF flows.
 type Worker struct {
 	cfg             Config
 	deps            Deps
@@ -187,7 +191,7 @@ func (w *Worker) RequeuePending(jobs map[string]*model.Job) {
 				w.EnqueueTranscribe(id)
 			}
 		case w.cfg.StatusRefiningPending, w.cfg.StatusRefining:
-			if w.deps.BlobSvc != nil && w.deps.BlobSvc.HasTranscript(id) {
+			if w.deps.BlobSvc != nil && w.deps.BlobSvc.HasTranscriptJSON(id) {
 				w.EnqueueRefine(id)
 			}
 		}
@@ -333,13 +337,13 @@ func (w *Worker) finalizeRefine(jobID string) {
 		}
 		return
 	}
-	b, err := w.deps.BlobSvc.LoadTranscript(jobID)
+	timelineText, err := w.deps.BlobSvc.LoadTranscriptTimelineText(jobID)
 	if err != nil {
-		w.deps.Errf("worker.loadTranscriptBlob", err, "job_id=%s", jobID)
+		w.deps.Errf("worker.loadTranscriptJSON", err, "job_id=%s", jobID)
 		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
 		return
 	}
-	if err := w.taskRefining(jobID, string(b)); err != nil {
+	if err := w.taskRefining(jobID, timelineText); err != nil {
 		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
 		w.deps.Errf("worker.refine", err, "job_id=%s", jobID)
 		return
@@ -347,8 +351,8 @@ func (w *Worker) finalizeRefine(jobID string) {
 	if updated := w.deps.GetJob(jobID); updated == nil || updated.IsTrashed {
 		return
 	}
-	w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusCompleted, "result": "db://transcript"})
-	w.deps.Logf("[WORKER] completed job_id=%s result=db://transcript", jobID)
+	w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusCompleted, "result": "db://transcript_json"})
+	w.deps.Logf("[WORKER] completed job_id=%s result=db://transcript_json", jobID)
 }
 
 func (w *Worker) taskTranscribe(jobID string) error {
@@ -429,12 +433,6 @@ func (w *Worker) taskTranscribe(jobID string) error {
 		return nil
 	}
 
-	if err := w.deps.BlobSvc.SaveTranscript(jobID, []byte(runResult.TimelineText)); err != nil {
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
-		w.deps.IncJobsTotal("failure")
-		w.deps.Errf("transcribe.saveTranscriptBlob", err, "job_id=%s", jobID)
-		return err
-	}
 	if len(runResult.TranscriptJSON) > 0 {
 		if err := w.deps.BlobSvc.SaveTranscriptJSON(jobID, runResult.TranscriptJSON); err != nil {
 			w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
@@ -456,7 +454,7 @@ func (w *Worker) taskTranscribe(jobID string) error {
 
 	w.deps.SetJobFields(jobID, map[string]any{
 		"status":       nextStatus,
-		"result":       "db://transcript",
+		"result":       "db://transcript_json",
 		"preview_text": "",
 		"completed_at": completed.Format("2006-01-02 15:04:05"),
 		"completed_ts": float64(completed.Unix()),
@@ -464,7 +462,7 @@ func (w *Worker) taskTranscribe(jobID string) error {
 	})
 	_ = os.Remove(wavPath)
 	w.deps.Logf("[TRANSCRIBE] cleaned input file job_id=%s", jobID)
-	w.deps.Logf("[TRANSCRIBE] done job_id=%s output=db://transcript status=%s duration_sec=%d", jobID, nextStatus, int(completed.Sub(started).Seconds()))
+	w.deps.Logf("[TRANSCRIBE] done job_id=%s output=db://transcript_json status=%s duration_sec=%d", jobID, nextStatus, int(completed.Sub(started).Seconds()))
 	return nil
 }
 

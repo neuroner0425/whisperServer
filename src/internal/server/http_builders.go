@@ -11,6 +11,7 @@ import (
 	intutil "whisperserver/src/internal/util"
 )
 
+// newFilesQuery builds the query adapter used by file-list handlers.
 func newFilesQuery() filequery.Query {
 	return filequery.Query{
 		JobsSnapshot:           jobsSnapshot,
@@ -22,6 +23,7 @@ func newFilesQuery() filequery.Query {
 	}
 }
 
+// newUploadHandlers wires upload transport handlers to shared helpers and services.
 func newUploadHandlers(svc appServices) httptransport.UploadHandlers {
 	return httptransport.UploadHandlers{
 		CurrentUser:               transportCurrentUser,
@@ -35,6 +37,7 @@ func newUploadHandlers(svc appServices) httptransport.UploadHandlers {
 	}
 }
 
+// newLegacyJobsHandlers wires legacy polling and download handlers.
 func newLegacyJobsHandlers(svc appServices, filesQ filequery.Query) httptransport.LegacyJobsHandlers {
 	return httptransport.LegacyJobsHandlers{
 		CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized,
@@ -57,6 +60,7 @@ func newLegacyJobsHandlers(svc appServices, filesQ filequery.Query) httptranspor
 	}
 }
 
+// newLegacyRefineHandlers wires the legacy refine retry endpoint.
 func newLegacyRefineHandlers(svc appServices) httptransport.LegacyRefineHandlers {
 	return httptransport.LegacyRefineHandlers{
 		CurrentUser:           transportCurrentUser,
@@ -71,6 +75,7 @@ func newLegacyRefineHandlers(svc appServices) httptransport.LegacyRefineHandlers
 	}
 }
 
+// newLegacyMutationHandlers wires legacy HTML mutation handlers.
 func newLegacyMutationHandlers(svc appServices) httptransport.LegacyMutationHandlers {
 	return httptransport.LegacyMutationHandlers{
 		CurrentUser:            transportCurrentUser,
@@ -94,6 +99,7 @@ func newLegacyMutationHandlers(svc appServices) httptransport.LegacyMutationHand
 	}
 }
 
+// newSPAHandlers wires SPA redirects and the SPA entrypoint.
 func newSPAHandlers() httptransport.SPAHandlers {
 	return httptransport.SPAHandlers{
 		SPAIndexPath: spaIndexPath,
@@ -101,6 +107,7 @@ func newSPAHandlers() httptransport.SPAHandlers {
 	}
 }
 
+// newEventsHandler builds the authenticated SSE handler.
 func newEventsHandler() echo.HandlerFunc {
 	return httptransport.SSEHandlers{
 		Broker: eventBroker(),

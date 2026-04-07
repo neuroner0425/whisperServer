@@ -39,9 +39,9 @@ func UpsertTag(ownerID, name, description string) error {
 		return fmt.Errorf("db is not initialized")
 	}
 	_, err := dbConn.Exec(`
-		INSERT INTO tags(owner_id, name, description, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+		INSERT INTO tags(id, owner_id, name, description, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(owner_id, name) DO UPDATE SET description=excluded.description, updated_at=CURRENT_TIMESTAMP
-	`, ownerID, name, description)
+	`, uuid.NewString(), ownerID, name, description)
 	return err
 }
 

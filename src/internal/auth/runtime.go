@@ -7,6 +7,7 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// Config contains the auth runtime settings loaded during bootstrap.
 type Config struct {
 	JWTSecret        []byte
 	JWTIssuer        string
@@ -14,6 +15,7 @@ type Config struct {
 	AuthCookieSecure bool
 }
 
+// Runtime exposes auth handlers in a bootstrap-friendly wrapper.
 type Runtime struct {
 	handlers *Auth
 }

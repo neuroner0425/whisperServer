@@ -6,6 +6,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	model "whisperserver/src/internal/domain"
+	"whisperserver/src/internal/service"
 )
 
 // JobControlHandlers exposes retry and refine actions for existing jobs.
@@ -13,9 +14,9 @@ type JobControlHandlers struct {
 	CurrentUserOrUnauthorized func(echo.Context) (*User, bool)
 	GetJob                    func(string) *model.Job
 	SetJobFields              func(string, map[string]any)
+	BlobSvc                   *service.JobBlobService
 
-	HasJobBlob    func(jobID, kind string) bool
-	DeleteJobBlob func(jobID, kind string)
+	HasJobBlob func(jobID, kind string) bool
 
 	EnqueueTranscribe func(string)
 	EnqueueRefine     func(string)
@@ -32,7 +33,6 @@ type JobControlHandlers struct {
 
 	BlobAudioAAC    string
 	BlobTranscript  string
-	BlobRefined     string
 	BlobPDFOriginal string
 }
 
@@ -119,7 +119,7 @@ func (h JobControlHandlers) Retranscribe() echo.HandlerFunc {
 		}
 
 		// If a refined result exists, queue refinement again after transcription finishes.
-		shouldRefineAfterTranscribe := h.HasJobBlob(jobID, h.BlobRefined)
+		shouldRefineAfterTranscribe := h.BlobSvc != nil && h.BlobSvc.HasRefined(jobID)
 		h.ResetForTranscribe(jobID, shouldRefineAfterTranscribe)
 		h.EnqueueTranscribe(jobID)
 		return c.JSON(http.StatusOK, map[string]any{
@@ -133,7 +133,7 @@ func (h JobControlHandlers) Retranscribe() echo.HandlerFunc {
 // Refine schedules Gemini refinement for a completed transcript.
 func (h JobControlHandlers) Refine() echo.HandlerFunc {
 	return func(c echo.Context) error {
-		if h.CurrentUserOrUnauthorized == nil || h.GetJob == nil || h.HasJobBlob == nil ||
+		if h.CurrentUserOrUnauthorized == nil || h.GetJob == nil || h.BlobSvc == nil ||
 			h.SetJobFields == nil || h.EnqueueRefine == nil || h.HasGeminiConfigured == nil {
 			return c.NoContent(http.StatusServiceUnavailable)
 		}
@@ -156,10 +156,10 @@ func (h JobControlHandlers) Refine() echo.HandlerFunc {
 		if !h.HasGeminiConfigured() {
 			return echo.NewHTTPError(http.StatusBadRequest, "정제 기능이 설정되어 있지 않습니다.")
 		}
-		if !h.HasJobBlob(jobID, h.BlobTranscript) {
+		if !h.BlobSvc.HasTranscriptJSON(jobID) {
 			return echo.NewHTTPError(http.StatusNotFound, "원본 전사 결과를 찾지 못했습니다.")
 		}
-		if h.HasJobBlob(jobID, h.BlobRefined) {
+		if h.BlobSvc.HasRefined(jobID) {
 			return echo.NewHTTPError(http.StatusBadRequest, "이미 정제된 작업입니다.")
 		}
 
@@ -176,8 +176,8 @@ func (h JobControlHandlers) Refine() echo.HandlerFunc {
 // Rerefine discards the current refined blob and schedules refinement again.
 func (h JobControlHandlers) Rerefine() echo.HandlerFunc {
 	return func(c echo.Context) error {
-		if h.CurrentUserOrUnauthorized == nil || h.GetJob == nil || h.HasJobBlob == nil ||
-			h.DeleteJobBlob == nil || h.SetJobFields == nil || h.EnqueueRefine == nil || h.HasGeminiConfigured == nil {
+		if h.CurrentUserOrUnauthorized == nil || h.GetJob == nil || h.BlobSvc == nil ||
+			h.SetJobFields == nil || h.EnqueueRefine == nil || h.HasGeminiConfigured == nil {
 			return c.NoContent(http.StatusServiceUnavailable)
 		}
 
@@ -199,14 +199,14 @@ func (h JobControlHandlers) Rerefine() echo.HandlerFunc {
 		if !h.HasGeminiConfigured() {
 			return echo.NewHTTPError(http.StatusBadRequest, "정제 기능이 설정되어 있지 않습니다.")
 		}
-		if !h.HasJobBlob(jobID, h.BlobTranscript) {
+		if !h.BlobSvc.HasTranscriptJSON(jobID) {
 			return echo.NewHTTPError(http.StatusNotFound, "원본 전사 결과를 찾지 못했습니다.")
 		}
-		if !h.HasJobBlob(jobID, h.BlobRefined) {
+		if !h.BlobSvc.HasRefined(jobID) {
 			return echo.NewHTTPError(http.StatusBadRequest, "정제 결과가 있는 작업만 다시 정제할 수 있습니다.")
 		}
 
-		h.DeleteJobBlob(jobID, h.BlobRefined)
+		h.BlobSvc.DeleteRefined(jobID)
 		h.SetJobFields(jobID, map[string]any{
 			"result_refined":   "",
 			"refine_enabled":   true,

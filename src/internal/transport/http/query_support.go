@@ -5,6 +5,7 @@ import (
 	"strings"
 )
 
+// ParsePositiveInt parses a positive integer and falls back on invalid input.
 func ParsePositiveInt(s string, def int) int {
 	v, err := strconv.Atoi(strings.TrimSpace(s))
 	if err != nil || v <= 0 {
@@ -13,6 +14,7 @@ func ParsePositiveInt(s string, def int) int {
 	return v
 }
 
+// NormalizeSortParams constrains sort options to the supported API values.
 func NormalizeSortParams(sortBy, sortOrder string) (string, string) {
 	sortBy = strings.ToLower(strings.TrimSpace(sortBy))
 	sortOrder = strings.ToLower(strings.TrimSpace(sortOrder))

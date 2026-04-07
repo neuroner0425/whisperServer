@@ -15,6 +15,7 @@ import (
 	intutil "whisperserver/src/internal/util"
 )
 
+// pdfChunkIndex persists the resumable progress marker for PDF extraction.
 type pdfChunkIndex struct {
 	MaxPagesPerRequest int   `json:"max_pages_per_request"`
 	TotalChunks        int   `json:"total_chunks"`
@@ -133,7 +134,7 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 	chunkResults := make([][]byte, 0, totalChunks)
 	if resumeState.LastCompletedChunk > 0 {
 		for i := 1; i <= resumeState.LastCompletedChunk; i++ {
-			b, loadErr := w.deps.BlobSvc.Load(jobID, pdfChunkJSONKind(i))
+			b, loadErr := w.deps.BlobSvc.LoadBlob(jobID, pdfChunkJSONKind(i))
 			if loadErr != nil {
 				return loadErr
 			}
@@ -219,10 +220,10 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 			return extractErr
 		}
 
-		if err := w.deps.BlobSvc.Save(jobID, pdfChunkJSONKind(idx+1), result); err != nil {
+		if err := w.deps.BlobSvc.SaveBlob(jobID, pdfChunkJSONKind(idx+1), result); err != nil {
 			return err
 		}
-		if err := w.deps.BlobSvc.Save(jobID, pdfChunkContextKind(idx+1), []byte(contextText)); err != nil {
+		if err := w.deps.BlobSvc.SaveBlob(jobID, pdfChunkContextKind(idx+1), []byte(contextText)); err != nil {
 			return err
 		}
 		chunkResults = append(chunkResults, result)
@@ -242,7 +243,7 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 		})
 	}
 
-	// Merge chunk JSON and render the final markdown output.
+	// Merge chunk JSON into the final structured document result.
 	w.deps.SetJobFields(jobID, map[string]any{
 		"phase":            "문서 병합 중",
 		"progress_percent": 92,
@@ -255,23 +256,7 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 		return err
 	}
 
-	w.deps.SetJobFields(jobID, map[string]any{
-		"phase":            "Markdown 생성 중",
-		"progress_percent": 97,
-	})
-	markdown, err := w.deps.RenderDocumentMarkdown(mergedJSON)
-	if err != nil {
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_detail": "Markdown 생성 실패"})
-		w.deps.IncJobsTotal("failure")
-		return err
-	}
-
 	if err := w.deps.BlobSvc.SaveDocumentJSON(jobID, mergedJSON); err != nil {
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
-		w.deps.IncJobsTotal("failure")
-		return err
-	}
-	if err := w.deps.BlobSvc.SaveDocumentMarkdown(jobID, []byte(markdown)); err != nil {
 		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
 		w.deps.IncJobsTotal("failure")
 		return err
@@ -283,7 +268,7 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 	w.deps.ObserveJobDuration(completed.Sub(started).Seconds())
 	w.deps.SetJobFields(jobID, map[string]any{
 		"status":               w.cfg.StatusCompleted,
-		"result":               "db://document_markdown",
+		"result":               "db://document_json",
 		"preview_text":         "",
 		"completed_at":         completed.Format("2006-01-02 15:04:05"),
 		"completed_ts":         float64(completed.Unix()),
@@ -300,6 +285,7 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 	return nil
 }
 
+// pdfResumeState is the parsed and validated PDF resume marker.
 type pdfResumeState struct {
 	Valid              bool
 	LastCompletedChunk int
@@ -360,7 +346,7 @@ func (w *Worker) clearPDFChunkBlobs(jobID string) {
 	}
 	for _, kind := range kinds {
 		if kind == w.deps.BlobSvc.DocumentChunkIndexKind() || strings.HasPrefix(kind, "document_chunk_") {
-			w.deps.BlobSvc.Delete(jobID, kind)
+			w.deps.BlobSvc.DeleteBlob(jobID, kind)
 		}
 	}
 }
@@ -376,14 +362,17 @@ func (w *Worker) savePDFChunkIndex(jobID string, idx pdfChunkIndex) error {
 	return w.deps.BlobSvc.SaveDocumentChunkIndex(jobID, b)
 }
 
+// pdfChunkJSONKind returns the blob kind for one chunk JSON result.
 func pdfChunkJSONKind(n int) string {
 	return "document_chunk_" + strconv.Itoa(n) + "_json"
 }
 
+// pdfChunkContextKind returns the blob kind for one chunk consistency context.
 func pdfChunkContextKind(n int) string {
 	return "document_chunk_" + strconv.Itoa(n) + "_context"
 }
 
+// splitPagePaths splits rendered page paths into chunk-sized batches.
 func splitPagePaths(paths []string, chunkSize int) [][]string {
 	if len(paths) == 0 {
 		return nil
@@ -399,6 +388,7 @@ func splitPagePaths(paths []string, chunkSize int) [][]string {
 	return out
 }
 
+// progressForChunk converts chunk progress into a coarse job percent.
 func progressForChunk(idx, total int) int {
 	if total <= 0 {
 		return 10
@@ -406,6 +396,7 @@ func progressForChunk(idx, total int) int {
 	return 10 + int(float64(idx)/float64(total)*75)
 }
 
+// processedPagesForChunk returns the number of pages covered by completed chunks.
 func processedPagesForChunk(completedChunks, pageCount, chunkSize int) int {
 	if completedChunks <= 0 {
 		return 0
@@ -417,6 +408,7 @@ func processedPagesForChunk(completedChunks, pageCount, chunkSize int) int {
 	return processed
 }
 
+// minInt returns the smaller of two integers.
 func minInt(a, b int) int {
 	if a < b {
 		return a
@@ -424,6 +416,7 @@ func minInt(a, b int) int {
 	return b
 }
 
+// hasContinuousChunkJSON checks that chunk JSON blobs exist without gaps up to the marker.
 func hasContinuousChunkJSON(kinds map[string]struct{}, lastCompletedChunk int) bool {
 	for i := 1; i <= lastCompletedChunk; i++ {
 		if _, ok := kinds[pdfChunkJSONKind(i)]; !ok {

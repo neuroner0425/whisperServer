@@ -71,8 +71,9 @@ export type JobDetailResponse = {
   status: string
   view: 'waiting' | 'preview' | 'result'
   preview_text?: string
-  original_text?: string
-  text?: string
+  original_json?: string
+  result_json?: string
+  result_kind?: 'transcript_json' | 'refined' | 'document_json'
   has_refined?: boolean
   can_refine?: boolean
   variant?: 'original' | 'refined'

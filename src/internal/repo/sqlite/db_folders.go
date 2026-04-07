@@ -29,7 +29,7 @@ func CreateFolder(ownerID, name, parentID string) (string, error) {
 	_, err := dbConn.Exec(`
 		INSERT INTO folders(id, owner_id, name, parent_id, is_trashed, updated_at)
 		VALUES (?, ?, ?, ?, 0, CURRENT_TIMESTAMP)
-	`, id, ownerID, name, parentID)
+	`, id, ownerID, name, emptyStringAsNil(parentID))
 	return id, err
 }
 
@@ -42,9 +42,9 @@ func ListFoldersByParent(ownerID, parentID string, trashed bool) ([]model.Folder
 		parentID = ""
 	}
 	rows, err := dbConn.Query(`
-		SELECT id, owner_id, name, parent_id, is_trashed, updated_at
+		SELECT id, owner_id, name, COALESCE(parent_id, ''), is_trashed, updated_at
 		FROM folders
-		WHERE owner_id = ? AND parent_id = ? AND is_trashed = ?
+		WHERE owner_id = ? AND COALESCE(parent_id, '') = ? AND is_trashed = ?
 		ORDER BY name
 	`, ownerID, parentID, boolToInt(trashed))
 	if err != nil {
@@ -71,7 +71,7 @@ func ListAllFoldersByOwner(ownerID string, trashed bool) ([]model.Folder, error)
 		return nil, fmt.Errorf("db is not initialized")
 	}
 	rows, err := dbConn.Query(`
-		SELECT id, owner_id, name, parent_id, is_trashed, updated_at
+		SELECT id, owner_id, name, COALESCE(parent_id, ''), is_trashed, updated_at
 		FROM folders
 		WHERE owner_id = ? AND is_trashed = ?
 		ORDER BY name
@@ -102,7 +102,7 @@ func GetFolderByID(ownerID, folderID string) (*model.Folder, error) {
 	var f model.Folder
 	var trashedInt int
 	err := dbConn.QueryRow(`
-		SELECT id, owner_id, name, parent_id, is_trashed, updated_at
+		SELECT id, owner_id, name, COALESCE(parent_id, ''), is_trashed, updated_at
 		FROM folders
 		WHERE owner_id = ? AND id = ?
 	`, ownerID, folderID).Scan(&f.ID, &f.OwnerID, &f.Name, &f.ParentID, &trashedInt, &f.UpdatedAt)
@@ -176,7 +176,7 @@ func MoveFolder(ownerID, folderID, parentID string) error {
 		UPDATE folders
 		SET parent_id = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE owner_id = ? AND id = ?
-	`, parentID, ownerID, folderID)
+	`, emptyStringAsNil(parentID), ownerID, folderID)
 	return err
 }
 

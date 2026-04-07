@@ -19,14 +19,13 @@ func TestResumeRestoredJob_PDFQueuesExtract(t *testing.T) {
 			switch kind {
 			case "pdf":
 				return true
-			case "doc":
-				return false
 			default:
 				return false
 			}
 		},
-		BlobKindPDFOriginal:      "pdf",
-		BlobKindDocumentMarkdown: "doc",
+		HasJobJSON:           func(_ string, kind string) bool { return kind == "doc" && false },
+		BlobKindPDFOriginal:  "pdf",
+		BlobKindDocumentJSON: "doc",
 	})
 
 	ResumeRestoredJob(
@@ -56,14 +55,13 @@ func TestResumeRestoredJob_AudioQueuesTranscribe(t *testing.T) {
 			switch kind {
 			case "aac":
 				return true
-			case "tr":
-				return false
 			default:
 				return false
 			}
 		},
-		BlobKindAudioAAC:   "aac",
-		BlobKindTranscript: "tr",
+		HasJobJSON:             func(_ string, kind string) bool { return kind == "tr" && false },
+		BlobKindAudioAAC:       "aac",
+		BlobKindTranscriptJSON: "tr",
 	})
 	ResumeRestoredJob(
 		"j1",
@@ -85,7 +83,7 @@ func TestResumeRestoredJob_TranscriptQueuesRefineWhenEnabled(t *testing.T) {
 	var queued bool
 	var status any
 	blob := NewJobBlobService(JobBlobServiceDeps{
-		HasJobBlob: func(_ string, kind string) bool {
+		HasJobJSON: func(_ string, kind string) bool {
 			switch kind {
 			case "tr":
 				return true
@@ -95,8 +93,8 @@ func TestResumeRestoredJob_TranscriptQueuesRefineWhenEnabled(t *testing.T) {
 				return false
 			}
 		},
-		BlobKindTranscript: "tr",
-		BlobKindRefined:    "ref",
+		BlobKindTranscriptJSON: "tr",
+		BlobKindRefined:        "ref",
 	})
 	ResumeRestoredJob(
 		"j1",
