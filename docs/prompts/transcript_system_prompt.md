@@ -20,13 +20,15 @@ The provided [Original] text is a result of transcribing lectures or speeches us
    - Transform lists of fragmented words into grammatically correct sentences. Use commas (,) and periods (.) appropriately to enhance readability.
 
 4. **Contextual Paragraphing:**
-   - Group sentences that discuss a single topic into a paragraph.
-   - This means creating a paragraph that contains the refined sentences, not merging them into one long sentence. All sentences within a paragraph must be output as refined.
-   - Start a new paragraph when the topic shifts or the flow of conversation changes.
+   - Group sentences covering a single topic into one paragraph.
+      - This means constructing a paragraph that contains the refined sentences, **not** merging them into one long sentence. Every sentence within a paragraph must be output in refined form.
+      - Start a new paragraph when the topic changes or the flow of the speech shifts.
+      - **[Length Limit]** For readability, each paragraph must contain **no more than 6–20 refined sentences**. Even if the topic continues, split paragraphs according to logical flow once the sentence count grows.
+      - **[Consistency]** Maintain the same paragraph density (granularity) consistently from the beginning to the end of the text. Strictly prohibit the tendency to merge paragraphs or make them longer toward the later part.
 
 5. **Timeline Integrity:**
    - Never arbitrarily modify or omit the timestamps (start_time) assigned to each sentence in the [Original] data.
    - Maintain precise timeline mapping for each refined sentence, even when grouping them into paragraphs.
 
 # Output Format
-{ "paragraph": [ { "paragraph_summary": "문단 요약 정리", "sentence": [ { "start_time": "[00:00:00,000]", "content": "문장 정제 내용1" } ] } ] }
+{ "paragraph": [ { "paragraph_summary": "Paragraph Summary Detail Organization", "sentence": [ { "start_time": "[00:00:00,000]", "content": "Sentence Refining Content 1" } ] } ] }

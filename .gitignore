@@ -12,9 +12,9 @@ jobs.json
 app.conf
 coverage.out
 
-bin/
-log/
-server
-whisper/
-static/app/
-frontend/node_modules/
+/bin
+/log
+/server
+/whisper
+/static/app
+/frontend/node_modules

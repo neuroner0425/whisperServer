@@ -202,16 +202,16 @@ func (h LegacyJobsHandlers) downloadVariant(c echo.Context, variant string) erro
 	switch variant {
 	case "refined":
 		b, err = h.BlobSvc.LoadRefinedMarkdown(jobID)
-		suffix = "_refined.md"
+		suffix = ".md"
 		mimeType = "text/markdown; charset=utf-8"
 	case "document_json":
 		b, err = h.BlobSvc.LoadDocumentJSON(jobID)
-		suffix = "_document.json"
+		suffix = ".json"
 		mimeType = "application/json; charset=utf-8"
 	default:
 		if job.FileType == "pdf" {
 			b, err = h.BlobSvc.LoadDocumentMarkdown(jobID)
-			suffix = "_document.md"
+			suffix = ".md"
 			mimeType = "text/markdown; charset=utf-8"
 		} else {
 			b, err = h.BlobSvc.LoadTranscriptMarkdown(jobID)
@@ -235,6 +235,9 @@ func (h LegacyJobsHandlers) downloadVariant(c echo.Context, variant string) erro
 	}
 
 	base := strings.TrimSuffix(job.Filename, filepath.Ext(job.Filename))
+	if mimeType == "text/markdown; charset=utf-8" {
+		b = []byte(service.RenderDownloadMarkdownTitle(base, string(b)))
+	}
 	c.Response().Header().Set(echo.HeaderContentDisposition, fmt.Sprintf(`attachment; filename="%s"`, base+suffix))
 	return c.Blob(http.StatusOK, mimeType, b)
 }
@@ -283,10 +286,10 @@ func (h LegacyJobsHandlers) BatchDownload() echo.HandlerFunc {
 				err    error
 			)
 			if job.FileType == "pdf" {
-				suffix = "_document.md"
+				suffix = ".md"
 				b, err = h.BlobSvc.LoadDocumentMarkdown(id)
 			} else if h.BlobSvc.HasRefined(id) {
-				suffix = "_refined.md"
+				suffix = ".md"
 				b, err = h.BlobSvc.LoadRefinedMarkdown(id)
 			} else {
 				suffix = ".md"
@@ -297,6 +300,7 @@ func (h LegacyJobsHandlers) BatchDownload() echo.HandlerFunc {
 			}
 
 			base := strings.TrimSuffix(job.Filename, filepath.Ext(job.Filename))
+			b = []byte(service.RenderDownloadMarkdownTitle(base, string(b)))
 			w, err := zw.Create(base + suffix)
 			if err != nil {
 				continue
@@ -317,7 +321,7 @@ func (h LegacyJobsHandlers) BatchDownload() echo.HandlerFunc {
 		if h.Logf != nil {
 			h.Logf("[BATCH_DOWNLOAD] success selected=%d added=%d", len(ids), added)
 		}
-		zipName := "whisper_results_" + time.Now().Format("20060102_150405") + ".zip"
+		zipName := time.Now().Format("20060102_150405") + ".zip"
 		c.Response().Header().Set(echo.HeaderContentDisposition, fmt.Sprintf(`attachment; filename="%s"`, zipName))
 		return c.Blob(http.StatusOK, "application/zip", buf.Bytes())
 	}

@@ -135,7 +135,10 @@ func newAppServices() appServices {
 		APIKeys:                       geminiAPIKeysFromConfig(),
 		PDFBatchTimeoutSec:            pdfBatchTimeoutSec,
 		PDFConsistencyContextMaxChars: pdfConsistencyContextMaxChars,
-		PromptPath:                    filepath.Join(projectRoot, "docs", "prompts", "file_transcript_system_prompt.md"),
+		TranscriptSystemPromptPath:    filepath.Join(projectRoot, "docs", "prompts", "transcript_system_prompt.md"),
+		TranscriptResponseSchemaPath:  filepath.Join(projectRoot, "docs", "prompts", "transcript_response.json"),
+		DocumentSystemPromptPath:      filepath.Join(projectRoot, "docs", "prompts", "file_transcript_system_prompt.md"),
+		DocumentResponseSchemaPath:    filepath.Join(projectRoot, "docs", "prompts", "file_transcript_response.json"),
 		Logf:                          procLogf,
 		Errf:                          procErrf,
 	})

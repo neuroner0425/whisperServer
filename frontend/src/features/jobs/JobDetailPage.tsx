@@ -841,7 +841,7 @@ function renderDocumentPageMarkdown(page: DocumentPage) {
       continue
     }
     if (element.list?.items?.length) {
-      lines.push(...renderPageListMarkdown(element.list.items, Boolean(element.list.ordered), 0))
+      lines.push(...renderPageListMarkdown(element.list.items, 0))
       lines.push('')
       continue
     }
@@ -871,18 +871,17 @@ function renderPageTableMarkdown(rows: Array<{ cells: string[] }>) {
   ]
 }
 
-function renderPageListMarkdown(items: DocumentListItem[], ordered: boolean, depth: number): string[] {
+function renderPageListMarkdown(items: DocumentListItem[], depth: number): string[] {
   const lines: string[] = []
-  for (const [index, item] of items.entries()) {
+  for (const item of items) {
     const text = item.text?.trim()
     if (!text) {
       continue
     }
-    const marker = ordered ? `${index + 1}.` : '-'
     const prefix = '  '.repeat(depth)
-    lines.push(`${prefix}${marker} ${text}`)
+    lines.push(`${prefix}- ${text}`)
     if (item.children?.length) {
-      lines.push(...renderPageListMarkdown(item.children, false, depth + 1))
+      lines.push(...renderPageListMarkdown(item.children, depth + 1))
     }
   }
   return lines

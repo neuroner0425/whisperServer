@@ -24,6 +24,10 @@
                       "type": "string"
                     }
                   },
+                  "propertyOrdering": [
+                    "level",
+                    "text"
+                  ],
                   "required": [
                     "level",
                     "text"
@@ -32,33 +36,9 @@
                 "text": {
                   "type": "string"
                 },
-                "math_inline": {
-                  "type": "string"
-                },
-                "math_block": {
-                  "type": "string"
-                },
-                "img": {
-                  "type": "object",
-                  "properties": {
-                    "title": {
-                      "type": "string"
-                    },
-                    "description": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "title",
-                    "description"
-                  ]
-                },
                 "list": {
                   "type": "object",
                   "properties": {
-                    "ordered": {
-                      "type": "boolean"
-                    },
                     "items": {
                       "type": "array",
                       "items": {
@@ -84,26 +64,78 @@
                                         "type": "string"
                                       }
                                     },
+                                    "propertyOrdering": [
+                                      "text"
+                                    ],
                                     "required": [
                                       "text"
                                     ]
                                   }
                                 }
                               },
+                              "propertyOrdering": [
+                                "text",
+                                "children"
+                              ],
                               "required": [
                                 "text"
                               ]
                             }
                           }
                         },
+                        "propertyOrdering": [
+                          "text",
+                          "children"
+                        ],
                         "required": [
                           "text"
                         ]
                       }
                     }
                   },
+                  "propertyOrdering": [
+                    "items"
+                  ],
                   "required": [
                     "items"
+                  ]
+                },
+                "code": {
+                  "type": "object",
+                  "properties": {
+                    "languages": {
+                      "type": "string"
+                    },
+                    "raw": {
+                      "type": "string"
+                    }
+                  },
+                  "propertyOrdering": [
+                    "languages",
+                    "raw"
+                  ],
+                  "required": [
+                    "languages",
+                    "raw"
+                  ]
+                },
+                "img": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    }
+                  },
+                  "propertyOrdering": [
+                    "title",
+                    "description"
+                  ],
+                  "required": [
+                    "title",
+                    "description"
                   ]
                 },
                 "table": {
@@ -124,21 +156,48 @@
                             }
                           }
                         },
+                        "propertyOrdering": [
+                          "cells"
+                        ],
                         "required": [
                           "cells"
                         ]
                       }
                     }
                   },
+                  "propertyOrdering": [
+                    "title",
+                    "rows"
+                  ],
                   "required": [
                     "title",
                     "rows"
                   ]
+                },
+                "math_inline": {
+                  "type": "string"
+                },
+                "math_block": {
+                  "type": "string"
                 }
-              }
+              },
+              "propertyOrdering": [
+                "header",
+                "text",
+                "list",
+                "code",
+                "img",
+                "table",
+                "math_inline",
+                "math_block"
+              ]
             }
           }
         },
+        "propertyOrdering": [
+          "page_index",
+          "elements"
+        ],
         "required": [
           "page_index",
           "elements"
@@ -146,6 +205,9 @@
       }
     }
   },
+  "propertyOrdering": [
+    "pages"
+  ],
   "required": [
     "pages"
   ]

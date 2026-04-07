@@ -33,8 +33,11 @@ export type DocumentPageElement = {
   math_inline?: string
   math_block?: string
   list?: {
-    ordered?: boolean
     items: DocumentListItem[]
+  }
+  code?: {
+    languages: string
+    raw: string
   }
   img?: {
     title: string
