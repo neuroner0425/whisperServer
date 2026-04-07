@@ -3,6 +3,8 @@ package gemini
 import (
 	"strings"
 	"testing"
+
+	"whisperserver/src/internal/structured"
 )
 
 func TestMergeDocumentJSON(t *testing.T) {
@@ -27,7 +29,8 @@ func TestRenderDocumentMarkdown(t *testing.T) {
 	      "elements": [
 	        { "header": { "level": 1, "text": "Doc" } },
 	        { "text": "Paragraph" },
-	        { "list": { "ordered": false, "items": [ { "text": "One" }, { "text": "Two" } ] } },
+	        { "list": { "items": [ { "text": "One" }, { "text": "Two" } ] } },
+	        { "code": { "languages": "python", "raw": "print('hi')" } },
 	        { "table": { "title": "Grid", "rows": [ { "cells": ["A", "B"] }, { "cells": ["1", "2"] } ] } }
 	      ]
 	    }
@@ -38,7 +41,7 @@ func TestRenderDocumentMarkdown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("renderDocumentMarkdown returned error: %v", err)
 	}
-	for _, want := range []string{"## Page 1", "# Doc", "Paragraph", "- One", "| A | B |"} {
+	for _, want := range []string{"## Page 1", "# Doc", "Paragraph", "- One", "```python", "print('hi')", "| A | B |"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("markdown missing %q: %s", want, out)
 		}
@@ -53,7 +56,6 @@ func TestRenderDocumentMarkdownNestedList(t *testing.T) {
 	      "elements": [
 	        {
 	          "list": {
-	            "ordered": false,
 	            "items": [
 	              {
 	                "text": "가 항목 내용",
@@ -131,7 +133,8 @@ func TestNormalizeDocumentResponseJSONTrimsMathFields(t *testing.T) {
 	      "page_index": 1,
 	      "elements": [
 	        { "math_inline": "  x+y  " },
-	        { "math_block": "  \\begin{pmatrix}1\\end{pmatrix}  " }
+	        { "math_block": "  \\begin{pmatrix}1\\end{pmatrix}  " },
+	        { "code": { "languages": "  ", "raw": "  print(1)\n  " } }
 	      ]
 	    }
 	  ]
@@ -142,7 +145,7 @@ func TestNormalizeDocumentResponseJSONTrimsMathFields(t *testing.T) {
 		t.Fatalf("normalizeDocumentResponseJSON returned error: %v", err)
 	}
 	got := string(out)
-	for _, want := range []string{`"math_inline": "x+y"`, `"math_block": "\\begin{pmatrix}1\\end{pmatrix}"`} {
+	for _, want := range []string{`"math_inline": "x+y"`, `"math_block": "\\begin{pmatrix}1\\end{pmatrix}"`, `"languages": "text"`, `"raw": "print(1)"`} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("normalized JSON missing %q: %s", want, got)
 		}
@@ -150,11 +153,25 @@ func TestNormalizeDocumentResponseJSONTrimsMathFields(t *testing.T) {
 }
 
 func TestTruncateConsistencyContext(t *testing.T) {
-	got := truncateConsistencyContext([]string{
-		"Document title: Sample",
-		"Observed headers: One | Two | Three",
-		"Important titles/terms: Alpha | Beta | Gamma",
-	}, 45)
+	got, err := structured.BuildConsistencyContext([]byte(`{
+	  "pages": [
+	    {
+	      "page_index": 1,
+	      "elements": [
+	        { "header": { "level": 1, "text": "Sample" } },
+	        { "header": { "level": 2, "text": "One" } },
+	        { "header": { "level": 2, "text": "Two" } },
+	        { "header": { "level": 2, "text": "Three" } },
+	        { "img": { "title": "Alpha", "description": "Description: Alpha" } },
+	        { "table": { "title": "Beta", "rows": [ { "cells": ["A"] } ] } },
+	        { "img": { "title": "Gamma", "description": "Description: Gamma" } }
+	      ]
+	    }
+	  ]
+	}`), 45)
+	if err != nil {
+		t.Fatalf("BuildConsistencyContext returned error: %v", err)
+	}
 	if !strings.Contains(got, "Document title: Sample") {
 		t.Fatalf("title should be preserved first: %s", got)
 	}

@@ -64,10 +64,10 @@ func (h FolderDownloadHandlers) Handler() echo.HandlerFunc {
 				err    error
 			)
 			if job.FileType == "pdf" {
-				suffix = "_document.md"
+				suffix = ".md"
 				b, err = h.BlobSvc.LoadDocumentMarkdown(id)
 			} else if h.BlobSvc.HasRefined(id) {
-				suffix = "_refined.md"
+				suffix = ".md"
 				b, err = h.BlobSvc.LoadRefinedMarkdown(id)
 			} else {
 				suffix = ".md"
@@ -77,6 +77,7 @@ func (h FolderDownloadHandlers) Handler() echo.HandlerFunc {
 				continue
 			}
 			base := strings.TrimSuffix(job.Filename, filepath.Ext(job.Filename))
+			b = []byte(service.RenderDownloadMarkdownTitle(base, string(b)))
 			w, err := zw.Create(base + suffix)
 			if err != nil {
 				continue

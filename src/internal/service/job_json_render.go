@@ -2,8 +2,9 @@ package service
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
+
+	"whisperserver/src/internal/structured"
 )
 
 type transcriptJSON struct {
@@ -30,44 +31,6 @@ type refinedSentence struct {
 	Content   string `json:"content"`
 }
 
-type documentJSON struct {
-	Pages []documentPage `json:"pages"`
-}
-
-type documentPage struct {
-	PageIndex int               `json:"page_index"`
-	Elements  []documentElement `json:"elements"`
-}
-
-type documentElement struct {
-	Header *struct {
-		Level int    `json:"level"`
-		Text  string `json:"text"`
-	} `json:"header"`
-	Text       string `json:"text"`
-	MathInline string `json:"math_inline"`
-	MathBlock  string `json:"math_block"`
-	List       *struct {
-		Ordered bool               `json:"ordered"`
-		Items   []documentListItem `json:"items"`
-	} `json:"list"`
-	Img *struct {
-		Title       string `json:"title"`
-		Description string `json:"description"`
-	} `json:"img"`
-	Table *struct {
-		Title string `json:"title"`
-		Rows  []struct {
-			Cells []string `json:"cells"`
-		} `json:"rows"`
-	} `json:"table"`
-}
-
-type documentListItem struct {
-	Text     string             `json:"text"`
-	Children []documentListItem `json:"children"`
-}
-
 func RenderTranscriptTimelineText(raw string) (string, error) {
 	var parsed transcriptJSON
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
@@ -79,7 +42,7 @@ func RenderTranscriptTimelineText(raw string) (string, error) {
 		if text == "" {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf(`%s ~ %s "%s"`, segment.From, segment.To, text))
+		lines = append(lines, segment.From+" ~ "+segment.To+` "`+text+`"`)
 	}
 	return strings.Join(lines, "\n"), nil
 }
@@ -89,15 +52,15 @@ func RenderTranscriptMarkdown(raw string) (string, error) {
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
 		return "", err
 	}
-	lines := make([]string, 0, len(parsed.Segments)*2)
+	sentences := make([]string, 0, len(parsed.Segments))
 	for _, segment := range parsed.Segments {
 		text := strings.TrimSpace(segment.Text)
 		if text == "" {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("- [%s ~ %s] %s", segment.From, segment.To, text))
+		sentences = append(sentences, text)
 	}
-	return strings.Join(lines, "\n"), nil
+	return strings.Join(sentences, " "), nil
 }
 
 func RenderRefinedMarkdown(raw string) (string, error) {
@@ -105,107 +68,48 @@ func RenderRefinedMarkdown(raw string) (string, error) {
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
 		return "", err
 	}
-	lines := []string{}
+	sections := make([]string, 0, len(parsed.Paragraph))
 	for _, paragraph := range parsed.Paragraph {
 		summary := strings.TrimSpace(paragraph.ParagraphSummary)
-		if summary != "" {
-			lines = append(lines, "### "+summary, "")
-		}
+		sentences := make([]string, 0, len(paragraph.Sentence))
 		for _, sentence := range paragraph.Sentence {
 			content := strings.TrimSpace(sentence.Content)
 			if content == "" {
 				continue
 			}
-			startTime := strings.TrimSpace(sentence.StartTime)
-			if startTime != "" {
-				lines = append(lines, fmt.Sprintf("- %s %s", startTime, content))
-			} else {
-				lines = append(lines, "- "+content)
+			sentences = append(sentences, content)
+		}
+		if summary == "" && len(sentences) == 0 {
+			continue
+		}
+		section := strings.Builder{}
+		if summary != "" {
+			section.WriteString("## ")
+			section.WriteString(summary)
+		}
+		if len(sentences) > 0 {
+			if section.Len() > 0 {
+				section.WriteString("\n\n")
 			}
+			section.WriteString(strings.Join(sentences, " "))
 		}
-		if len(lines) > 0 {
-			lines = append(lines, "")
-		}
+		sections = append(sections, section.String())
 	}
-	return strings.TrimSpace(strings.Join(lines, "\n")), nil
+	return strings.TrimSpace(strings.Join(sections, "\n\n")), nil
 }
 
 func RenderDocumentMarkdown(raw string) (string, error) {
-	var parsed documentJSON
-	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
-		return "", err
-	}
-	lines := []string{}
-	for _, page := range parsed.Pages {
-		lines = append(lines, fmt.Sprintf("## Page %d", page.PageIndex), "")
-		for _, element := range page.Elements {
-			switch {
-			case element.Header != nil:
-				level := element.Header.Level
-				if level < 1 {
-					level = 1
-				}
-				if level > 3 {
-					level = 3
-				}
-				lines = append(lines, strings.Repeat("#", level)+" "+strings.TrimSpace(element.Header.Text), "")
-			case strings.TrimSpace(element.MathBlock) != "":
-				lines = append(lines, "$$", strings.TrimSpace(element.MathBlock), "$$", "")
-			case strings.TrimSpace(element.MathInline) != "":
-				lines = append(lines, "$"+strings.TrimSpace(element.MathInline)+"$", "")
-			case strings.TrimSpace(element.Text) != "":
-				lines = append(lines, strings.TrimSpace(element.Text), "")
-			case element.List != nil && len(element.List.Items) > 0:
-				lines = append(lines, renderDocumentListMarkdown(element.List.Items, element.List.Ordered, 0)...)
-				lines = append(lines, "")
-			case element.Img != nil:
-				lines = append(lines, "**"+strings.TrimSpace(element.Img.Title)+"**", "", strings.TrimSpace(element.Img.Description), "")
-			case element.Table != nil:
-				lines = append(lines, "**"+strings.TrimSpace(element.Table.Title)+"**", "")
-				lines = append(lines, renderDocumentTableMarkdown(element.Table.Rows)...)
-				lines = append(lines, "")
-			}
-		}
-	}
-	return strings.TrimSpace(strings.Join(lines, "\n")), nil
+	return structured.RenderDocumentMarkdown([]byte(raw))
 }
 
-func renderDocumentListMarkdown(items []documentListItem, ordered bool, depth int) []string {
-	lines := []string{}
-	for i, item := range items {
-		text := strings.TrimSpace(item.Text)
-		if text == "" {
-			continue
-		}
-		marker := "-"
-		if ordered {
-			marker = fmt.Sprintf("%d.", i+1)
-		}
-		lines = append(lines, strings.Repeat("  ", depth)+marker+" "+text)
-		if len(item.Children) > 0 {
-			lines = append(lines, renderDocumentListMarkdown(item.Children, false, depth+1)...)
-		}
+func RenderDownloadMarkdownTitle(title, body string) string {
+	title = strings.TrimSpace(title)
+	body = strings.TrimSpace(body)
+	if title == "" {
+		return body
 	}
-	return lines
-}
-
-func renderDocumentTableMarkdown(rows []struct {
-	Cells []string `json:"cells"`
-}) []string {
-	if len(rows) == 0 {
-		return nil
+	if body == "" {
+		return "# " + title
 	}
-	header := rows[0].Cells
-	divider := make([]string, len(header))
-	for i := range divider {
-		divider[i] = "---"
-	}
-	lines := []string{
-		"| " + strings.Join(header, " | ") + " |",
-		"| " + strings.Join(divider, " | ") + " |",
-	}
-	for _, row := range rows[1:] {
-		lines = append(lines, "| "+strings.Join(row.Cells, " | ")+" |")
-	}
-	return lines
+	return "# " + title + "\n\n" + body
 }
