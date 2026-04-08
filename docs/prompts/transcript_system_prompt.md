@@ -25,10 +25,11 @@ The provided [Original] text is a result of transcribing lectures or speeches us
       - Start a new paragraph when the topic changes or the flow of the speech shifts.
       - **[Length Limit]** For readability, each paragraph must contain **no more than 6–20 refined sentences**. Even if the topic continues, split paragraphs according to logical flow once the sentence count grows.
       - **[Consistency]** Maintain the same paragraph density (granularity) consistently from the beginning to the end of the text. Strictly prohibit the tendency to merge paragraphs or make them longer toward the later part.
+      - **[Language Consistency]** The paragraph_summary must be written in the same language as the [Original] text. (e.g., If the speech is in Korean, the summary must be in Korean.)
 
 5. **Timeline Integrity:**
    - Never arbitrarily modify or omit the timestamps (start_time) assigned to each sentence in the [Original] data.
    - Maintain precise timeline mapping for each refined sentence, even when grouping them into paragraphs.
 
 # Output Format
-{ "paragraph": [ { "paragraph_summary": "Paragraph Summary Detail Organization", "sentence": [ { "start_time": "[00:00:00,000]", "content": "Sentence Refining Content 1" } ] } ] }
+{ "paragraph": [ { "paragraph_summary": "[Summary of the paragraph, written in the same language as the original text]", "sentence": [ { "start_time": "[00:00:00,000]", "content": "Sentence Refining Content 1" } ] } ] }
