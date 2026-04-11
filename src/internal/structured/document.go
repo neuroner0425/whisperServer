@@ -111,11 +111,11 @@ func NormalizeDocumentResponseJSON(raw string) ([]byte, error) {
 				}
 			}
 			if parsed.Pages[i].Elements[j].Img != nil {
-				parsed.Pages[i].Elements[j].Img.Title = strings.TrimSpace(parsed.Pages[i].Elements[j].Img.Title)
-				parsed.Pages[i].Elements[j].Img.Description = strings.TrimSpace(parsed.Pages[i].Elements[j].Img.Description)
+				parsed.Pages[i].Elements[j].Img.Title = ensureImageTitlePrefix(strings.TrimSpace(parsed.Pages[i].Elements[j].Img.Title))
+				parsed.Pages[i].Elements[j].Img.Description = ensureImageDescriptionPrefix(strings.TrimSpace(parsed.Pages[i].Elements[j].Img.Description))
 			}
 			if parsed.Pages[i].Elements[j].Table != nil {
-				parsed.Pages[i].Elements[j].Table.Title = strings.TrimSpace(parsed.Pages[i].Elements[j].Table.Title)
+				parsed.Pages[i].Elements[j].Table.Title = ensureTableTitlePrefix(strings.TrimSpace(parsed.Pages[i].Elements[j].Table.Title))
 				for rowIdx := range parsed.Pages[i].Elements[j].Table.Rows {
 					for cellIdx := range parsed.Pages[i].Elements[j].Table.Rows[rowIdx].Cells {
 						parsed.Pages[i].Elements[j].Table.Rows[rowIdx].Cells[cellIdx] = strings.TrimSpace(parsed.Pages[i].Elements[j].Table.Rows[rowIdx].Cells[cellIdx])
@@ -125,6 +125,39 @@ func NormalizeDocumentResponseJSON(raw string) ([]byte, error) {
 		}
 	}
 	return json.MarshalIndent(parsed, "", "  ")
+}
+
+func ensureImageTitlePrefix(title string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return title
+	}
+	if strings.HasPrefix(title, "Photo:") || strings.HasPrefix(title, "Photo :") {
+		return title
+	}
+	return "Photo: " + title
+}
+
+func ensureImageDescriptionPrefix(description string) string {
+	description = strings.TrimSpace(description)
+	if description == "" {
+		return description
+	}
+	if strings.HasPrefix(description, "Description:") || strings.HasPrefix(description, "Description :") {
+		return description
+	}
+	return "Description: " + description
+}
+
+func ensureTableTitlePrefix(title string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return title
+	}
+	if strings.HasPrefix(title, "Table:") || strings.HasPrefix(title, "Table :") {
+		return title
+	}
+	return "Table: " + title
 }
 
 // MergeDocumentJSON concatenates chunk-level document JSON into one response body.

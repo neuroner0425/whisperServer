@@ -152,6 +152,49 @@ func TestNormalizeDocumentResponseJSONTrimsMathFields(t *testing.T) {
 	}
 }
 
+func TestNormalizeDocumentResponseJSONAddsEnglishImagePrefixes(t *testing.T) {
+	raw := `{
+	  "pages": [
+	    {
+	      "page_index": 1,
+	      "elements": [
+	        { "header": { "level": 1, "text": "선형대수 공지" } },
+	        { "text": "강의 소개와 동아리 예시를 설명한다." },
+	        { "img": { "title": "Photo: University club recruitment posters", "description": "Description: A photo showing various recruitment posters on a wall." } },
+	        { "table": { "title": "수강 계획", "rows": [ { "cells": ["주차", "내용"] }, { "cells": ["1", "소개"] } ] } }
+	      ]
+	    },
+	    {
+	      "page_index": 2,
+	      "elements": [
+	        { "header": { "level": 1, "text": "Linear Algebra Notice" } },
+	        { "text": "This page introduces the lecture materials." },
+	        { "img": { "title": "사진: 교재 표지", "description": "설명: 강의 교재 표지 이미지." } },
+	        { "table": { "title": "Table: Schedule", "rows": [ { "cells": ["Week", "Topic"] }, { "cells": ["1", "Intro"] } ] } }
+	      ]
+	    }
+	  ]
+	}`
+
+	out, err := normalizeDocumentResponseJSON(raw)
+	if err != nil {
+		t.Fatalf("normalizeDocumentResponseJSON returned error: %v", err)
+	}
+	got := string(out)
+	for _, want := range []string{
+		`"title": "Photo: University club recruitment posters"`,
+		`"description": "Description: A photo showing various recruitment posters on a wall."`,
+		`"title": "Table: 수강 계획"`,
+		`"title": "Photo: 사진: 교재 표지"`,
+		`"description": "Description: 설명: 강의 교재 표지 이미지."`,
+		`"title": "Table: Schedule"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("normalized JSON missing %q: %s", want, got)
+		}
+	}
+}
+
 func TestTruncateConsistencyContext(t *testing.T) {
 	got, err := structured.BuildConsistencyContext([]byte(`{
 	  "pages": [

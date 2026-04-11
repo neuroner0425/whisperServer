@@ -44,10 +44,8 @@ Extract every page into JSON according to the schema. Preserve heading hierarchy
 - **Distinction**: Do not confuse `code` with `math_block`. Code is typically written in a monospaced font and contains programming logic or commands.
 
 ## **4. Visual Material Extraction (Comprehensive Description)**
-- **Language & Prefixes**: 
+- **Language**:
   - **The `title` and `description` MUST be written in the same language as the primary text of the page.**
-  - **Title Prefix**: Prepend a language-appropriate prefix like **"Photo: "** (English) or **"사진: "** (Korean) to the `title` unless already present.
-  - **Description Prefix**: Prepend a language-appropriate prefix like **"Description: "** (English) or **"설명: "** (Korean) to the beginning of the `description`.
 - **Filtering**: Extract ALL meaningful visuals (charts, diagrams, educational illustrations, conceptual photos, etc.). Exclude purely decorative template elements.
 - **`title`**: **Use the caption** from the page or generate a concise title (5-10 words).
 - **`description`**: 
@@ -58,9 +56,9 @@ Extract every page into JSON according to the schema. Preserve heading hierarchy
 ## **5. Table Extraction (High Precision)**
 - **Structure**: Every table must have a `title`, `rows`, and `cells`.
 - **Grid Mapping**: Preserve the exact grid structure of the original table. Each row in the image must correspond to one `object` in the `rows` array.
-- **Header Row**: The first row (column headers) MUST be included as the first element: `rows[0]`.
+- **Header Row**: The first row (column headers) MUST be included as the first element (rows[0]). If the table has no header row, represent the cells in rows[0] as empty strings "".
 - **Merged Cells**: If cells are merged (span multiple rows/columns), repeat the value in each corresponding JSON cell to maintain the rectangular grid integrity, or ensure the sequence remains logical.
-- **Empty Cells**: Represent empty cells as an empty string `""`, do not skip them.
+- **Multi-line Content**: If a single cell contains multiple lines of text, do not use newline characters (e.g., \n). Instead, separate each line using the `<br>` tag.
 
 ## **6. Mathematical Expression (LaTeX)**
 - All math content must be valid LaTeX.
