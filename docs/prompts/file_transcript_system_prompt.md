@@ -22,17 +22,35 @@ Extract every page into JSON according to the schema. Preserve heading hierarchy
 
 # **Detailed Element Rules**
 
-## **1. Heading & Text**
-- **`header`**: Assign `level` **(1: Document title, 2: Chapter or Major section, 3: Subsection or page-level section).**
-- **`text`**: Use for plain prose only. If a sentence is interrupted by a block formula or table, split the prose into separate `text` elements before and after the interruption.
+## 1. Heading and Text
+- `header.level`:
+  - `1` = document title
+  - `2` = chapter or major section
+  - `3` = subsection or page-level section
+- `text` must contain prose only.
+- If prose is interrupted by a table, image, code block, or block formula, split the prose before and after that interruption.
 
-## **2. Nested List Extraction**
-- Represent lists as a structured hierarchy, not as a flat array of strings.
-- `list.items` contains top-level list items. Each item may contain `children` for nested list items.
+## 2. Nested List Extraction
+- Lists must be represented as hierarchy, not as a flat sequence.
+- `list.items` contains only top-level items.
+- Child items must be placed inside `children`.
 - Support nesting up to 3 levels total.
-- **Hierarchical Detection**: Use visual indentation, **changes in marker style (e.g., switching from "1." to "(1)" or "1)" to "a)"),** numbering patterns, and alignment to decide parent-child relationships.
-- **Strict Nesting**: **Do not flatten child items.** If the bullet or numbering style changes, treat it as a strong indicator of a new hierarchical level even if the indentation is subtle.
-- If a parent item has nested items beneath it, keep the parent text in the parent item and place nested entries in `children`.
+
+### 2.1. Hierarchy Decision Rules
+Use all of the following together:
+- visual indentation
+- marker style changes
+- numbering pattern changes
+- left-edge alignment
+- vertical grouping
+- parent-child semantic dependence
+
+### 2.2. Strict Anti-Flattening Rules
+- Never flatten nested items into the same level when a parent-child relationship is visually or semantically present.
+- If a parent item is followed by indented sub-items, those sub-items must go into `children`.
+- If marker style changes from examples like `1.` -> `(1)` -> `a.` or `-` -> `•` -> `-`, treat that as strong evidence of nesting.
+- If an item explains or enumerates the immediately preceding item, prefer `children` over a new sibling.
+- If uncertain between sibling and child, choose child conservatively rather than flattening.
 
 ## **3. Code Block Extraction (Syntax & Fidelity)**
 - **`languages`**: Identify the programming language used (e.g., `python`, `java`, `cpp`, `sql`, `html`, `bash`). If the language is not explicitly mentioned, infer it from the syntax. If truly unknown, use `"text"`.
@@ -44,8 +62,7 @@ Extract every page into JSON according to the schema. Preserve heading hierarchy
 - **Distinction**: Do not confuse `code` with `math_block`. Code is typically written in a monospaced font and contains programming logic or commands.
 
 ## **4. Visual Material Extraction (Comprehensive Description)**
-- **Language**:
-  - **The `title` and `description` MUST be written in the same language as the primary text of the page.**
+- `img.title` and `img.description` **must be written in the same primary language as the page body text.**
 - **Filtering**: Extract ALL meaningful visuals (charts, diagrams, educational illustrations, conceptual photos, etc.). Exclude purely decorative template elements.
 - **`title`**: **Use the caption** from the page or generate a concise title (5-10 words).
 - **`description`**: 
@@ -58,7 +75,7 @@ Extract every page into JSON according to the schema. Preserve heading hierarchy
 - **Grid Mapping**: Preserve the exact grid structure of the original table. Each row in the image must correspond to one `object` in the `rows` array.
 - **Header Row**: The first row (column headers) MUST be included as the first element (rows[0]). If the table has no header row, represent the cells in rows[0] as empty strings "".
 - **Merged Cells**: If cells are merged (span multiple rows/columns), repeat the value in each corresponding JSON cell to maintain the rectangular grid integrity, or ensure the sequence remains logical.
-- **Multi-line Content**: If a single cell contains multiple lines of text, do not use newline characters (e.g., \n). Instead, separate each line using the `<br>` tag.
+- **Multi-line Content**: If a single cell contains content that requires semantic line breaks, do not use newline characters (e.g., \n). Instead, use the `<br>` tag to separate lines according to their meaning.
 
 ## **6. Mathematical Expression (LaTeX)**
 - All math content must be valid LaTeX.
@@ -67,3 +84,11 @@ Extract every page into JSON according to the schema. Preserve heading hierarchy
 - Do not include explanatory natural language inside `math_block`.
 - If a sentence contains both prose and math, split them into separate elements when needed instead of mixing long block expressions into `text`.
 - If a matrix or equation is visually standalone, it must be emitted as `math_block`.
+
+## **7. Final Validation Before Answering**
+Before producing the final JSON, verify all of the following:
+1. No descriptive `img` field language conflicts with the page’s primary language.
+2. No nested list has been flattened into sibling items.
+3. No code block was converted into prose.
+4. No standalone equation was left inside `text`.
+5. Output matches the schema exactly.
