@@ -9,8 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"google.golang.org/genai"
 	"whisperserver/src/internal/worker"
+
+	"google.golang.org/genai"
 )
 
 // Config defines Gemini-specific runtime settings and callbacks.
@@ -260,7 +261,7 @@ func (r *Runtime) generateDocument(ctx context.Context, idx int, systemPrompt st
 			Parts: parts,
 		}},
 		&genai.GenerateContentConfig{
-			Temperature: genai.Ptr[float32](0.2),
+			Temperature: genai.Ptr[float32](0.7),
 			SystemInstruction: &genai.Content{
 				Parts: []*genai.Part{{Text: systemPrompt}},
 			},
