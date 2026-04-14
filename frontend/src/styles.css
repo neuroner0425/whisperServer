@@ -1515,6 +1515,7 @@ textarea.dark-input:focus {
 .markdown-panel h3,
 .markdown-panel p,
 .markdown-panel ul,
+.markdown-panel pre,
 .markdown-panel hr,
 .markdown-panel table {
   margin: 0 0 10px;
@@ -1544,6 +1545,24 @@ textarea.dark-input:focus {
 
 .markdown-panel ul {
   padding-left: 18px;
+}
+
+.markdown-panel pre {
+  overflow-x: auto;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.markdown-panel code {
+  font-family: "SF Mono", "JetBrains Mono", "Fira Code", monospace;
+  font-size: 0.94em;
+}
+
+.markdown-panel pre code {
+  display: block;
+  white-space: pre;
 }
 
 .markdown-panel li + li {
