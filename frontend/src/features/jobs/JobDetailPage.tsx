@@ -845,6 +845,11 @@ function renderDocumentPageMarkdown(page: DocumentPage) {
       lines.push('')
       continue
     }
+    if (element.code?.raw?.trim()) {
+      const language = (element.code.languages || 'text').trim() || 'text'
+      lines.push(`\`\`\`${language}`, element.code.raw.trimEnd(), '```', '')
+      continue
+    }
     if (element.img) {
       lines.push(`**${element.img.title}**`, '', element.img.description, '')
       continue
