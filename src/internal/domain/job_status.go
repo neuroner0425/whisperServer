@@ -2,12 +2,17 @@ package domain
 
 // Canonical job status codes persisted in SQLite and reused across the app.
 const (
-	JobStatusPendingCode         = 10
-	JobStatusRunningCode         = 20
-	JobStatusRefiningPendingCode = 30
-	JobStatusRefiningCode        = 40
-	JobStatusCompletedCode       = 50
-	JobStatusFailedCode          = 60
+	JobStatusPendingCode            = 10
+	JobStatusRunningCode            = 20
+	JobStatusRefiningPendingCode    = 30
+	JobStatusRefiningCode           = 40
+	JobStatusCompletedCode          = 50
+	JobStatusFailedCode             = 60
+	JobStatusAudioConvertFailedCode = 61
+	JobStatusPDFConvertFailedCode   = 62
+	JobStatusTranscribeFailedCode   = 63
+	JobStatusRefineFailedCode       = 64
+	JobStatusPDFExtractFailedCode   = 65
 )
 
 // JobStatusName converts a numeric code into the localized status label.
@@ -25,6 +30,16 @@ func JobStatusName(code int) string {
 		return "완료"
 	case JobStatusFailedCode:
 		return "실패"
+	case JobStatusAudioConvertFailedCode:
+		return "오디오 변환 실패"
+	case JobStatusPDFConvertFailedCode:
+		return "PDF 변환 실패"
+	case JobStatusTranscribeFailedCode:
+		return "전사 실패"
+	case JobStatusRefineFailedCode:
+		return "정제 실패"
+	case JobStatusPDFExtractFailedCode:
+		return "PDF 추출 실패"
 	default:
 		return ""
 	}
@@ -45,6 +60,16 @@ func JobStatusCode(name string) int {
 		return JobStatusCompletedCode
 	case "실패":
 		return JobStatusFailedCode
+	case "오디오 변환 실패":
+		return JobStatusAudioConvertFailedCode
+	case "PDF 변환 실패":
+		return JobStatusPDFConvertFailedCode
+	case "전사 실패":
+		return JobStatusTranscribeFailedCode
+	case "정제 실패":
+		return JobStatusRefineFailedCode
+	case "PDF 추출 실패":
+		return JobStatusPDFExtractFailedCode
 	default:
 		return 0
 	}

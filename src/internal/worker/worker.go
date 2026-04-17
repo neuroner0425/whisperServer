@@ -331,7 +331,7 @@ func (w *Worker) finalizeRefine(jobID string) {
 		return
 	}
 	if w.deps.BlobSvc == nil {
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusRefineFailedCode})
 		if w.deps.Errf != nil {
 			w.deps.Errf("worker.blobSvc", errors.New("missing blob service"), "job_id=%s", jobID)
 		}
@@ -340,18 +340,18 @@ func (w *Worker) finalizeRefine(jobID string) {
 	timelineText, err := w.deps.BlobSvc.LoadTranscriptTimelineText(jobID)
 	if err != nil {
 		w.deps.Errf("worker.loadTranscriptJSON", err, "job_id=%s", jobID)
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusRefineFailedCode})
 		return
 	}
 	if err := w.taskRefining(jobID, timelineText); err != nil {
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusRefineFailedCode})
 		w.deps.Errf("worker.refine", err, "job_id=%s", jobID)
 		return
 	}
 	if updated := w.deps.GetJob(jobID); updated == nil || updated.IsTrashed {
 		return
 	}
-	w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusCompleted, "result": "db://transcript_json"})
+	w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusCompleted, "status_code": model.JobStatusCompletedCode, "phase": "", "result": "db://transcript_json"})
 	w.deps.Logf("[WORKER] completed job_id=%s result=db://transcript_json", jobID)
 }
 
@@ -365,12 +365,12 @@ func (w *Worker) taskTranscribe(jobID string) error {
 		"preview_text": "",
 	})
 	if w.deps.BlobSvc == nil {
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusTranscribeFailedCode})
 		w.deps.IncJobsTotal("failure")
 		return errors.New("missing blob service")
 	}
 	if w.deps.WhisperRunner == nil {
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusTranscribeFailedCode})
 		w.deps.IncJobsTotal("failure")
 		return errors.New("missing whisper runner")
 	}
@@ -387,7 +387,7 @@ func (w *Worker) taskTranscribe(jobID string) error {
 	audioBytes, err := w.deps.BlobSvc.LoadAudioAAC(jobID)
 	if err != nil {
 		w.deps.Errf("transcribe.loadAudioBlob", err, "job_id=%s", jobID)
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusTranscribeFailedCode})
 		w.deps.IncJobsTotal("failure")
 		return err
 	}
@@ -395,14 +395,14 @@ func (w *Worker) taskTranscribe(jobID string) error {
 	wavPath := filepath.Join(w.cfg.TmpFolder, jobID+".wav")
 	if err := os.WriteFile(aacPath, audioBytes, 0o644); err != nil {
 		w.deps.Errf("transcribe.writeTempAac", err, "job_id=%s", jobID)
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusAudioConvertFailedCode})
 		w.deps.IncJobsTotal("failure")
 		return err
 	}
 	if err := w.deps.ConvertToWav(aacPath, wavPath); err != nil {
 		_ = os.Remove(aacPath)
 		w.deps.Errf("transcribe.convertToWav", err, "job_id=%s", jobID)
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusAudioConvertFailedCode})
 		w.deps.IncJobsTotal("failure")
 		return err
 	}
@@ -411,14 +411,14 @@ func (w *Worker) taskTranscribe(jobID string) error {
 	if err != nil {
 		_ = os.Remove(wavPath)
 		w.deps.Errf("transcribe.readTempWav", err, "job_id=%s", jobID)
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusAudioConvertFailedCode})
 		w.deps.IncJobsTotal("failure")
 		return err
 	}
 	runResult, err := w.deps.WhisperRunner.RunFromBlob(ctx, jobID, wavBytes, totalSec)
 	if err != nil {
 		statusLabel := "failure"
-		fields := map[string]any{"status": w.cfg.StatusFailed}
+		fields := map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusTranscribeFailedCode}
 		if errors.Is(err, context.DeadlineExceeded) {
 			fields["status_detail"] = "타임아웃"
 			statusLabel = "timeout"
@@ -435,7 +435,7 @@ func (w *Worker) taskTranscribe(jobID string) error {
 
 	if len(runResult.TranscriptJSON) > 0 {
 		if err := w.deps.BlobSvc.SaveTranscriptJSON(jobID, runResult.TranscriptJSON); err != nil {
-			w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+			w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusTranscribeFailedCode})
 			w.deps.IncJobsTotal("failure")
 			w.deps.Errf("transcribe.saveTranscriptJSONBlob", err, "job_id=%s", jobID)
 			return err
@@ -454,7 +454,9 @@ func (w *Worker) taskTranscribe(jobID string) error {
 
 	w.deps.SetJobFields(jobID, map[string]any{
 		"status":       nextStatus,
+		"status_code":  model.JobStatusCode(nextStatus),
 		"result":       "db://transcript_json",
+		"phase":        "",
 		"preview_text": "",
 		"completed_at": completed.Format("2006-01-02 15:04:05"),
 		"completed_ts": float64(completed.Unix()),

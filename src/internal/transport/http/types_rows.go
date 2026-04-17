@@ -10,6 +10,7 @@ type JobRow struct {
 	FileType        string
 	MediaDuration   string
 	SizeBytes       int64
+	StatusCode      int
 	Status          string
 	Phase           string
 	ProgressPercent int

@@ -292,6 +292,7 @@ func (s *UploadService) finalizeUploadedAudio(jobID, tempPath, aacPath string) {
 		}
 		d.SetJobFields(jobID, map[string]any{
 			"status":         d.StatusFailed,
+			"status_code":    model.JobStatusAudioConvertFailedCode,
 			"phase":          "업로드 처리 실패",
 			"progress_label": "",
 			"status_detail":  "ffmpeg 변환 실패",
@@ -306,6 +307,7 @@ func (s *UploadService) finalizeUploadedAudio(jobID, tempPath, aacPath string) {
 		}
 		d.SetJobFields(jobID, map[string]any{
 			"status":         d.StatusFailed,
+			"status_code":    model.JobStatusAudioConvertFailedCode,
 			"phase":          "업로드 처리 실패",
 			"progress_label": "",
 			"status_detail":  "업로드 파일 처리 실패",
@@ -319,6 +321,7 @@ func (s *UploadService) finalizeUploadedAudio(jobID, tempPath, aacPath string) {
 		}
 		d.SetJobFields(jobID, map[string]any{
 			"status":         d.StatusFailed,
+			"status_code":    model.JobStatusAudioConvertFailedCode,
 			"phase":          "업로드 처리 실패",
 			"progress_label": "",
 			"status_detail":  "오디오 파일 저장 실패",
@@ -359,6 +362,7 @@ func (s *UploadService) finalizeUploadedPDF(jobID, tempPath string) {
 		}
 		d.SetJobFields(jobID, map[string]any{
 			"status":         d.StatusFailed,
+			"status_code":    model.JobStatusPDFConvertFailedCode,
 			"phase":          "업로드 처리 실패",
 			"progress_label": "",
 			"status_detail":  "PDF 파일 처리 실패",
@@ -372,6 +376,7 @@ func (s *UploadService) finalizeUploadedPDF(jobID, tempPath string) {
 		}
 		d.SetJobFields(jobID, map[string]any{
 			"status":         d.StatusFailed,
+			"status_code":    model.JobStatusPDFConvertFailedCode,
 			"phase":          "업로드 처리 실패",
 			"progress_label": "",
 			"status_detail":  "PDF 파일 저장 실패",

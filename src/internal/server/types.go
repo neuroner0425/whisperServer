@@ -3,6 +3,7 @@ package server
 
 // JobView is the server-local detail payload shaped before transport serialization.
 type JobView struct {
+	StatusCode         int
 	Filename           string
 	FileType           string
 	Status             string

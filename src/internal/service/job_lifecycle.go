@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	model "whisperserver/src/internal/domain"
 	store "whisperserver/src/internal/repo/sqlite"
 )
 
@@ -75,6 +76,30 @@ func (s *JobLifecycle) ResetForTranscribe(jobID string, refineEnabled bool) {
 	}
 	s.deleteJobBlob(jobID, store.BlobKindPreview)
 	s.deleteJobJSON(jobID, store.BlobKindTranscriptJSON)
+	s.deleteJobJSON(jobID, store.BlobKindRefined)
+}
+
+// ResetForRefine clears refine-only state before scheduling refinement again.
+func (s *JobLifecycle) ResetForRefine(jobID string) {
+	if s == nil {
+		return
+	}
+	if s.d.CancelJob != nil {
+		s.d.CancelJob(jobID)
+	}
+	if s.d.SetJobFields != nil {
+		s.d.SetJobFields(jobID, map[string]any{
+			"result_refined":   "",
+			"refine_enabled":   true,
+			"status":           model.JobStatusName(model.JobStatusRefiningPendingCode),
+			"status_code":      model.JobStatusRefiningPendingCode,
+			"phase":            "",
+			"progress_percent": 100,
+			"progress_label":   "",
+			"preview_text":     "",
+			"status_detail":    "",
+		})
+	}
 	s.deleteJobJSON(jobID, store.BlobKindRefined)
 }
 

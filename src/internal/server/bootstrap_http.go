@@ -72,6 +72,7 @@ func transportCurrentUserOrUnauthorized(c echo.Context) (*httptransport.User, bo
 // toAPIJobView maps the runtime job model into the job view returned by the JSON detail API.
 func toAPIJobView(job *model.Job) JobView {
 	return JobView{
+		StatusCode:         job.StatusCode,
 		Filename:           job.Filename,
 		FileType:           job.FileType,
 		Status:             job.Status,

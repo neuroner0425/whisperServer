@@ -43,6 +43,11 @@ func ensureStatusCodes(db *sql.DB) error {
 		`INSERT INTO status_codes(code, name) VALUES (40, '정제 중') ON CONFLICT(code) DO UPDATE SET name=excluded.name`,
 		`INSERT INTO status_codes(code, name) VALUES (50, '완료') ON CONFLICT(code) DO UPDATE SET name=excluded.name`,
 		`INSERT INTO status_codes(code, name) VALUES (60, '실패') ON CONFLICT(code) DO UPDATE SET name=excluded.name`,
+		`INSERT INTO status_codes(code, name) VALUES (61, '오디오 변환 실패') ON CONFLICT(code) DO UPDATE SET name=excluded.name`,
+		`INSERT INTO status_codes(code, name) VALUES (62, 'PDF 변환 실패') ON CONFLICT(code) DO UPDATE SET name=excluded.name`,
+		`INSERT INTO status_codes(code, name) VALUES (63, '전사 실패') ON CONFLICT(code) DO UPDATE SET name=excluded.name`,
+		`INSERT INTO status_codes(code, name) VALUES (64, '정제 실패') ON CONFLICT(code) DO UPDATE SET name=excluded.name`,
+		`INSERT INTO status_codes(code, name) VALUES (65, 'PDF 추출 실패') ON CONFLICT(code) DO UPDATE SET name=excluded.name`,
 	}
 	for _, statement := range statements {
 		if _, err := db.Exec(statement); err != nil {

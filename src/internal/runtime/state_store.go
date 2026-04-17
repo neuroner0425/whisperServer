@@ -442,9 +442,14 @@ func deriveJobPhase(statusCode int) string {
 	case model.JobStatusRefiningCode:
 		return "정제 중"
 	case model.JobStatusCompletedCode:
-		return "완료"
-	case model.JobStatusFailedCode:
-		return "실패"
+		return model.JobStatusName(statusCode)
+	case model.JobStatusFailedCode,
+		model.JobStatusAudioConvertFailedCode,
+		model.JobStatusPDFConvertFailedCode,
+		model.JobStatusTranscribeFailedCode,
+		model.JobStatusRefineFailedCode,
+		model.JobStatusPDFExtractFailedCode:
+		return model.JobStatusName(statusCode)
 	default:
 		return "대기 중"
 	}
