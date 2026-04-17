@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	model "whisperserver/src/internal/domain"
 	intutil "whisperserver/src/internal/util"
 )
 
@@ -41,7 +42,7 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 		"resume_available":     false,
 	})
 	if w.deps.BlobSvc == nil {
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusPDFExtractFailedCode})
 		w.deps.IncJobsTotal("failure")
 		return errors.New("missing blob service")
 	}
@@ -56,7 +57,7 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 
 	pdfBytes, err := w.deps.BlobSvc.LoadPDFOriginal(jobID)
 	if err != nil {
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusPDFExtractFailedCode})
 		w.deps.IncJobsTotal("failure")
 		return err
 	}
@@ -71,7 +72,7 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 
 	pdfPath := filepath.Join(tmpDir, jobID+".pdf")
 	if err := os.WriteFile(pdfPath, pdfBytes, 0o644); err != nil {
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusPDFConvertFailedCode})
 		w.deps.IncJobsTotal("failure")
 		return err
 	}
@@ -83,32 +84,32 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 	// Validate the page count and render each page into JPEG input for Gemini.
 	pageCount, err := w.deps.CountPDFPages(pdfPath)
 	if err != nil {
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_detail": "PDF 페이지 수 확인 실패"})
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusPDFConvertFailedCode, "status_detail": "PDF 페이지 수 확인 실패"})
 		w.deps.IncJobsTotal("failure")
 		return err
 	}
 	if pageCount > w.cfg.PDFMaxPages {
 		err = fmt.Errorf("pdf page limit exceeded: %d > %d", pageCount, w.cfg.PDFMaxPages)
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_detail": fmt.Sprintf("PDF는 최대 %d페이지까지 지원합니다.", w.cfg.PDFMaxPages)})
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusPDFConvertFailedCode, "status_detail": fmt.Sprintf("PDF는 최대 %d페이지까지 지원합니다.", w.cfg.PDFMaxPages)})
 		w.deps.IncJobsTotal("failure")
 		return err
 	}
 
 	imagePaths, err := w.deps.RenderPDFToJPEGs(pdfPath, tmpDir)
 	if err != nil {
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_detail": "PDF 페이지 변환 실패"})
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusPDFConvertFailedCode, "status_detail": "PDF 페이지 변환 실패"})
 		w.deps.IncJobsTotal("failure")
 		return err
 	}
 	if len(imagePaths) == 0 {
 		err = errors.New("no rendered pages")
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_detail": "PDF 페이지가 없습니다."})
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusPDFConvertFailedCode, "status_detail": "PDF 페이지가 없습니다."})
 		w.deps.IncJobsTotal("failure")
 		return err
 	}
 	if len(imagePaths) > w.cfg.PDFMaxPages {
 		err = fmt.Errorf("pdf rendered page limit exceeded: %d > %d", len(imagePaths), w.cfg.PDFMaxPages)
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_detail": fmt.Sprintf("PDF는 최대 %d페이지까지 지원합니다.", w.cfg.PDFMaxPages)})
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusPDFConvertFailedCode, "status_detail": fmt.Sprintf("PDF는 최대 %d페이지까지 지원합니다.", w.cfg.PDFMaxPages)})
 		w.deps.IncJobsTotal("failure")
 		return err
 	}
@@ -251,13 +252,13 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 	})
 	mergedJSON, err := w.deps.MergeDocumentJSON(chunkResults...)
 	if err != nil {
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_detail": "문서 병합 실패"})
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusPDFExtractFailedCode, "status_detail": "문서 병합 실패"})
 		w.deps.IncJobsTotal("failure")
 		return err
 	}
 
 	if err := w.deps.BlobSvc.SaveDocumentJSON(jobID, mergedJSON); err != nil {
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed})
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusPDFExtractFailedCode})
 		w.deps.IncJobsTotal("failure")
 		return err
 	}
@@ -268,6 +269,7 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 	w.deps.ObserveJobDuration(completed.Sub(started).Seconds())
 	w.deps.SetJobFields(jobID, map[string]any{
 		"status":               w.cfg.StatusCompleted,
+		"status_code":          model.JobStatusCompletedCode,
 		"result":               "db://document_json",
 		"preview_text":         "",
 		"completed_at":         completed.Format("2006-01-02 15:04:05"),
@@ -327,6 +329,7 @@ func (w *Worker) markPDFChunkFailure(jobID string, chunkIndex, totalChunks, star
 	processed := processedPagesForChunk(chunkIndex-1, totalPages, w.cfg.PDFMaxPagesPerRequest)
 	w.deps.SetJobFields(jobID, map[string]any{
 		"status":               w.cfg.StatusFailed,
+		"status_code":          model.JobStatusPDFExtractFailedCode,
 		"phase":                fmt.Sprintf("실패: %d/%d 배치", chunkIndex, totalChunks),
 		"current_chunk":        chunkIndex,
 		"total_chunks":         totalChunks,

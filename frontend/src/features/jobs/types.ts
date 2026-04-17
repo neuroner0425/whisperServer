@@ -1,4 +1,5 @@
 export type JobView = {
+  StatusCode?: number
   Filename: string
   FileType?: string
   Status: string

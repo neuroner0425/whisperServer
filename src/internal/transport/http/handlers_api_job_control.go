@@ -23,6 +23,7 @@ type JobControlHandlers struct {
 	EnqueuePDFExtract func(string)
 
 	ResetForTranscribe  func(jobID string, refineEnabled bool)
+	ResetForRefine      func(jobID string)
 	ResetForPDF         func(jobID string)
 	PrepareForPDFRetry  func(jobID string)
 	HasGeminiConfigured func() bool
@@ -54,8 +55,18 @@ func (h JobControlHandlers) Retry() echo.HandlerFunc {
 		if job == nil || job.OwnerID != u.ID || job.IsTrashed {
 			return echo.NewHTTPError(http.StatusNotFound, "작업을 찾을 수 없습니다.")
 		}
-		if job.Status != h.StatusFailed {
+		if !isRetryableFailureStatus(job.StatusCode, job.Status, h.StatusFailed) {
 			return echo.NewHTTPError(http.StatusBadRequest, "실패한 작업만 재시도할 수 있습니다.")
+		}
+
+		if h.BlobSvc != nil && h.EnqueueRefine != nil && h.ResetForRefine != nil &&
+			h.HasGeminiConfigured != nil && h.HasGeminiConfigured() &&
+			h.BlobSvc.HasTranscriptJSON(jobID) &&
+			(job.StatusCode == model.JobStatusRefineFailedCode ||
+				(job.StatusCode == model.JobStatusFailedCode && job.FileType != "pdf")) {
+			h.ResetForRefine(jobID)
+			h.EnqueueRefine(jobID)
+			return c.JSON(http.StatusOK, map[string]string{"job_id": jobID, "status": "requeued_refine"})
 		}
 
 		// PDF jobs restart document extraction from the preserved original file.
@@ -76,6 +87,19 @@ func (h JobControlHandlers) Retry() echo.HandlerFunc {
 		h.EnqueueTranscribe(jobID)
 		return c.JSON(http.StatusOK, map[string]string{"job_id": jobID, "status": "retried"})
 	}
+}
+
+func isRetryableFailureStatus(statusCode int, status string, failedLabel string) bool {
+	switch statusCode {
+	case model.JobStatusFailedCode,
+		model.JobStatusAudioConvertFailedCode,
+		model.JobStatusPDFConvertFailedCode,
+		model.JobStatusTranscribeFailedCode,
+		model.JobStatusRefineFailedCode,
+		model.JobStatusPDFExtractFailedCode:
+		return true
+	}
+	return strings.TrimSpace(status) == strings.TrimSpace(failedLabel)
 }
 
 // Retranscribe restarts a completed job from its source artifact.
