@@ -14,9 +14,10 @@ export type UploadState = {
   folderId: string
   description: string
   refineEnabled: boolean
+  fileType: 'audio' | 'pdf'
 }
 
-export type TypeFilter = 'all' | 'folder' | 'document'
+export type TypeFilter = 'all' | 'folder' | 'file' | 'audio' | 'pdf'
 export type DateFilter = 'all' | 'past_hour' | 'today' | 'past_7_days' | 'past_30_days' | 'this_year' | 'last_year'
 export type SortKey = 'name' | 'updated' | 'kind' | 'location'
 export type SortDirection = 'asc' | 'desc'
@@ -64,6 +65,7 @@ export type PendingUpload = {
   jobId?: string
   folderId: string
   filename: string
+  fileType: 'audio' | 'pdf'
   stage: 'uploading' | 'queued' | 'processing' | 'failed'
   progress: number
 }
@@ -116,7 +118,9 @@ export type ConfirmDialogState =
 
 export const TYPE_OPTIONS: Array<{ value: TypeFilter; label: string }> = [
   { value: 'folder', label: '폴더' },
-  { value: 'document', label: '문서' },
+  { value: 'file', label: '파일' },
+  { value: 'audio', label: '오디오' },
+  { value: 'pdf', label: 'PDF' },
 ]
 
 export const DATE_OPTIONS: Array<{ value: DateFilter; label: string }> = [

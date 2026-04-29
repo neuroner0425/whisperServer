@@ -31,12 +31,15 @@ import {
   defaultSortState,
   displayFilename,
   entryKey,
+  fileIconForJob,
   fileTypeLabel,
   formatBytes,
   formatJobSub,
   formatPendingStatus,
   matchesFolderFilters,
+  matchesFolderTypeFilter,
   matchesJobFilters,
+  matchesJobTypeFilter,
   normalizePage,
   normalizeRect,
   readDragPayload,
@@ -250,21 +253,22 @@ export function FilesPage({ viewMode }: FilesPageProps) {
   const jobItems = useMemo(() => data?.job_items ?? [], [data?.job_items])
   const folderPath = data?.folder_path ?? []
   const filteredFolderItems = useMemo(
-    () => folderItems.filter((folder) => matchesFolderFilters(folder, dateFilter)),
-    [dateFilter, folderItems],
+    () => folderItems.filter((folder) => matchesFolderFilters(folder, dateFilter) && matchesFolderTypeFilter(typeFilter)),
+    [dateFilter, folderItems, typeFilter],
   )
   const filteredJobItems = useMemo(
-    () => jobItems.filter((job) => matchesJobFilters(job, dateFilter)),
-    [dateFilter, jobItems],
+    () => jobItems.filter((job) => matchesJobFilters(job, dateFilter) && matchesJobTypeFilter(job, typeFilter)),
+    [dateFilter, jobItems, typeFilter],
   )
   const pendingVisibleJobs = useMemo(
     () =>
       pendingUploads
         .filter((item) => viewMode === 'home' || item.folderId === folderId)
+        .filter((item) => dateFilter === 'all' && matchesJobTypeFilter({ FileType: item.fileType }, typeFilter))
         .map((item) => ({
           ID: item.jobId || item.localId,
           Filename: item.filename,
-          FileType: 'audio',
+          FileType: item.fileType,
           MediaDuration: '',
           SizeBytes: 0,
           Status:
@@ -284,38 +288,67 @@ export function FilesPage({ viewMode }: FilesPageProps) {
           __pending: true,
           __jobId: item.jobId || '',
         })),
-    [allFolders, folderId, pendingUploads, viewMode],
+    [allFolders, dateFilter, folderId, pendingUploads, typeFilter, viewMode],
   )
   const actualJobItems = useMemo(
     () => jobItems.filter((job) => !pendingUploads.some((item) => matchesPendingUpload(job, item))),
     [jobItems, pendingUploads],
   )
+  const filteredActualJobItems = useMemo(
+    () => actualJobItems.filter((job) => matchesJobFilters(job, dateFilter) && matchesJobTypeFilter(job, typeFilter)),
+    [actualJobItems, dateFilter, typeFilter],
+  )
   const sortedHomeJobs = useMemo(
-    () => sortJobs(actualJobItems, sortKey === 'kind' ? 'updated' : sortKey, sortDirection),
-    [actualJobItems, sortDirection, sortKey],
+    () => sortJobs(filteredActualJobItems, sortKey === 'kind' ? 'updated' : sortKey, sortDirection),
+    [filteredActualJobItems, sortDirection, sortKey],
   )
   const sortedExploreEntries = useMemo<VisibleEntry[]>(
     () =>
       sortEntries(
         [
-          ...(typeFilter === 'document' ? [] : filteredFolderItems.map((folder) => ({ key: entryKey('folder', folder.ID), kind: 'folder' as const, item: folder }))),
-          ...(typeFilter === 'folder'
-            ? []
-            : [...pendingVisibleJobs, ...filteredJobItems.filter((job) => !pendingUploads.some((item) => matchesPendingUpload(job, item)))].map((job) => ({
-                key: entryKey('file', job.ID),
-                kind: 'file' as const,
-                item: job,
-              }))),
+          ...filteredFolderItems.map((folder) => ({ key: entryKey('folder', folder.ID), kind: 'folder' as const, item: folder })),
+          ...[...pendingVisibleJobs, ...filteredJobItems.filter((job) => !pendingUploads.some((item) => matchesPendingUpload(job, item)))].map((job) => ({
+            key: entryKey('file', job.ID),
+            kind: 'file' as const,
+            item: job,
+          })),
         ],
         sortKey,
         sortDirection,
       ),
-    [filteredFolderItems, filteredJobItems, pendingUploads, pendingVisibleJobs, sortDirection, sortKey, typeFilter],
+    [filteredFolderItems, filteredJobItems, pendingUploads, pendingVisibleJobs, sortDirection, sortKey],
   )
   const visibleEntries = useMemo<VisibleEntry[]>(
     () => (viewMode === 'explore' ? sortedExploreEntries : []),
     [sortedExploreEntries, viewMode],
   )
+
+  useEffect(() => {
+    if (viewMode !== 'explore' || uploadState || textDialog || confirmDialog || moveState) {
+      return
+    }
+
+    const handleSelectAll = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'a' || event.altKey) {
+        return
+      }
+      const target = event.target as HTMLElement | null
+      if (target?.closest('input, textarea, select, [contenteditable="true"]') || visibleEntries.length === 0) {
+        return
+      }
+      event.preventDefault()
+      const nextKeys = visibleEntries.map((entry) => entry.key)
+      setSelectedKeys(nextKeys)
+      setSelectionAnchor(nextKeys[0] ?? null)
+      setMenuState(null)
+    }
+
+    window.addEventListener('keydown', handleSelectAll)
+    return () => {
+      window.removeEventListener('keydown', handleSelectAll)
+    }
+  }, [confirmDialog, moveState, textDialog, uploadState, viewMode, visibleEntries])
+
   const selectedEntries = useMemo(
     () => visibleEntries.filter((entry) => selectedKeys.includes(entry.key)),
     [selectedKeys, visibleEntries],
@@ -410,6 +443,7 @@ export function FilesPage({ viewMode }: FilesPageProps) {
       folderId,
       description: '',
       refineEnabled: !isPDF,
+      fileType: isPDF ? 'pdf' : 'audio',
     })
     event.target.value = ''
   }
@@ -792,6 +826,8 @@ export function FilesPage({ viewMode }: FilesPageProps) {
   }
 
   const hasActiveFilters = typeFilter !== 'all' || dateFilter !== 'all'
+  const showFolderSections = matchesFolderTypeFilter(typeFilter)
+  const showJobSections = typeFilter !== 'folder'
   const moveCurrentPath = buildMovePath(moveBrowserData?.all_folders ?? allFolders, moveBrowserFolderId)
   const moveTitle = moveState
     ? moveState.id === '__selection__'
@@ -799,6 +835,94 @@ export function FilesPage({ viewMode }: FilesPageProps) {
       : `"${displayFilename(moveState.name)}" 이동중`
     : ''
   const homeDisplayJobs = [...pendingVisibleJobs, ...sortedHomeJobs]
+
+  const renderFilterToolbar = () => (
+    <div className="filter-toolbar">
+      <div className="filter-group">
+        <div className="filter-control">
+          <button
+            className={`filter-toggle-button${typeFilter !== 'all' ? ' active' : ''}`}
+            onClick={(event) => {
+              event.stopPropagation()
+              setFilterMenu((current) => (current === 'type' ? null : 'type'))
+            }}
+            type="button"
+          >
+            <span>{typeFilterLabel(typeFilter)}</span>
+            <span className="filter-toggle-caret">▾</span>
+          </button>
+          {filterMenu === 'type' ? (
+            <div className="filter-menu">
+              {TYPE_OPTIONS.map((option) => (
+                <button
+                  className={`filter-menu-item${typeFilter === option.value ? ' active' : ''}`}
+                  key={option.value}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    setTypeFilter(option.value)
+                    setFilterMenu(null)
+                  }}
+                  type="button"
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+        {typeFilter !== 'all' ? (
+          <button className="filter-clear-button" onClick={() => setTypeFilter('all')} type="button">
+            ×
+          </button>
+        ) : null}
+      </div>
+      <div className="filter-group">
+        <div className="filter-control">
+          <button
+            className={`filter-toggle-button${dateFilter !== 'all' ? ' active' : ''}`}
+            onClick={(event) => {
+              event.stopPropagation()
+              setFilterMenu((current) => (current === 'date' ? null : 'date'))
+            }}
+            type="button"
+          >
+            <span>{dateFilterLabel(dateFilter)}</span>
+            <span className="filter-toggle-caret">▾</span>
+          </button>
+          {filterMenu === 'date' ? (
+            <div className="filter-menu">
+              {DATE_OPTIONS.map((option) => (
+                <button
+                  className={`filter-menu-item${dateFilter === option.value ? ' active' : ''}`}
+                  key={option.value}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    setDateFilter(option.value)
+                    setFilterMenu(null)
+                  }}
+                  type="button"
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+        {dateFilter !== 'all' ? (
+          <button className="filter-clear-button" onClick={() => setDateFilter('all')} type="button">
+            ×
+          </button>
+        ) : null}
+      </div>
+      {hasActiveFilters ? (
+        <div className="filter-group">
+          <button className="filter-reset-button" onClick={resetFilters} type="button">
+            필터 지우기
+          </button>
+        </div>
+      ) : null}
+    </div>
+  )
 
   const submitTextDialog = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -859,12 +983,14 @@ export function FilesPage({ viewMode }: FilesPageProps) {
 
         {data && viewMode === 'home' ? (
           <div className="drive-sections">
+            {renderFilterToolbar()}
+            {showFolderSections ? (
             <section className="drive-section">
               <div className="drive-section-header">
                 <h2>최근 수정 폴더</h2>
               </div>
               <div className="drive-folder-strip">
-                {folderItems.map((folder) => {
+                {filteredFolderItems.map((folder) => {
                   const key = entryKey('folder', folder.ID)
                   return (
                   <article
@@ -894,7 +1020,9 @@ export function FilesPage({ viewMode }: FilesPageProps) {
                 })}
               </div>
             </section>
+            ) : null}
 
+            {showJobSections ? (
             <section className="drive-section">
               <div className="drive-section-header">
                 <h2>최근 수정 파일</h2>
@@ -926,7 +1054,7 @@ export function FilesPage({ viewMode }: FilesPageProps) {
                     onDoubleClick={canOpen ? () => openFile(job.ID) : undefined}
                   >
                     <div className="drive-table-primary" role="button" tabIndex={0}>
-                      <span className="drive-item-icon">🎧</span>
+                      <span className="drive-item-icon">{fileIconForJob(job)}</span>
                       <span className="drive-item-copy">
                         <span className="drive-item-title">{displayFilename(job.Filename)}</span>
                         <span className="drive-item-sub">{formatJobSub(job)}</span>
@@ -954,8 +1082,10 @@ export function FilesPage({ viewMode }: FilesPageProps) {
                   </div>
                   )
                 })}
+                {homeDisplayJobs.length === 0 ? <div className="empty-panel">표시할 파일이 없습니다.</div> : null}
               </div>
             </section>
+            ) : null}
           </div>
         ) : null}
 
@@ -964,6 +1094,7 @@ export function FilesPage({ viewMode }: FilesPageProps) {
             <div className="drive-section-header">
               <h2>{query ? `"${query}" 검색 결과` : '검색 결과'}</h2>
             </div>
+            {renderFilterToolbar()}
             <div className="drive-table">
               <div className="drive-table-header">
                 <button className="column-sort-button" onClick={() => toggleSort('name')} type="button">
@@ -988,7 +1119,7 @@ export function FilesPage({ viewMode }: FilesPageProps) {
                     onDoubleClick={() => openFile(job.ID)}
                   >
                     <div className="drive-table-primary" role="button" tabIndex={0}>
-                      <span className="drive-item-icon">🎧</span>
+                      <span className="drive-item-icon">{fileIconForJob(job)}</span>
                       <span className="drive-item-copy">
                         <span className="drive-item-title">{displayFilename(job.Filename)}</span>
                         <span className="drive-item-sub">{formatJobSub(job)}</span>
@@ -1248,7 +1379,7 @@ export function FilesPage({ viewMode }: FilesPageProps) {
                           }}
                         >
                           <div className="drive-table-primary" role="button" tabIndex={0}>
-                            <span className="drive-item-icon">🎧</span>
+                            <span className="drive-item-icon">{fileIconForJob(entry.item)}</span>
                             <span className="drive-item-copy">
                               <span className="drive-item-title">{displayFilename(entry.item.Filename)}</span>
                               <span className="drive-item-sub">{formatJobSub(entry.item)}</span>
@@ -1281,7 +1412,7 @@ export function FilesPage({ viewMode }: FilesPageProps) {
           </section>
         ) : null}
 
-        {data && data.total_pages > 1 ? (
+        {data && viewMode !== 'home' && data.total_pages > 1 ? (
           <div className="pagination">
             {Array.from({ length: data.total_pages }, (_, index) => index + 1).map((pageNumber) => (
               <button
@@ -1402,7 +1533,7 @@ export function FilesPage({ viewMode }: FilesPageProps) {
               ))}
               {moveFileChildren.map((job) => (
                 <div className="move-folder-row is-disabled" key={job.ID}>
-                  <span className="drive-item-icon">📄</span>
+                  <span className="drive-item-icon">{fileIconForJob(job)}</span>
                   <span>{job.Filename}</span>
                 </div>
               ))}

@@ -131,6 +131,24 @@ export function matchesJobFilters(job: JobItem, dateFilter: DateFilter) {
   return matchesDateFilter(job.UpdatedAt, dateFilter)
 }
 
+export function matchesFolderTypeFilter(typeFilter: TypeFilter) {
+  return typeFilter === 'all' || typeFilter === 'folder'
+}
+
+export function matchesJobTypeFilter(job: Pick<JobItem, 'FileType'>, typeFilter: TypeFilter) {
+  const normalized = (job.FileType || '').trim().toLowerCase()
+  if (typeFilter === 'all' || typeFilter === 'file') {
+    return true
+  }
+  if (typeFilter === 'audio') {
+    return normalized === 'audio'
+  }
+  if (typeFilter === 'pdf') {
+    return normalized === 'pdf'
+  }
+  return false
+}
+
 export function renderSortMark(currentKey: SortKey, currentDirection: SortDirection, targetKey: SortKey) {
   if (currentKey !== targetKey) {
     return ''
@@ -208,8 +226,14 @@ export function typeFilterLabel(typeFilter: TypeFilter) {
   if (typeFilter === 'folder') {
     return '폴더'
   }
-  if (typeFilter === 'document') {
-    return '문서'
+  if (typeFilter === 'file') {
+    return '파일'
+  }
+  if (typeFilter === 'audio') {
+    return '오디오'
+  }
+  if (typeFilter === 'pdf') {
+    return 'PDF'
   }
   return '유형'
 }
@@ -230,6 +254,17 @@ export function fileTypeLabel(fileType?: string) {
     return '파일'
   }
   return normalized.toUpperCase()
+}
+
+export function fileIconForJob(job: Pick<JobItem, 'FileType'>) {
+  const normalized = (job.FileType || '').trim().toLowerCase()
+  if (normalized === 'audio') {
+    return '🎧'
+  }
+  if (normalized === 'pdf') {
+    return '📄'
+  }
+  return '📎'
 }
 
 function compareDate(a?: string, b?: string) {

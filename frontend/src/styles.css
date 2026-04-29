@@ -458,6 +458,10 @@ textarea.dark-input:focus {
   margin-inline: 20px;
 }
 
+.drive-sections > .filter-toolbar {
+  margin-inline: 20px;
+}
+
 .drive-section-header {
   display: flex;
   align-items: center;
@@ -1908,12 +1912,81 @@ textarea.dark-input:focus {
   .drive-table-row,
   .drive-table-header.explore,
   .drive-table-row.explore,
+  .drive-table-header.home,
+  .drive-table-row.home,
   .drive-pathbar,
   .selection-toolbar,
   .filter-toolbar {
     display: flex;
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .drive-table-header,
+  .drive-table-header.explore,
+  .drive-table-header.home {
+    display: none;
+  }
+
+  .drive-section:not(.explore-section),
+  .drive-explorer-body {
+    padding-inline: 12px;
+  }
+
+  .explore-section .drive-pathbar,
+  .explore-section .filter-toolbar,
+  .explore-section .selection-toolbar,
+  .drive-sections > .filter-toolbar {
+    margin-inline: 12px;
+  }
+
+  .drive-table-row,
+  .drive-table-row.explore,
+  .drive-table-row.home {
+    position: relative;
+    gap: 6px;
+    min-height: auto;
+    padding: 10px 48px 10px 12px;
+  }
+
+  .drive-table-primary {
+    width: 100%;
+    padding: 0;
+  }
+
+  .drive-table-meta,
+  .drive-link-button {
+    padding-left: 42px;
+    font-size: 0.92rem;
+    white-space: normal;
+  }
+
+  .drive-table-row > .row-menu-button {
+    position: absolute;
+    top: 9px;
+    right: 10px;
+  }
+
+  .selection-toolbar-inner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .selection-toolbar-main,
+  .selection-toolbar-actions,
+  .filter-group,
+  .pagination {
+    width: 100%;
+  }
+
+  .selection-toolbar-actions,
+  .filter-group,
+  .pagination {
+    gap: 8px;
+  }
+
+  .filter-toggle-button {
+    width: 100%;
   }
 
   .drive-folder-strip {
