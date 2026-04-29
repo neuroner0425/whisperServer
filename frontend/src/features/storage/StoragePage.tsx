@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 
 import { dateFilterLabel, matchesDateFilter } from '../files/filesPageDateUtils'
-import { displayFilename, fileTypeLabel } from '../files/filesPageUtils'
+import { displayFilename, fileTypeLabel, matchesJobTypeFilter, typeFilterLabel } from '../files/filesPageUtils'
 import { DATE_OPTIONS, TYPE_OPTIONS, type DateFilter, type TypeFilter } from '../files/filesPageTypes'
 import { batchDownloadJobs, trashJob } from '../files/api'
 import { fetchStorage, type StorageItem } from './api'
@@ -70,13 +70,10 @@ export function StoragePage() {
   const filteredItems = useMemo(() => {
     const source = data?.items ?? []
     const filtered = source.filter((item) => {
-      if (typeFilter === 'document' && !item.file_type) {
-        return false
-      }
       if (typeFilter === 'folder') {
         return false
       }
-      return matchesDateFilter(item.updated_at, dateFilter)
+      return matchesJobTypeFilter({ FileType: item.file_type }, typeFilter) && matchesDateFilter(item.updated_at, dateFilter)
     })
     return [...filtered].sort((a, b) => {
       let value = 0
@@ -205,7 +202,7 @@ export function StoragePage() {
                     }}
                     type="button"
                   >
-                    <span>{typeFilter === 'document' ? '문서' : '유형'}</span>
+                    <span>{typeFilterLabel(typeFilter)}</span>
                     <span className="filter-toggle-caret">▾</span>
                   </button>
                   {filterMenu === 'type' ? (

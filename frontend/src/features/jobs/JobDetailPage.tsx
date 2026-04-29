@@ -86,6 +86,7 @@ export function JobDetailPage() {
   const currentFileName = displayFilename(data?.job.Filename || '파일')
   const progressText = data ? buildJobStatusText(data.job) : ''
   const isPDF = data?.job.FileType === 'pdf'
+  const isFailed = isFailureStatusCode(data?.job.StatusCode)
 
   usePageTitle(currentFileName)
 
@@ -458,7 +459,7 @@ export function JobDetailPage() {
               JSON
             </a>
           ) : null}
-          {data?.status === '실패' ? (
+          {isFailed ? (
             <button className="ghost-button" disabled={isRetrying} onClick={() => void handleRetry()} type="button">
               {isRetrying ? '재시도 중...' : isPDF ? '문서 다시 처리' : '재시도'}
             </button>
@@ -584,7 +585,7 @@ export function JobDetailPage() {
                     </span>
                   </div>
                 ) : null}
-                {isPDF && (data.job.ResumeAvailable || data.resume_available) && data.status === '실패' ? (
+                {isPDF && (data.job.ResumeAvailable || data.resume_available) && isFailed ? (
                   <div className="detail-row compact">
                     <span className="detail-value">실패 배치부터 재시도할 수 있습니다.</span>
                   </div>
@@ -901,6 +902,13 @@ function clampPage(page: number, maxPage: number) {
     return upper
   }
   return page
+}
+
+function isFailureStatusCode(statusCode?: number) {
+  if (!statusCode) {
+    return false
+  }
+  return statusCode >= 60
 }
 
 function isPersistentNetworkError(error: string) {

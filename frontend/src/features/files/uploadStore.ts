@@ -95,6 +95,7 @@ export async function startPendingUpload(uploadState: UploadState) {
     clientUploadId,
     folderId: uploadState.folderId,
     filename: normalizeUploadFilename(uploadState),
+    fileType: uploadState.fileType,
     stage: 'uploading',
     progress: 0,
   }

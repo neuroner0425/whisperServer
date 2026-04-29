@@ -64,7 +64,18 @@ func (h FilesHandlers) Handler() echo.HandlerFunc {
 		folderID := NormalizeFolderID(c.QueryParam("folder_id"))
 		sortBy, sortOrder := NormalizeSortParams(c.QueryParam("sort"), c.QueryParam("order"))
 		page := ParsePositiveInt(c.QueryParam("page"), 1)
-		pageSize := ParsePositiveInt(c.QueryParam("page_size"), 20)
+		defaultPageSize := 40
+		if view == "home" {
+			defaultPageSize = 20
+		}
+		pageSize := ParsePositiveInt(c.QueryParam("page_size"), defaultPageSize)
+		if pageSize > 100 {
+			pageSize = 100
+		}
+		if view == "home" {
+			page = 1
+			pageSize = 20
+		}
 
 		if view == "explore" && folderID != "" {
 			if _, err := h.FolderSvc.Require(u.ID, folderID, false, http.StatusNotFound, "폴더를 찾을 수 없습니다."); err != nil {
@@ -85,7 +96,13 @@ func (h FilesHandlers) Handler() echo.HandlerFunc {
 		// Apply ordering and page slicing before producing a versioned response.
 		h.SortJobRows(rows, sortBy, sortOrder)
 		pagedRows, page, totalPages := h.PaginateRows(rows, page, pageSize)
-		snapshotVersion := h.SnapshotVersion(pagedRows, folderItems, page, pageSize, totalPages, len(rows))
+		totalItems := len(rows)
+		if view == "home" {
+			page = 1
+			totalPages = 1
+			totalItems = len(pagedRows)
+		}
+		snapshotVersion := h.SnapshotVersion(pagedRows, folderItems, page, pageSize, totalPages, totalItems)
 		clientVersion := strings.TrimSpace(c.QueryParam("v"))
 		if clientVersion != "" && clientVersion == snapshotVersion {
 			return c.JSON(http.StatusOK, map[string]any{
@@ -94,7 +111,7 @@ func (h FilesHandlers) Handler() echo.HandlerFunc {
 				"page":        page,
 				"page_size":   pageSize,
 				"total_pages": totalPages,
-				"total_items": len(rows),
+				"total_items": totalItems,
 			})
 		}
 
@@ -120,7 +137,7 @@ func (h FilesHandlers) Handler() echo.HandlerFunc {
 			"page":              page,
 			"page_size":         pageSize,
 			"total_pages":       totalPages,
-			"total_items":       len(rows),
+			"total_items":       totalItems,
 			"version":           snapshotVersion,
 			"links": map[string]string{
 				"legacy_root": filesRootPath,
