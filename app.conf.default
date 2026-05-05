@@ -2,6 +2,7 @@
 # If app.conf exists, it is used instead of this default file.
 
 PORT=8000
+RUN_MODE=PRODUCTION
 MAX_UPLOAD_SIZE_MB=512
 UPLOAD_RATE_LIMIT_KBPS=0
 JOB_TIMEOUT_SEC=3600

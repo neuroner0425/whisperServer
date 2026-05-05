@@ -18,6 +18,7 @@ export function AppShell() {
   const [searchParams] = useSearchParams()
   const queryInput = searchParams.get('q') ?? ''
   const [storageSummary, setStorageSummary] = useState<{ used: number; capacity: number } | null>(null)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
   useEffect(() => {
     const loadStorageSummary = async () => {
@@ -78,14 +79,17 @@ export function AppShell() {
 
   return (
     <div className="workspace-shell">
-      <aside className="workspace-sidebar">
+      <aside className={`workspace-sidebar${mobileNavOpen ? ' open' : ''}`}>
         <div className="workspace-brand-block">
           <div className="workspace-brand">Whisper Drive</div>
           <div aria-hidden="true" className="workspace-subtitle" />
         </div>
         <button
           className="sidebar-create-button"
-          onClick={() => window.dispatchEvent(new CustomEvent('whisper:new-file'))}
+          onClick={() => {
+            setMobileNavOpen(false)
+            window.dispatchEvent(new CustomEvent('whisper:new-file'))
+          }}
           type="button"
         >
           <span className="sidebar-create-plus">+</span>
@@ -97,6 +101,7 @@ export function AppShell() {
               key={item.to}
               className={({ isActive }) => `workspace-nav-link${isActive ? ' active' : ''}`}
               end={item.end}
+              onClick={() => setMobileNavOpen(false)}
               to={item.to}
             >
               {item.label}
@@ -111,12 +116,23 @@ export function AppShell() {
             {storageSummary ? `${formatBytes(storageSummary.capacity)} 중 ${formatBytes(storageSummary.used)} 사용` : '5GB 중 0B 사용'}
           </div>
         </div>
-        <button className="ghost-button" onClick={() => void handleLogout()} type="button">
+        <button
+          className="ghost-button"
+          onClick={() => {
+            setMobileNavOpen(false)
+            void handleLogout()
+          }}
+          type="button"
+        >
           로그아웃
         </button>
       </aside>
+      {mobileNavOpen ? <button aria-label="메뉴 닫기" className="workspace-sidebar-backdrop" onClick={() => setMobileNavOpen(false)} type="button" /> : null}
       <main className="workspace-main">
         <header className="workspace-topbar">
+          <button aria-label="메뉴 열기" className="workspace-menu-button" onClick={() => setMobileNavOpen(true)} type="button">
+            ☰
+          </button>
           <form className="drive-search app-drive-search" onSubmit={handleSearch}>
             <span className="drive-search-icon" aria-hidden="true">
               ⌕

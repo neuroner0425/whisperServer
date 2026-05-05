@@ -33,6 +33,19 @@ function normalizeUploadFilename(uploadState: UploadState) {
   return ext && !trimmedDisplayName.toLowerCase().endsWith(ext) ? `${trimmedDisplayName}${ext}` : trimmedDisplayName
 }
 
+function buildPendingUpload(uploadState: UploadState): PendingUpload {
+  const clientUploadId = buildClientUploadId()
+  return {
+    localId: `local-${clientUploadId}`,
+    clientUploadId,
+    folderId: uploadState.folderId,
+    filename: normalizeUploadFilename(uploadState),
+    fileType: uploadState.fileType,
+    stage: 'waiting',
+    progress: 0,
+  }
+}
+
 function updatePendingUpload(localId: string, updater: (item: PendingUpload) => PendingUpload) {
   let changed = false
   const next = pendingUploads.map((item) => {
@@ -70,17 +83,45 @@ export function matchesPendingUpload(job: JobItem, pendingUpload: PendingUpload)
   return false
 }
 
-export function prunePendingUploads(serverJobs: JobItem[]) {
-  const next = pendingUploads.filter((item) => {
-    return !serverJobs.some((job) => matchesPendingUpload(job, item))
+function isServerUploadFinalizing(job: JobItem) {
+  const phase = (job.Phase || '').trim()
+  return phase === '업로드 처리 중' || phase === '파일을 변환하는 중'
+}
+
+export function reconcilePendingUploads(serverJobs: JobItem[]) {
+  let changed = false
+  const next = pendingUploads.flatMap((item) => {
+    const serverJob = serverJobs.find((job) => matchesPendingUpload(job, item))
+    if (!serverJob) {
+      return [item]
+    }
+    if (isServerUploadFinalizing(serverJob)) {
+      const updated: PendingUpload = {
+        ...item,
+        jobId: serverJob.ID,
+        stage: 'converting',
+        progress: 0,
+      }
+      changed = changed || updated.jobId !== item.jobId || updated.stage !== item.stage || updated.progress !== item.progress
+      return [updated]
+    }
+    changed = true
+    return []
   })
-  if (next.length !== pendingUploads.length) {
+  if (changed || next.length !== pendingUploads.length) {
     setPendingUploads(next)
   }
 }
 
-export async function startPendingUpload(uploadState: UploadState) {
-  const clientUploadId = buildClientUploadId()
+export function enqueuePendingUploads(uploadStates: UploadState[]) {
+  const items = uploadStates.map(buildPendingUpload)
+  setPendingUploads([...items, ...pendingUploads])
+  return items
+}
+
+export async function startPendingUpload(uploadState: UploadState, pendingUpload?: PendingUpload) {
+  const pendingItem = pendingUpload ?? buildPendingUpload(uploadState)
+  const clientUploadId = pendingItem.clientUploadId
   const formData = new FormData()
   formData.append('file', uploadState.file)
   formData.append('display_name', uploadState.displayName)
@@ -89,37 +130,30 @@ export async function startPendingUpload(uploadState: UploadState) {
   formData.append('refine', String(uploadState.refineEnabled))
   formData.append('client_upload_id', clientUploadId)
 
-  const localId = `local-${clientUploadId}`
-  const pendingItem: PendingUpload = {
-    localId,
-    clientUploadId,
-    folderId: uploadState.folderId,
-    filename: normalizeUploadFilename(uploadState),
-    fileType: uploadState.fileType,
-    stage: 'uploading',
-    progress: 0,
+  if (!pendingUploads.some((item) => item.localId === pendingItem.localId)) {
+    setPendingUploads([pendingItem, ...pendingUploads])
   }
-  setPendingUploads([pendingItem, ...pendingUploads])
+  updatePendingUpload(pendingItem.localId, (item) => ({ ...item, stage: 'uploading', progress: 0 }))
 
   try {
     const response = await uploadFileWithProgress(formData, (percent) => {
-      updatePendingUpload(localId, (item) => {
+      updatePendingUpload(pendingItem.localId, (item) => {
         if (percent >= 100) {
-          return { ...item, progress: 98, stage: 'processing' }
+          return { ...item, progress: 100, stage: 'finishing' }
         }
-        return { ...item, progress: Math.min(percent, 98), stage: 'uploading' }
+        return { ...item, progress: Math.max(0, Math.min(percent, 99)), stage: 'uploading' }
       })
     })
-    updatePendingUpload(localId, (item) => ({
+    updatePendingUpload(pendingItem.localId, (item) => ({
       ...item,
       jobId: response.job_id,
       clientUploadId: response.client_upload_id || item.clientUploadId,
-      stage: 'queued',
-      progress: 99,
+      stage: 'converting',
+      progress: 0,
     }))
     return response
   } catch (error) {
-    updatePendingUpload(localId, (item) => ({ ...item, stage: 'failed', progress: 0 }))
+    updatePendingUpload(pendingItem.localId, (item) => ({ ...item, stage: 'failed', progress: 0 }))
     throw error
   }
 }

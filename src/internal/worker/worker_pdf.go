@@ -94,6 +94,9 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 		w.deps.IncJobsTotal("failure")
 		return err
 	}
+	if w.cfg.DevMode {
+		return w.taskExtractPDFDev(jobID, started, pageCount)
+	}
 
 	imagePaths, err := w.deps.RenderPDFToJPEGs(pdfPath, tmpDir)
 	if err != nil {
@@ -427,4 +430,64 @@ func hasContinuousChunkJSON(kinds map[string]struct{}, lastCompletedChunk int) b
 		}
 	}
 	return true
+}
+
+func (w *Worker) taskExtractPDFDev(jobID string, started time.Time, pageCount int) error {
+	w.deps.Logf("[PDF] dev stub start job_id=%s pages=%d", jobID, pageCount)
+	if pageCount <= 0 {
+		pageCount = 1
+	}
+	pages := make([]map[string]any, 0, pageCount)
+	for i := 1; i <= pageCount; i++ {
+		pages = append(pages, map[string]any{
+			"page_index": i,
+			"elements": []map[string]any{
+				{
+					"header": map[string]any{
+						"level": 1,
+						"text":  fmt.Sprintf("DEV PDF 테스트 페이지 %d", i),
+					},
+				},
+				{
+					"text": fmt.Sprintf("DEV 모드에서 생성한 PDF %d페이지 테스트 결과입니다. 실제 Gemini 문서 추출은 실행하지 않았습니다.", i),
+				},
+			},
+		})
+	}
+	payload := map[string]any{"pages": pages}
+	mergedJSON, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusPDFExtractFailedCode})
+		w.deps.IncJobsTotal("failure")
+		return err
+	}
+	if err := w.deps.BlobSvc.SaveDocumentJSON(jobID, mergedJSON); err != nil {
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusPDFExtractFailedCode})
+		w.deps.IncJobsTotal("failure")
+		return err
+	}
+	w.deps.BlobSvc.DeletePreview(jobID)
+
+	completed := time.Now()
+	w.deps.IncJobsTotal("success")
+	w.deps.ObserveJobDuration(completed.Sub(started).Seconds())
+	w.deps.SetJobFields(jobID, map[string]any{
+		"status":               w.cfg.StatusCompleted,
+		"status_code":          model.JobStatusCompletedCode,
+		"result":               "db://document_json",
+		"preview_text":         "",
+		"completed_at":         completed.Format("2006-01-02 15:04:05"),
+		"completed_ts":         float64(completed.Unix()),
+		"duration":             intutil.FormatSeconds(int(completed.Sub(started).Seconds())),
+		"progress_percent":     100,
+		"phase":                "완료",
+		"status_detail":        "",
+		"page_count":           pageCount,
+		"processed_page_count": pageCount,
+		"current_chunk":        1,
+		"total_chunks":         1,
+		"resume_available":     false,
+	})
+	w.deps.Logf("[PDF] dev stub done job_id=%s pages=%d", jobID, pageCount)
+	return nil
 }

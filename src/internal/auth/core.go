@@ -130,6 +130,9 @@ func (a *Auth) CurrentUserFromRequest(c echo.Context) (*User, error) {
 	if claims.UserID == "" || claims.Email == "" {
 		return nil, errors.New("invalid subject")
 	}
+	if claims.Issuer != a.jwtIssuer {
+		return nil, errors.New("invalid issuer")
+	}
 	return &User{ID: claims.UserID, LoginID: claims.LoginID, Email: claims.Email}, nil
 }
 

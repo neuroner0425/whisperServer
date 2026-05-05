@@ -188,3 +188,41 @@ func (h TrashHandlers) DeleteTrashJobs() echo.HandlerFunc {
 		})
 	}
 }
+
+// DeleteJobs permanently deletes selected jobs owned by the user, regardless of trash state.
+func (h TrashHandlers) DeleteJobs() echo.HandlerFunc {
+	return func(c echo.Context) error {
+		if h.CurrentUserOrUnauthorized == nil || h.JobsSnapshot == nil || h.DeleteJobsFn == nil || h.NotifyFilesChanged == nil {
+			return c.NoContent(http.StatusServiceUnavailable)
+		}
+		u, ok := h.CurrentUserOrUnauthorized(c)
+		if !ok || u == nil {
+			return nil
+		}
+
+		var body struct {
+			JobIDs []string `json:"job_ids"`
+		}
+		if err := c.Bind(&body); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "잘못된 요청입니다.")
+		}
+
+		snapshot := h.JobsSnapshot()
+		toDelete := make([]string, 0, len(body.JobIDs))
+		for _, id := range body.JobIDs {
+			id = strings.TrimSpace(id)
+			job := snapshot[id]
+			if job == nil || job.OwnerID != u.ID {
+				continue
+			}
+			toDelete = append(toDelete, id)
+		}
+
+		h.DeleteJobsFn(toDelete)
+		h.NotifyFilesChanged(u.ID)
+		return c.JSON(http.StatusOK, map[string]any{
+			"deleted_jobs": len(toDelete),
+			"job_ids":      toDelete,
+		})
+	}
+}

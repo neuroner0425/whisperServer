@@ -68,7 +68,7 @@ func newLegacyRefineHandlers(svc appServices) httptransport.LegacyRefineHandlers
 		BlobSvc:               svc.blobSvc,
 		SetJobFields:          svc.runtime.SetJobFields,
 		EnqueueRefine:         svc.runtime.EnqueueRefine,
-		HasGeminiConfigured:   svc.geminiRt.HasConfigured,
+		HasGeminiConfigured:   svc.canGemini,
 		StatusCompleted:       statusCompleted,
 		StatusRefiningPending: statusRefiningPending,
 		Logf:                  procLogf,

@@ -39,7 +39,7 @@ func NewBootstrap() (*Bootstrap, error) {
 
 	procLogf("[BOOT] config source=%s", configPath)
 	store.ConfigureLogging(procLogf, procErrf)
-	if err := store.Init(projectRoot); err != nil {
+	if err := store.InitWithFilename(projectRoot, dbFilenameForRunMode()); err != nil {
 		closeProcessingLogger()
 		return nil, fmt.Errorf("db init failed: %w", err)
 	}
@@ -102,4 +102,11 @@ func NewBootstrap() (*Bootstrap, error) {
 			closeProcessingLogger()
 		},
 	}, nil
+}
+
+func dbFilenameForRunMode() string {
+	if isDevMode() {
+		return "whisper.dev.db"
+	}
+	return "whisper.db"
 }

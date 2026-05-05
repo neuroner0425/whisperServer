@@ -36,12 +36,13 @@ func initRuntimeConfig() error {
 	maxUploadSizeMB = loadedConfig.MaxUploadSizeMB
 	uploadRateLimitKB = loadedConfig.UploadRateLimitKBPS
 	jobTimeoutSec = loadedConfig.JobTimeoutSec
+	runMode = loadedConfig.RunMode
 	splitTaskQueues = loadedConfig.SplitTaskQueues
 
 	geminiModel = loadedConfig.GeminiModel
 
 	jwtSecret = loadedConfig.JWTSecret
-	jwtIssuer = loadedConfig.JWTIssuer
+	jwtIssuer = effectiveJWTIssuer(loadedConfig.JWTIssuer, loadedConfig.RunMode)
 	jwtExpiryHours = loadedConfig.JWTExpiryHours
 	authCookieSecure = loadedConfig.AuthCookieSecure
 
@@ -60,6 +61,14 @@ func initRuntimeConfig() error {
 	}
 
 	return nil
+}
+
+func effectiveJWTIssuer(base, mode string) string {
+	base = strings.TrimSpace(base)
+	if strings.EqualFold(strings.TrimSpace(mode), "DEV") {
+		return base + ":dev"
+	}
+	return base
 }
 
 // validatePDFConfigValues checks PDF processing limits for invalid values.

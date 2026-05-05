@@ -21,6 +21,7 @@ type FolderServiceDeps struct {
 	ListAllFoldersByOwner       func(ownerID string, trashed bool) ([]model.Folder, error)
 	ListFolderPath              func(ownerID, folderID string) ([]model.Folder, error)
 	DeleteTrashedFoldersByOwner func(ownerID string) error
+	DeleteFolderSubtreeByOwner  func(ownerID, folderID string) error
 }
 
 // FolderService applies folder-specific validation and tree rules.
@@ -200,6 +201,21 @@ func (s *FolderService) DeleteTrashed(ownerID string) error {
 	}
 	if err := s.d.DeleteTrashedFoldersByOwner(ownerID); err != nil {
 		return NewHTTPError(http.StatusInternalServerError, "휴지통 비우기 실패")
+	}
+	return nil
+}
+
+// DeleteSubtree permanently removes a folder and its descendant folders.
+func (s *FolderService) DeleteSubtree(ownerID, folderID string) error {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return NewHTTPError(http.StatusBadRequest, "폴더 삭제 실패")
+	}
+	if s.d.DeleteFolderSubtreeByOwner == nil {
+		return NewHTTPError(http.StatusServiceUnavailable, "서비스를 사용할 수 없습니다.")
+	}
+	if err := s.d.DeleteFolderSubtreeByOwner(ownerID, folderID); err != nil {
+		return NewHTTPError(http.StatusBadRequest, "폴더 삭제 실패")
 	}
 	return nil
 }

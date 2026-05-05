@@ -190,6 +190,7 @@ export function uploadFileWithProgress(
         reject(new Error(payload?.detail || payload?.message || `Request failed (${xhr.status})`))
         return
       }
+      onProgress(100)
       resolve({
         job_id: payload.job_id,
         filename: payload.filename,
