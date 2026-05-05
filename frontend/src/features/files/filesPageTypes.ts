@@ -17,6 +17,15 @@ export type UploadState = {
   fileType: 'audio' | 'pdf'
 }
 
+export type UploadDescriptionMode = 'shared' | 'per_file'
+
+export type UploadBatchState = {
+  folderId: string
+  descriptionMode: UploadDescriptionMode
+  sharedDescription: string
+  items: UploadState[]
+}
+
 export type TypeFilter = 'all' | 'folder' | 'file' | 'audio' | 'pdf'
 export type DateFilter = 'all' | 'past_hour' | 'today' | 'past_7_days' | 'past_30_days' | 'this_year' | 'last_year'
 export type SortKey = 'name' | 'updated' | 'kind' | 'location'
@@ -66,7 +75,7 @@ export type PendingUpload = {
   folderId: string
   filename: string
   fileType: 'audio' | 'pdf'
-  stage: 'uploading' | 'queued' | 'processing' | 'failed'
+  stage: 'waiting' | 'uploading' | 'finishing' | 'converting' | 'queued' | 'failed'
   progress: number
 }
 

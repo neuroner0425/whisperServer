@@ -19,7 +19,8 @@ import (
 type Config struct {
 	SourcePath string
 
-	Port string
+	Port    string
+	RunMode string
 
 	MaxUploadSizeMB     int
 	UploadRateLimitKBPS int
@@ -55,6 +56,13 @@ func Load(projectRoot string) (Config, error) {
 	c.Port = strings.TrimSpace(values.string("PORT"))
 	if c.Port == "" {
 		return Config{}, fmt.Errorf("PORT must not be empty (source: %s)", srcPath)
+	}
+	c.RunMode = strings.ToUpper(strings.TrimSpace(values.string("RUN_MODE")))
+	if c.RunMode == "" {
+		c.RunMode = "PRODUCTION"
+	}
+	if c.RunMode != "PRODUCTION" && c.RunMode != "DEV" {
+		return Config{}, fmt.Errorf("RUN_MODE must be PRODUCTION or DEV (source: %s)", srcPath)
 	}
 
 	c.MaxUploadSizeMB = values.int("MAX_UPLOAD_SIZE_MB")

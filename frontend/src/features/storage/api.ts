@@ -28,3 +28,22 @@ export async function fetchStorage(): Promise<StorageResponse> {
   }
   return (await response.json()) as StorageResponse
 }
+
+export async function deleteJobsPermanently(jobIds: string[]) {
+  const response = await fetch('/api/jobs/delete', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ job_ids: jobIds }),
+  })
+  if (response.status === 401) {
+    window.location.href = '/auth/login'
+    throw new Error('인증이 필요합니다.')
+  }
+  if (!response.ok) {
+    throw new Error(`파일 완전삭제에 실패했습니다. (${response.status})`)
+  }
+  return response.json()
+}

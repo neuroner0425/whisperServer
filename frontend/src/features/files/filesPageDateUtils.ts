@@ -25,6 +25,17 @@ export function extractDate(value?: string) {
   return `${date.getFullYear()}년 ${String(date.getMonth() + 1).padStart(2, '0')}월 ${String(date.getDate()).padStart(2, '0')}일 ${time}`
 }
 
+export function formatCompactDate(value?: string) {
+  if (!value) {
+    return '-'
+  }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return '-'
+  }
+  return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')}`
+}
+
 export function dateFilterLabel(dateFilter: DateFilter) {
   switch (dateFilter) {
     case 'past_hour':

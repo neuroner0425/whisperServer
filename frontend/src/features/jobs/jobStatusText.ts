@@ -41,6 +41,9 @@ export function buildJobStatusText(job: JobStatusLike) {
   if (phase === '업로드 처리 중') {
     return `업로드 처리 중 ${progress}%`
   }
+  if (phase === '파일을 변환하는 중') {
+    return '파일을 변환하는 중'
+  }
   if (phase === '업로드 처리 실패') {
     return detail ? `업로드 처리 실패 (${detail})` : '업로드 처리 실패'
   }

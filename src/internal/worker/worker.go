@@ -3,6 +3,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -30,6 +31,7 @@ type Config struct {
 	PDFMaxPages              int
 	PDFMaxPagesPerRequest    int
 	PDFMaxRenderedImageBytes int64
+	DevMode                  bool
 	ProgressRe               *regexp.Regexp
 	StatusPending            string
 	StatusRunning            string
@@ -369,11 +371,6 @@ func (w *Worker) taskTranscribe(jobID string) error {
 		w.deps.IncJobsTotal("failure")
 		return errors.New("missing blob service")
 	}
-	if w.deps.WhisperRunner == nil {
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusTranscribeFailedCode})
-		w.deps.IncJobsTotal("failure")
-		return errors.New("missing whisper runner")
-	}
 	w.deps.BlobSvc.DeletePreview(jobID)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(w.cfg.JobTimeoutSec)*time.Second)
 	w.setCancel(jobID, cancel)
@@ -381,8 +378,19 @@ func (w *Worker) taskTranscribe(jobID string) error {
 		cancel()
 		w.setCancel(jobID, nil)
 	}()
-
 	job := w.deps.GetJob(jobID)
+	if job == nil || job.IsTrashed {
+		return nil
+	}
+	if w.cfg.DevMode {
+		return w.taskTranscribeDev(ctx, jobID, job, started)
+	}
+	if w.deps.WhisperRunner == nil {
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusTranscribeFailedCode})
+		w.deps.IncJobsTotal("failure")
+		return errors.New("missing whisper runner")
+	}
+
 	totalSec := job.MediaDurationSeconds
 	audioBytes, err := w.deps.BlobSvc.LoadAudioAAC(jobID)
 	if err != nil {
@@ -474,6 +482,9 @@ func (w *Worker) taskRefining(jobID, timelineText string) error {
 		return nil
 	}
 	w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusRefining})
+	if w.cfg.DevMode {
+		return w.taskRefiningDev(jobID, timelineText)
+	}
 	if !w.deps.HasGeminiConfigured() {
 		w.deps.Logf("[REFINE] skipped job_id=%s reason=no gemini key", jobID)
 		return nil
@@ -533,4 +544,172 @@ func (w *Worker) buildRefineDescription(job *model.Job) string {
 		return strings.Join(tagLines, "\n")
 	}
 	return base + "\n\n" + strings.Join(tagLines, "\n")
+}
+
+func (w *Worker) taskTranscribeDev(ctx context.Context, jobID string, job *model.Job, started time.Time) error {
+	w.deps.Logf("[TRANSCRIBE] dev stub start job_id=%s", jobID)
+	w.deps.SetJobFields(jobID, map[string]any{
+		"phase":            "DEV 전사 테스트 중",
+		"progress_percent": 5,
+		"progress_label":   "DEV",
+	})
+	if err := w.sleepWithProgress(ctx, 20*time.Second, func(percent int) {
+		w.deps.SetJobFields(jobID, map[string]any{
+			"phase":            "DEV 전사 테스트 중",
+			"progress_percent": percent,
+			"progress_label":   "DEV",
+		})
+	}); err != nil {
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusTranscribeFailedCode})
+		w.deps.IncJobsTotal("failure")
+		return err
+	}
+	if updated := w.deps.GetJob(jobID); updated == nil || updated.IsTrashed {
+		return nil
+	}
+	payload := map[string]any{
+		"segments": []map[string]string{
+			{
+				"from": "00:00:00,000",
+				"to":   "00:00:08,000",
+				"text": "DEV 모드에서 생성한 전사 테스트 결과입니다.",
+			},
+			{
+				"from": "00:00:08,000",
+				"to":   "00:00:20,000",
+				"text": "실제 Whisper 전사는 실행하지 않았으며 업로드와 작업 흐름 확인용 문장입니다.",
+			},
+		},
+	}
+	b, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := w.deps.BlobSvc.SaveTranscriptJSON(jobID, b); err != nil {
+		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusTranscribeFailedCode})
+		w.deps.IncJobsTotal("failure")
+		return err
+	}
+	w.deps.BlobSvc.DeletePreview(jobID)
+
+	completed := time.Now()
+	w.deps.IncJobsTotal("success")
+	w.deps.ObserveJobDuration(completed.Sub(started).Seconds())
+
+	nextStatus := w.cfg.StatusCompleted
+	if job.RefineEnabled {
+		nextStatus = w.cfg.StatusRefiningPending
+	}
+	w.deps.SetJobFields(jobID, map[string]any{
+		"status":           nextStatus,
+		"status_code":      model.JobStatusCode(nextStatus),
+		"result":           "db://transcript_json",
+		"phase":            "",
+		"preview_text":     "",
+		"completed_at":     completed.Format("2006-01-02 15:04:05"),
+		"completed_ts":     float64(completed.Unix()),
+		"duration":         intutil.FormatSeconds(int(completed.Sub(started).Seconds())),
+		"progress_percent": 100,
+		"progress_label":   "",
+	})
+	w.deps.Logf("[TRANSCRIBE] dev stub done job_id=%s status=%s", jobID, nextStatus)
+	return nil
+}
+
+func (w *Worker) taskRefiningDev(jobID, timelineText string) error {
+	job := w.deps.GetJob(jobID)
+	if job == nil || job.IsTrashed {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(w.cfg.JobTimeoutSec)*time.Second)
+	w.setCancel(jobID, cancel)
+	defer func() {
+		cancel()
+		w.setCancel(jobID, nil)
+	}()
+	w.deps.SetJobFields(jobID, map[string]any{
+		"phase":            "DEV 정제 테스트 중",
+		"progress_percent": 10,
+		"progress_label":   "DEV",
+	})
+	if err := w.sleepWithProgress(ctx, 10*time.Second, func(percent int) {
+		w.deps.SetJobFields(jobID, map[string]any{
+			"phase":            "DEV 정제 테스트 중",
+			"progress_percent": percent,
+			"progress_label":   "DEV",
+		})
+	}); err != nil {
+		return err
+	}
+	desc := strings.TrimSpace(w.buildRefineDescription(job))
+	if desc == "" {
+		desc = "입력된 설명이 없습니다."
+	}
+	if strings.TrimSpace(timelineText) == "" {
+		timelineText = "전사 원문이 비어 있습니다."
+	}
+	payload := map[string]any{
+		"paragraph": []map[string]any{
+			{
+				"paragraph_summary": "DEV 정제 테스트 요약",
+				"sentence": []map[string]string{
+					{
+						"start_time": "[00:00:00,000]",
+						"content":    "DEV 모드에서 생성한 정제 결과입니다. 사용자 설명: " + desc,
+					},
+					{
+						"start_time": "[00:00:10,000]",
+						"content":    "원본 전사 예시: " + timelineText,
+					},
+				},
+			},
+		},
+	}
+	refined, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+	if w.deps.BlobSvc == nil {
+		return errors.New("missing blob service")
+	}
+	if err := w.deps.BlobSvc.SaveRefined(jobID, refined); err != nil {
+		return err
+	}
+	if updated := w.deps.GetJob(jobID); updated == nil || updated.IsTrashed {
+		return nil
+	}
+	w.deps.SetJobFields(jobID, map[string]any{"result_refined": "db://refined", "progress_percent": 100, "phase": "", "progress_label": ""})
+	w.deps.Logf("[REFINE] dev stub done job_id=%s", jobID)
+	return nil
+}
+
+func (w *Worker) sleepWithProgress(ctx context.Context, duration time.Duration, update func(int)) error {
+	if duration <= 0 {
+		return nil
+	}
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	deadline := time.NewTimer(duration)
+	defer deadline.Stop()
+	start := time.Now()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			if update != nil {
+				update(95)
+			}
+			return nil
+		case <-ticker.C:
+			if update != nil {
+				elapsed := time.Since(start)
+				percent := 10 + int(float64(elapsed)/float64(duration)*80)
+				if percent > 95 {
+					percent = 95
+				}
+				update(percent)
+			}
+		}
+	}
 }

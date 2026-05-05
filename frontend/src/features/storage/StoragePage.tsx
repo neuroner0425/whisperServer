@@ -4,8 +4,8 @@ import type { MouseEvent as ReactMouseEvent } from 'react'
 import { dateFilterLabel, matchesDateFilter } from '../files/filesPageDateUtils'
 import { displayFilename, fileTypeLabel, matchesJobTypeFilter, typeFilterLabel } from '../files/filesPageUtils'
 import { DATE_OPTIONS, TYPE_OPTIONS, type DateFilter, type TypeFilter } from '../files/filesPageTypes'
-import { batchDownloadJobs, trashJob } from '../files/api'
-import { fetchStorage, type StorageItem } from './api'
+import { batchDownloadJobs } from '../files/api'
+import { deleteJobsPermanently, fetchStorage, type StorageItem } from './api'
 import { usePageTitle } from '../../usePageTitle'
 
 type SortKey = 'name' | 'size'
@@ -86,6 +86,27 @@ export function StoragePage() {
     })
   }, [data?.items, dateFilter, sortDirection, sortKey, typeFilter])
 
+  useEffect(() => {
+    const handleSelectAll = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'a' || event.altKey) {
+        return
+      }
+      const target = event.target as HTMLElement | null
+      if (target?.closest('input, textarea, select, [contenteditable="true"]') || filteredItems.length === 0) {
+        return
+      }
+      event.preventDefault()
+      const nextIds = filteredItems.map((item) => item.id)
+      setSelectedItemIds(nextIds)
+      setSelectionAnchor(nextIds[0] ?? null)
+    }
+
+    window.addEventListener('keydown', handleSelectAll)
+    return () => {
+      window.removeEventListener('keydown', handleSelectAll)
+    }
+  }, [filteredItems])
+
   const toggleSort = (nextKey: SortKey) => {
     if (sortKey === nextKey) {
       setSortDirection((current) => (current === 'desc' ? 'asc' : 'desc'))
@@ -132,15 +153,16 @@ export function StoragePage() {
   }
 
   const handleDeleteSelection = async () => {
+    if (!window.confirm(`${selectedItemIds.length}개 파일을 완전삭제할까요? 이 작업은 되돌릴 수 없습니다.`)) {
+      return
+    }
     try {
-      for (const itemId of selectedItemIds) {
-        await trashJob(itemId)
-      }
+      await deleteJobsPermanently(selectedItemIds)
       const payload = await fetchStorage()
       setData(payload)
       clearSelection()
     } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : '파일 삭제에 실패했습니다.')
+      setError(actionError instanceof Error ? actionError.message : '파일 완전삭제에 실패했습니다.')
     }
   }
 
@@ -185,7 +207,7 @@ export function StoragePage() {
                     다운로드
                   </button>
                   <button className="toolbar-button danger" onClick={() => void handleDeleteSelection()} type="button">
-                    삭제
+                    완전삭제
                   </button>
                 </div>
               </div>

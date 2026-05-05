@@ -81,6 +81,7 @@ type Handlers struct {
 	APITrashList       echo.HandlerFunc
 	APITrashClear      echo.HandlerFunc
 	APITrashJobsDelete echo.HandlerFunc
+	APIJobsDelete      echo.HandlerFunc
 	APIRestoreJob      echo.HandlerFunc
 	APIRestoreFolder   echo.HandlerFunc
 	APIBatchMove       echo.HandlerFunc
@@ -175,6 +176,7 @@ func RegisterRoutes(e *echo.Echo, cfg Config, h Handlers) {
 	e.GET("/api/trash", h.APITrashList)
 	e.POST("/api/trash/clear", h.APITrashClear)
 	e.POST("/api/trash/jobs/delete", h.APITrashJobsDelete)
+	e.POST("/api/jobs/delete", h.APIJobsDelete)
 	e.POST("/api/jobs/:job_id/restore", h.APIRestoreJob)
 	e.POST("/api/folders/:folder_id/restore", h.APIRestoreFolder)
 	e.POST("/api/move", h.APIBatchMove)

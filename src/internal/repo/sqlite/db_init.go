@@ -11,12 +11,21 @@ import (
 
 // Init opens the SQLite database, applies pragmas, and ensures the schema is ready.
 func Init(projectRoot string) error {
+	return InitWithFilename(projectRoot, "whisper.db")
+}
+
+// InitWithFilename opens the named SQLite database under .run and ensures the schema is ready.
+func InitWithFilename(projectRoot, dbFilename string) error {
 	runDir := filepath.Join(projectRoot, ".run")
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		return err
 	}
 
-	dbPath := filepath.Join(runDir, "whisper.db")
+	dbFilename = filepath.Base(strings.TrimSpace(dbFilename))
+	if dbFilename == "." || dbFilename == "" {
+		dbFilename = "whisper.db"
+	}
+	dbPath := filepath.Join(runDir, dbFilename)
 	runtimeArtifactsDir = filepath.Join(runDir, "job_runtime")
 	if err := os.MkdirAll(runtimeArtifactsDir, 0o755); err != nil {
 		return err
@@ -82,7 +91,8 @@ func ensureBaseIndexes(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_jobs_owner_trashed_uploaded ON jobs(owner_id, is_trashed, uploaded_ts DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_jobs_owner_folder_trashed ON jobs(owner_id, folder_id, is_trashed)`,
 		`CREATE INDEX IF NOT EXISTS idx_folders_owner_parent_trashed ON folders(owner_id, parent_id, is_trashed)`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS uq_folders_owner_parent_name ON folders(owner_id, parent_id, name)`,
+		`DROP INDEX IF EXISTS uq_folders_owner_parent_name`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS uq_folders_owner_parent_name_active ON folders(owner_id, parent_id, name) WHERE is_trashed = 0`,
 	}
 	for _, stmt := range statements {
 		if _, err := db.Exec(stmt); err != nil {

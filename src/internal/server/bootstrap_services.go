@@ -28,6 +28,7 @@ type appServices struct {
 	uploadSvc  *service.UploadService
 	geminiRt   *intgemini.Runtime
 	whisperRt  *intwhisper.Runtime
+	canGemini  func() bool
 }
 
 // newAppServices constructs the service graph used by HTTP handlers and workers.
@@ -63,6 +64,7 @@ func newAppServices() appServices {
 		ListAllFoldersByOwner:       store.ListAllFoldersByOwner,
 		ListFolderPath:              store.ListFolderPath,
 		DeleteTrashedFoldersByOwner: store.DeleteTrashedFoldersByOwner,
+		DeleteFolderSubtreeByOwner:  store.DeleteFolderSubtreeByOwner,
 	})
 	tagSvc := service.NewTagService(service.TagServiceDeps{
 		ListTagsByOwner:     store.ListTagsByOwner,
@@ -155,7 +157,10 @@ func newAppServices() appServices {
 		OnPreviewLine: runtime.AppendJobPreviewLine,
 		OnPreviewText: runtime.ReplaceJobPreviewText,
 	})
-	return appServices{blobSvc: blobSvc, folderSvc: folderSvc, lifecycle: lifecycle, runtime: runtime, tagSvc: tagSvc, storageSvc: storageSvc, uploadSvc: uploadSvc, geminiRt: geminiRt, whisperRt: whisperRt}
+	canGemini := func() bool {
+		return isDevMode() || geminiRt.HasConfigured()
+	}
+	return appServices{blobSvc: blobSvc, folderSvc: folderSvc, lifecycle: lifecycle, runtime: runtime, tagSvc: tagSvc, storageSvc: storageSvc, uploadSvc: uploadSvc, geminiRt: geminiRt, whisperRt: whisperRt, canGemini: canGemini}
 }
 
 // newAppWorker constructs the background worker with runtime and integration hooks.
@@ -171,6 +176,7 @@ func newAppWorker(blobSvc *service.JobBlobService, geminiRt *intgemini.Runtime, 
 		PDFMaxPages:              pdfMaxPages,
 		PDFMaxPagesPerRequest:    pdfMaxPagesPerRequest,
 		PDFMaxRenderedImageBytes: pdfMaxRenderedImageBytes,
+		DevMode:                  isDevMode(),
 		ProgressRe:               progressRe,
 		StatusPending:            statusPending,
 		StatusRunning:            statusRunning,
@@ -186,7 +192,7 @@ func newAppWorker(blobSvc *service.JobBlobService, geminiRt *intgemini.Runtime, 
 		BlobSvc:               blobSvc,
 		ConvertToWav:          intutil.ConvertToWav,
 		WhisperRunner:         whisperRt,
-		HasGeminiConfigured:   geminiRt.HasConfigured,
+		HasGeminiConfigured:   func() bool { return isDevMode() || geminiRt.HasConfigured() },
 		RefineTranscript:      geminiRt.RefineTranscript,
 		CountPDFPages:         func(path string) (int, error) { return intutil.CountPDFPages(pdfToolPDFInfo, path) },
 		RenderPDFToJPEGs: func(pdfPath, outDir string) ([]string, error) {

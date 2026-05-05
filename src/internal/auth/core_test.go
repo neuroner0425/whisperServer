@@ -33,6 +33,25 @@ func TestAuthCurrentUserFromRequestValidToken(t *testing.T) {
 	}
 }
 
+func TestAuthCurrentUserFromRequestRejectsIssuerMismatch(t *testing.T) {
+	issuerA := NewAuth([]byte("test-secret-1234567890"), "test-issuer:production", 24, false, nil, nil)
+	issuerB := NewAuth([]byte("test-secret-1234567890"), "test-issuer:dev", 24, false, nil, nil)
+	token, err := issuerA.issueAuthToken("user-1", "login1", "user@example.com")
+	if err != nil {
+		t.Fatalf("issueAuthToken() error = %v", err)
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	req.AddCookie(&http.Cookie{Name: authCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if _, err := issuerB.CurrentUserFromRequest(c); err == nil {
+		t.Fatal("CurrentUserFromRequest() should reject a token issued for another run mode")
+	}
+}
+
 func TestAuthMiddlewareUnauthorizedAPIReturnsJSON(t *testing.T) {
 	a := NewAuth([]byte("test-secret-1234567890"), "test-issuer", 24, false, nil, nil)
 

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 
-import { clearTrash, deleteTrashJobs, fetchTrash, restoreJob } from './api'
+import { clearTrash as clearTrashAPI, deleteTrashJobs, fetchTrash, restoreJob } from './api'
 import type { TrashJobItem } from './api'
+import { formatCompactDate } from '../files/filesPageDateUtils'
 import { formatBytes } from '../files/filesPageUtils'
 import { usePageTitle } from '../../usePageTitle'
 import {
@@ -88,6 +89,27 @@ export function TrashPage() {
     [dateFilter, jobs, sortDirection, sortKey],
   )
 
+  useEffect(() => {
+    const handleSelectAll = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'a' || event.altKey) {
+        return
+      }
+      const target = event.target as HTMLElement | null
+      if (target?.closest('input, textarea, select, [contenteditable="true"]') || filteredJobs.length === 0) {
+        return
+      }
+      event.preventDefault()
+      const nextIds = filteredJobs.map((job) => job.ID)
+      setSelectedJobIds(nextIds)
+      setSelectionAnchor(nextIds[0] ?? null)
+    }
+
+    window.addEventListener('keydown', handleSelectAll)
+    return () => {
+      window.removeEventListener('keydown', handleSelectAll)
+    }
+  }, [filteredJobs])
+
   const clearSelection = () => {
     setSelectedJobIds([])
     setSelectionAnchor(null)
@@ -143,13 +165,31 @@ export function TrashPage() {
   }
 
   const handleDeleteSelection = async () => {
+    if (!window.confirm(`${selectedJobIds.length}개 파일을 완전삭제할까요? 이 작업은 되돌릴 수 없습니다.`)) {
+      return
+    }
     try {
       await deleteTrashJobs(selectedJobIds)
-      setMessage(`${selectedJobIds.length}개 파일을 완전 삭제했습니다.`)
+      setMessage(`${selectedJobIds.length}개 파일을 완전삭제했습니다.`)
       clearSelection()
       await load()
     } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : '파일 삭제에 실패했습니다.')
+      setError(actionError instanceof Error ? actionError.message : '파일 완전삭제에 실패했습니다.')
+    }
+  }
+
+  const handleClearTrash = async () => {
+    if (!window.confirm('휴지통의 모든 항목을 완전삭제할까요? 이 작업은 되돌릴 수 없습니다.')) {
+      return
+    }
+    try {
+      await clearTrashAPI()
+      setJobs([])
+      clearSelection()
+      setMessage('휴지통을 비웠습니다.')
+      await load()
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : '휴지통 비우기에 실패했습니다.')
     }
   }
 
@@ -169,7 +209,7 @@ export function TrashPage() {
               <span className="drive-path-segment static">휴지통</span>
             </div>
             <div className="drive-path-meta">
-              <button className="ghost-button danger small" onClick={() => void clearTrash()} type="button">
+              <button className="ghost-button danger small" onClick={() => void handleClearTrash()} type="button">
                 휴지통 비우기
               </button>
             </div>
@@ -189,7 +229,7 @@ export function TrashPage() {
                     복구
                   </button>
                   <button className="toolbar-button danger" onClick={() => void handleDeleteSelection()} type="button">
-                    완전 삭제
+                    완전삭제
                   </button>
                 </div>
               </div>
@@ -278,10 +318,16 @@ export function TrashPage() {
                     <span className="drive-item-sub">휴지통</span>
                     </span>
                   </div>
-                <span className="drive-table-meta">{job.FileType ? job.FileType.toUpperCase() : 'FILE'}</span>
-                <span className="drive-table-meta">{formatTableDate(job.DeletedAt)}</span>
-                <span className="drive-table-meta">{job.FolderName || '내 파일'}</span>
-                <span className="drive-table-meta">{formatBytes(job.SizeBytes)}</span>
+                <div className="drive-table-mobile-meta">
+                  <span className="drive-table-meta mobile-type-meta">{job.FileType ? job.FileType.toUpperCase() : 'FILE'}</span>
+                  <span className="drive-table-meta mobile-location-meta">{job.FolderName || '내 파일'}</span>
+                  <span className="drive-table-meta mobile-size-meta">{formatBytes(job.SizeBytes)}</span>
+                  <span className="drive-table-meta mobile-date-meta">{formatCompactDate(job.DeletedAt)}</span>
+                </div>
+                <span className="drive-table-meta mobile-type-source">{job.FileType ? job.FileType.toUpperCase() : 'FILE'}</span>
+                <span className="drive-table-meta mobile-date-source">{formatTableDate(job.DeletedAt)}</span>
+                <span className="drive-table-meta mobile-location-source">{job.FolderName || '내 파일'}</span>
+                <span className="drive-table-meta mobile-size-source">{formatBytes(job.SizeBytes)}</span>
               </div>
             ))}
             {filteredJobs.length === 0 ? <div className="empty-panel">삭제된 파일이 없습니다.</div> : null}

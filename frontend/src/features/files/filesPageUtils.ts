@@ -37,11 +37,17 @@ export function displayFilename(filename: string) {
 }
 
 export function formatPendingStatus(stage: PendingUpload['stage'], progress: number) {
+  if (stage === 'waiting') {
+    return '업로드 대기중'
+  }
   if (stage === 'queued') {
     return '작업 대기 중'
   }
-  if (stage === 'processing') {
-    return `업로드 처리 중 ${Math.max(0, progress)}%`
+  if (stage === 'finishing') {
+    return '업로드를 완료하는 중'
+  }
+  if (stage === 'converting') {
+    return '파일을 변환하는 중'
   }
   if (stage === 'failed') {
     return '업로드 실패'

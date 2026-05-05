@@ -6,6 +6,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	model "whisperserver/src/internal/domain"
 	"whisperserver/src/internal/service"
 )
 
@@ -17,6 +18,8 @@ type FolderMutationHandlers struct {
 
 	CollectFolderSubtree   func(userID string, folderIDs []string, trashFolders bool) map[string]struct{}
 	MarkSubtreeJobsTrashed func(userID string, subtree map[string]struct{})
+	JobsSnapshot           func() map[string]*model.Job
+	DeleteJobsFn           func([]string)
 
 	Errf func(scope string, err error, format string, args ...any)
 }
@@ -96,10 +99,10 @@ func (h FolderMutationHandlers) Rename() echo.HandlerFunc {
 	}
 }
 
-// Trash marks a folder subtree and its jobs as trashed.
+// Trash permanently deletes a folder subtree and all jobs inside it.
 func (h FolderMutationHandlers) Trash() echo.HandlerFunc {
 	return func(c echo.Context) error {
-		if h.CurrentUserOrUnauthorized == nil || h.NotifyFilesChanged == nil || h.CollectFolderSubtree == nil || h.MarkSubtreeJobsTrashed == nil || h.FolderSvc == nil {
+		if h.CurrentUserOrUnauthorized == nil || h.NotifyFilesChanged == nil || h.CollectFolderSubtree == nil || h.JobsSnapshot == nil || h.DeleteJobsFn == nil || h.FolderSvc == nil {
 			return c.NoContent(http.StatusServiceUnavailable)
 		}
 		u, ok := h.CurrentUserOrUnauthorized(c)
@@ -109,16 +112,25 @@ func (h FolderMutationHandlers) Trash() echo.HandlerFunc {
 		folderID := c.Param("folder_id")
 		f, _ := h.FolderSvc.Require(u.ID, folderID, true, http.StatusBadRequest, "폴더 삭제 실패")
 		subtree := h.CollectFolderSubtree(u.ID, []string{folderID}, false)
-		if err := h.FolderSvc.Trash(u.ID, folderID); err != nil {
+		jobIDs := make([]string, 0)
+		for id, job := range h.JobsSnapshot() {
+			if job == nil || job.OwnerID != u.ID {
+				continue
+			}
+			if _, ok := subtree[strings.TrimSpace(job.FolderID)]; ok {
+				jobIDs = append(jobIDs, id)
+			}
+		}
+		h.DeleteJobsFn(jobIDs)
+		if err := h.FolderSvc.DeleteSubtree(u.ID, folderID); err != nil {
 			return toEchoHTTPError(err, http.StatusBadRequest, "폴더 삭제 실패")
 		}
-		h.MarkSubtreeJobsTrashed(u.ID, subtree)
 		if f != nil {
 			if err := h.FolderSvc.TouchAncestors(u.ID, f.ParentID); err != nil && h.Errf != nil {
-				h.Errf("api.folder.trashTouchParent", err, "owner_id=%s folder_id=%s parent_id=%s", u.ID, folderID, f.ParentID)
+				h.Errf("api.folder.deleteTouchParent", err, "owner_id=%s folder_id=%s parent_id=%s", u.ID, folderID, f.ParentID)
 			}
 		}
 		h.NotifyFilesChanged(u.ID)
-		return c.JSON(http.StatusOK, map[string]string{"folder_id": folderID, "status": "trashed"})
+		return c.JSON(http.StatusOK, map[string]any{"folder_id": folderID, "deleted_jobs": len(jobIDs), "status": "deleted"})
 	}
 }

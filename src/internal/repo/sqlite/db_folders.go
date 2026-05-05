@@ -17,6 +17,29 @@ func DeleteTrashedFoldersByOwner(ownerID string) error {
 	return err
 }
 
+// DeleteFolderSubtreeByOwner permanently removes one folder and all descendant folders.
+func DeleteFolderSubtreeByOwner(ownerID, folderID string) error {
+	if dbConn == nil {
+		return fmt.Errorf("db is not initialized")
+	}
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return fmt.Errorf("folder id is required")
+	}
+	_, err := dbConn.Exec(`
+		WITH RECURSIVE folder_tree(id) AS (
+			SELECT id FROM folders WHERE owner_id = ? AND id = ?
+			UNION ALL
+			SELECT f.id FROM folders f
+			JOIN folder_tree ft ON f.parent_id = ft.id
+			WHERE f.owner_id = ?
+		)
+		DELETE FROM folders
+		WHERE owner_id = ? AND id IN (SELECT id FROM folder_tree)
+	`, ownerID, folderID, ownerID, ownerID)
+	return err
+}
+
 // CreateFolder inserts a new folder row and returns its generated ID.
 func CreateFolder(ownerID, name, parentID string) (string, error) {
 	if dbConn == nil {

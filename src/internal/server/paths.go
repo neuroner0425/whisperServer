@@ -21,6 +21,7 @@ var (
 	maxUploadSizeMB               int
 	uploadRateLimitKB             int
 	jobTimeoutSec                 int
+	runMode                       string
 	geminiModel                   string
 	splitTaskQueues               bool
 	pdfMaxPages                   int
@@ -34,3 +35,7 @@ var (
 
 	progressRe = regexp.MustCompile(`\[(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)\s*-->`)
 )
+
+func isDevMode() bool {
+	return runMode == "DEV"
+}

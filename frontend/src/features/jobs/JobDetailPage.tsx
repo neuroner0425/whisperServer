@@ -60,7 +60,7 @@ const PDFPreviewPage = memo(function PDFPreviewPage({
 
 export function JobDetailPage() {
   const { jobId = '' } = useParams()
-  const [searchParams, setSearchParams] = useSearchParams()
+  const [searchParams] = useSearchParams()
   const [data, setData] = useState<JobDetailResponse | null>(null)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -75,14 +75,14 @@ export function JobDetailPage() {
   const [currentPDFPage, setCurrentPDFPage] = useState(1)
   const [pdfPageCount, setPDFPageCount] = useState(0)
   const [pdfRenderWidth, setPDFRenderWidth] = useState(760)
+  const [showOriginal, setShowOriginal] = useState(() => searchParams.get('original') === 'true')
+  const [showCompare, setShowCompare] = useState(() => searchParams.get('compare') === 'true')
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const itemRefs = useRef<Record<string, HTMLElement | null>>({})
   const pdfViewportRef = useRef<HTMLElement | null>(null)
   const pdfPageRefs = useRef<Record<number, HTMLDivElement | null>>({})
   const comparePageRefs = useRef<Record<number, HTMLElement | null>>({})
 
-  const showOriginal = searchParams.get('original') === 'true'
-  const showCompare = searchParams.get('compare') === 'true'
   const currentFileName = displayFilename(data?.job.Filename || '파일')
   const progressText = data ? buildJobStatusText(data.job) : ''
   const isPDF = data?.job.FileType === 'pdf'
@@ -170,23 +170,11 @@ export function JobDetailPage() {
   }, [data?.download_document_json_url, data?.view, isPDF])
 
   const toggleOriginal = (enabled: boolean) => {
-    const next = new URLSearchParams(searchParams)
-    if (enabled) {
-      next.set('original', 'true')
-    } else {
-      next.delete('original')
-    }
-    setSearchParams(next)
+    setShowOriginal(enabled)
   }
 
   const toggleCompare = (enabled: boolean) => {
-    const next = new URLSearchParams(searchParams)
-    if (enabled) {
-      next.set('compare', 'true')
-    } else {
-      next.delete('compare')
-    }
-    setSearchParams(next)
+    setShowCompare(enabled)
   }
 
   const downloadHref = useMemo(() => {
@@ -208,7 +196,13 @@ export function JobDetailPage() {
     }
     return ''
   }, [data])
-  const transcriptSegments = useMemo(() => parseTranscriptSegmentsJSON(transcriptSourceJSON), [transcriptSourceJSON])
+  const transcriptSegments = useMemo(() => {
+    const segments = parseTranscriptSegmentsJSON(transcriptSourceJSON)
+    if (segments.length > 0 || data?.view !== 'preview') {
+      return segments
+    }
+    return parseTranscriptSegmentsText(data.preview_text || '')
+  }, [data?.preview_text, data?.view, transcriptSourceJSON])
   const refinedParagraphs = useMemo(
     () => parseRefinedParagraphs(data?.view === 'result' && data?.result_kind === 'refined' ? data?.result_json || '' : ''),
     [data?.result_json, data?.result_kind, data?.view],
@@ -404,9 +398,7 @@ export function JobDetailPage() {
       setIsRetranscribing(true)
       const payload = await retranscribeJob(jobId)
       setMessage(payload.will_refine ? '전사를 다시 시작했고, 완료 후 정제도 다시 진행합니다.' : '전사를 다시 시작했습니다.')
-      const next = new URLSearchParams(searchParams)
-      next.delete('original')
-      setSearchParams(next)
+      setShowOriginal(false)
       const refreshed = await fetchJobDetail(jobId, false)
       setData(refreshed)
     } catch (retranscribeError) {
@@ -424,9 +416,7 @@ export function JobDetailPage() {
       setIsRerefining(true)
       await rerefineJob(jobId)
       setMessage('정제를 다시 시작했습니다.')
-      const next = new URLSearchParams(searchParams)
-      next.delete('original')
-      setSearchParams(next)
+      setShowOriginal(false)
       const refreshed = await fetchJobDetail(jobId, false)
       setData(refreshed)
     } catch (rerefineError) {
@@ -549,18 +539,17 @@ export function JobDetailPage() {
               <div className="toolbar-actions">
                 {data.has_refined ? (
                   <>
-                    <button className={`ghost-button small${showOriginal ? '' : ' active'}`} onClick={() => toggleOriginal(false)} type="button">
-                      정제본
-                    </button>
-                    <button className={`ghost-button small${showOriginal ? ' active' : ''}`} onClick={() => toggleOriginal(true)} type="button">
+                    <label className="detail-view-toggle">
+                      <input checked={showOriginal} onChange={(event) => toggleOriginal(event.target.checked)} type="checkbox" />
                       원본
-                    </button>
+                    </label>
                   </>
                 ) : null}
                 {isPDF && data.view === 'result' && data.original_pdf_url ? (
-                  <button className={`ghost-button small${showCompare ? ' active' : ''}`} onClick={() => toggleCompare(!showCompare)} type="button">
+                  <label className="detail-view-toggle">
+                    <input checked={showCompare} onChange={(event) => toggleCompare(event.target.checked)} type="checkbox" />
                     대조 보기
-                  </button>
+                  </label>
                 ) : null}
                 {isPDF && data.view === 'result' && data.original_pdf_url ? <span className="pdf-page-indicator">현재 페이지 {currentPDFPage}</span> : null}
               </div>
@@ -749,6 +738,65 @@ function parseTranscriptSegmentsJSON(raw: string): TimelineSegment[] {
   } catch {
     return []
   }
+}
+
+function parseTranscriptSegmentsText(raw: string): TimelineSegment[] {
+  const lines = raw
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+  const segments: TimelineSegment[] = []
+  let pendingStart = ''
+  let pendingEnd = ''
+  let pendingText: string[] = []
+
+  const flush = () => {
+    const content = pendingText.join(' ').trim()
+    if (pendingStart && content) {
+      segments.push({
+        key: `preview-segment-${segments.length}`,
+        startMs: parseTimelineMs(pendingStart),
+        endMs: pendingEnd ? parseTimelineMs(pendingEnd) : Number.POSITIVE_INFINITY,
+        timeLabel: `[${pendingStart}]`,
+        content,
+      })
+    }
+    pendingStart = ''
+    pendingEnd = ''
+    pendingText = []
+  }
+
+  for (const line of lines) {
+    if (!line || /^\d+$/.test(line)) {
+      continue
+    }
+    const rangeMatch = line.match(/^(\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})(?:\s+(.*))?$/)
+    if (rangeMatch) {
+      flush()
+      pendingStart = rangeMatch[1]
+      pendingEnd = rangeMatch[2]
+      if (rangeMatch[3]) {
+        pendingText.push(rangeMatch[3])
+      }
+      continue
+    }
+    const bracketMatch = line.match(/^\[?(\d{2}:\d{2}:\d{2},\d{3})\]?\s*(.*)$/)
+    if (bracketMatch) {
+      flush()
+      pendingStart = bracketMatch[1]
+      pendingText.push(bracketMatch[2])
+      continue
+    }
+    if (pendingStart) {
+      pendingText.push(line)
+    }
+  }
+  flush()
+
+  return segments.map((segment, index) => ({
+    ...segment,
+    endMs: Number.isFinite(segment.endMs) ? segment.endMs : segments[index + 1]?.startMs ?? Number.POSITIVE_INFINITY,
+  }))
 }
 
 function parseRefinedParagraphs(text: string): RefinedParagraph[] {
