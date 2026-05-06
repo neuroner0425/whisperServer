@@ -16,16 +16,17 @@ import (
 
 // Config defines Gemini-specific runtime settings and callbacks.
 type Config struct {
-	Model                         string
-	APIKeys                       []string
-	PDFBatchTimeoutSec            int
-	PDFConsistencyContextMaxChars int
-	TranscriptSystemPromptPath    string
-	TranscriptResponseSchemaPath  string
-	DocumentSystemPromptPath      string
-	DocumentResponseSchemaPath    string
-	Logf                          func(format string, args ...any)
-	Errf                          func(scope string, err error, format string, args ...any)
+	Model                          string
+	APIKeys                        []string
+	PDFBatchTimeoutSec             int
+	PDFConsistencyContextMaxChars  int
+	TranscriptSystemPromptPath     string
+	TranscriptResponseSchemaPath   string
+	RefineTimelineSystemPromptPath string
+	DocumentSystemPromptPath       string
+	DocumentResponseSchemaPath     string
+	Logf                           func(format string, args ...any)
+	Errf                           func(scope string, err error, format string, args ...any)
 }
 
 // Runtime owns Gemini clients, key rotation, and request helpers.
@@ -43,6 +44,10 @@ type Runtime struct {
 	transcriptSchemaOnce sync.Once
 	transcriptSchema     *genai.Schema
 	transcriptSchemaErr  error
+
+	refineTimelinePromptOnce sync.Once
+	refineTimelinePromptText string
+	refineTimelinePromptErr  error
 
 	documentPromptOnce sync.Once
 	documentPromptText string

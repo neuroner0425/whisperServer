@@ -27,9 +27,9 @@ func TestValidatePDFConfigValues(t *testing.T) {
 	})
 
 	pdfMaxPages = 300
-	pdfMaxPagesPerRequest = 80
+	pdfMaxPagesPerRequest = 50
 	pdfRenderDPI = 144
-	pdfBatchTimeoutSec = 180
+	pdfBatchTimeoutSec = 300
 	pdfMaxRenderedImageBytes = 1024
 	pdfConsistencyContextMaxChars = 100
 	pdfToolPDFInfo = "pdfinfo"

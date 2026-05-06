@@ -26,6 +26,7 @@ type JobBlobServiceDeps struct {
 	BlobKindDocumentJSON       string
 	BlobKindDocumentChunkIndex string
 	BlobKindTranscriptJSON     string
+	BlobKindRefinedTimeline    string
 	BlobKindRefined            string
 }
 
@@ -210,6 +211,27 @@ func (s *JobBlobService) LoadTranscriptJSON(jobID string) ([]byte, error) {
 // SaveTranscriptJSON persists the structured transcript JSON payload.
 func (s *JobBlobService) SaveTranscriptJSON(jobID string, b []byte) error {
 	return s.SaveJSON(jobID, s.d.BlobKindTranscriptJSON, string(b))
+}
+
+// HasRefinedTimeline reports whether the intermediate polished timeline exists.
+func (s *JobBlobService) HasRefinedTimeline(jobID string) bool {
+	return s.HasJSON(jobID, s.d.BlobKindRefinedTimeline)
+}
+
+// LoadRefinedTimeline loads the intermediate polished timeline.
+func (s *JobBlobService) LoadRefinedTimeline(jobID string) ([]byte, error) {
+	data, err := s.LoadJSON(jobID, s.d.BlobKindRefinedTimeline)
+	return []byte(data), err
+}
+
+// SaveRefinedTimeline persists the intermediate polished timeline.
+func (s *JobBlobService) SaveRefinedTimeline(jobID string, b []byte) error {
+	return s.SaveJSON(jobID, s.d.BlobKindRefinedTimeline, string(b))
+}
+
+// DeleteRefinedTimeline removes the intermediate polished timeline.
+func (s *JobBlobService) DeleteRefinedTimeline(jobID string) {
+	s.DeleteJSON(jobID, s.d.BlobKindRefinedTimeline)
 }
 
 // LoadTranscriptTimelineText renders transcript JSON into the timeline text used by refinement.

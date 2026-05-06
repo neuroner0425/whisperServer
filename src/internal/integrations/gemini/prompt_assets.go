@@ -30,6 +30,17 @@ func (r *Runtime) transcriptResponseSchema() (*genai.Schema, error) {
 	return r.transcriptSchema, r.transcriptSchemaErr
 }
 
+func (r *Runtime) refineTimelineSystemPrompt() (string, error) {
+	r.refineTimelinePromptOnce.Do(func() {
+		r.refineTimelinePromptText, r.refineTimelinePromptErr = readPromptAsset(
+			r.cfg.RefineTimelineSystemPromptPath,
+			filepath.Join("docs", "prompts", "refine_timeline_system_prompt.md"),
+			"",
+		)
+	})
+	return r.refineTimelinePromptText, r.refineTimelinePromptErr
+}
+
 func (r *Runtime) documentSystemPrompt() (string, error) {
 	r.documentPromptOnce.Do(func() {
 		r.documentPromptText, r.documentPromptErr = readPromptAsset(
