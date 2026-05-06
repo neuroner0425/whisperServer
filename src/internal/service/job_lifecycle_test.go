@@ -33,8 +33,24 @@ func TestJobLifecycle_ResetForTranscribe(t *testing.T) {
 	}
 
 	sort.Strings(deleted)
-	want := []string{"preview", "refined", "transcript_json"}
+	want := []string{"preview", "refined", "refined_timeline", "transcript_json"}
 	sort.Strings(want)
+	if !reflect.DeepEqual(deleted, want) {
+		t.Fatalf("deleted kinds mismatch:\n got=%v\nwant=%v", deleted, want)
+	}
+}
+
+func TestJobLifecycle_ResetForRefinePreservesRefinedTimeline(t *testing.T) {
+	deleted := []string{}
+	s := NewJobLifecycle(JobLifecycleDeps{
+		CancelJob:     func(string) {},
+		SetJobFields:  func(string, map[string]any) {},
+		DeleteJobJSON: func(_ string, kind string) { deleted = append(deleted, kind) },
+	})
+
+	s.ResetForRefine("job1")
+
+	want := []string{"refined"}
 	if !reflect.DeepEqual(deleted, want) {
 		t.Fatalf("deleted kinds mismatch:\n got=%v\nwant=%v", deleted, want)
 	}

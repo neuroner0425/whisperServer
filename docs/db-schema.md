@@ -82,6 +82,7 @@
 현재 대표 kind:
 
 - `transcript_json`
+- `refined_timeline`
 - `refined`
 - `document_json`
 

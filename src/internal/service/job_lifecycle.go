@@ -76,6 +76,7 @@ func (s *JobLifecycle) ResetForTranscribe(jobID string, refineEnabled bool) {
 	}
 	s.deleteJobBlob(jobID, store.BlobKindPreview)
 	s.deleteJobJSON(jobID, store.BlobKindTranscriptJSON)
+	s.deleteJobJSON(jobID, store.BlobKindRefinedTimeline)
 	s.deleteJobJSON(jobID, store.BlobKindRefined)
 }
 

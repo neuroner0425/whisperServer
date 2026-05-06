@@ -231,6 +231,7 @@ func (h JobControlHandlers) Rerefine() echo.HandlerFunc {
 		}
 
 		h.BlobSvc.DeleteRefined(jobID)
+		h.BlobSvc.DeleteRefinedTimeline(jobID)
 		h.SetJobFields(jobID, map[string]any{
 			"result_refined":   "",
 			"refine_enabled":   true,

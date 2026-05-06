@@ -69,22 +69,23 @@ type Deps struct {
 	WhisperRunner         interface {
 		RunFromBlob(context.Context, string, []byte, *int) (intwhisper.RunResult, error)
 	}
-	HasGeminiConfigured     func() bool
-	RefineTranscript        func(string, string) (string, error)
-	CountPDFPages           func(string) (int, error)
-	RenderPDFToJPEGs        func(string, string) ([]string, error)
-	ExtractDocumentChunk    func(context.Context, DocumentChunk, string) ([]byte, error)
-	BuildConsistencyContext func([]byte) (string, error)
-	MergeDocumentJSON       func(...[]byte) ([]byte, error)
-	UniqueStrings           func([]string) []string
-	GetTagDescriptions      func(string, []string) (map[string]string, error)
-	Logf                    func(string, ...any)
-	Errf                    func(string, error, string, ...any)
-	IncInProgress           func()
-	DecInProgress           func()
-	SetQueueLength          func(float64)
-	IncJobsTotal            func(string)
-	ObserveJobDuration      func(float64)
+	HasGeminiConfigured           func() bool
+	PolishTranscriptTimeline      func(string, string) (string, error)
+	StructureTranscriptParagraphs func(string, string) (string, error)
+	CountPDFPages                 func(string) (int, error)
+	RenderPDFToJPEGs              func(string, string) ([]string, error)
+	ExtractDocumentChunk          func(context.Context, DocumentChunk, string) ([]byte, error)
+	BuildConsistencyContext       func([]byte) (string, error)
+	MergeDocumentJSON             func(...[]byte) ([]byte, error)
+	UniqueStrings                 func([]string) []string
+	GetTagDescriptions            func(string, []string) (map[string]string, error)
+	Logf                          func(string, ...any)
+	Errf                          func(string, error, string, ...any)
+	IncInProgress                 func()
+	DecInProgress                 func()
+	SetQueueLength                func(float64)
+	IncJobsTotal                  func(string)
+	ObserveJobDuration            func(float64)
 }
 
 // Worker consumes queued tasks and executes transcription, refine, and PDF flows.
@@ -333,7 +334,11 @@ func (w *Worker) finalizeRefine(jobID string) {
 		return
 	}
 	if w.deps.BlobSvc == nil {
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusRefineFailedCode})
+		w.deps.SetJobFields(jobID, map[string]any{
+			"status":        w.cfg.StatusFailed,
+			"status_code":   model.JobStatusRefineFailedCode,
+			"status_detail": "정제 서비스를 사용할 수 없습니다.",
+		})
 		if w.deps.Errf != nil {
 			w.deps.Errf("worker.blobSvc", errors.New("missing blob service"), "job_id=%s", jobID)
 		}
@@ -342,7 +347,11 @@ func (w *Worker) finalizeRefine(jobID string) {
 	timelineText, err := w.deps.BlobSvc.LoadTranscriptTimelineText(jobID)
 	if err != nil {
 		w.deps.Errf("worker.loadTranscriptJSON", err, "job_id=%s", jobID)
-		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusRefineFailedCode})
+		w.deps.SetJobFields(jobID, map[string]any{
+			"status":        w.cfg.StatusFailed,
+			"status_code":   model.JobStatusRefineFailedCode,
+			"status_detail": "원본 전사 결과를 불러오지 못했습니다.",
+		})
 		return
 	}
 	if err := w.taskRefining(jobID, timelineText); err != nil {
@@ -353,7 +362,14 @@ func (w *Worker) finalizeRefine(jobID string) {
 	if updated := w.deps.GetJob(jobID); updated == nil || updated.IsTrashed {
 		return
 	}
-	w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusCompleted, "status_code": model.JobStatusCompletedCode, "phase": "", "result": "db://transcript_json"})
+	w.deps.SetJobFields(jobID, map[string]any{
+		"status":         w.cfg.StatusCompleted,
+		"status_code":    model.JobStatusCompletedCode,
+		"status_detail":  "",
+		"phase":          "",
+		"progress_label": "",
+		"result":         "db://transcript_json",
+	})
 	w.deps.Logf("[WORKER] completed job_id=%s result=db://transcript_json", jobID)
 }
 
@@ -481,7 +497,7 @@ func (w *Worker) taskRefining(jobID, timelineText string) error {
 	if updated := w.deps.GetJob(jobID); updated == nil || updated.IsTrashed {
 		return nil
 	}
-	w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusRefining})
+	w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusRefining, "status_detail": ""})
 	if w.cfg.DevMode {
 		return w.taskRefiningDev(jobID, timelineText)
 	}
@@ -489,30 +505,98 @@ func (w *Worker) taskRefining(jobID, timelineText string) error {
 		w.deps.Logf("[REFINE] skipped job_id=%s reason=no gemini key", jobID)
 		return nil
 	}
-	job := w.deps.GetJob(jobID)
-	desc := w.buildRefineDescription(job)
-	refined, err := w.deps.RefineTranscript(timelineText, desc)
-	if err != nil || strings.TrimSpace(refined) == "" {
-		if err != nil {
-			w.deps.Errf("refine.refineTranscript", err, "job_id=%s", jobID)
-		} else {
-			w.deps.Logf("[REFINE] empty result job_id=%s", jobID)
-		}
-		return err
-	}
 	if w.deps.BlobSvc == nil {
 		return errors.New("missing blob service")
 	}
+	if w.deps.PolishTranscriptTimeline == nil || w.deps.StructureTranscriptParagraphs == nil {
+		return errors.New("missing refine functions")
+	}
+	job := w.deps.GetJob(jobID)
+	if job == nil || job.IsTrashed {
+		return nil
+	}
+	desc := w.buildRefineDescription(job)
+
+	polishedTimeline, err := w.loadOrPolishRefinedTimeline(jobID, timelineText, desc)
+	if err != nil {
+		return err
+	}
+	w.deps.SetJobFields(jobID, map[string]any{
+		"phase":            "전사 정제 중: 문단 구성",
+		"progress_percent": 80,
+		"progress_label":   "정제 중",
+	})
+	refined, err := w.deps.StructureTranscriptParagraphs(polishedTimeline, desc)
+	if err != nil || strings.TrimSpace(refined) == "" {
+		if err != nil {
+			w.deps.SetJobFields(jobID, map[string]any{"status_detail": "전사 정제 중 문단 구성에 실패했습니다."})
+			w.deps.Errf("refine.structureTranscriptParagraphs", err, "job_id=%s", jobID)
+		} else {
+			w.deps.SetJobFields(jobID, map[string]any{"status_detail": "전사 정제 중 문단 구성 결과가 비어 있습니다."})
+			w.deps.Logf("[REFINE] empty result job_id=%s", jobID)
+			err = errors.New("empty refined result")
+		}
+		return err
+	}
+	if err := validateRefinedCoverage(timelineText, refined); err != nil {
+		w.deps.SetJobFields(jobID, map[string]any{"status_detail": err.Error()})
+		return err
+	}
 	if err := w.deps.BlobSvc.SaveRefined(jobID, []byte(refined)); err != nil {
+		w.deps.SetJobFields(jobID, map[string]any{"status_detail": "최종 정제 결과를 저장하지 못했습니다."})
 		w.deps.Errf("refine.saveRefinedBlob", err, "job_id=%s", jobID)
 		return err
 	}
 	if updated := w.deps.GetJob(jobID); updated == nil || updated.IsTrashed {
 		return nil
 	}
-	w.deps.SetJobFields(jobID, map[string]any{"result_refined": "db://refined"})
+	w.deps.SetJobFields(jobID, map[string]any{
+		"result_refined":   "db://refined",
+		"progress_percent": 100,
+		"phase":            "",
+		"progress_label":   "",
+		"status_detail":    "",
+	})
 	w.deps.Logf("[REFINE] done job_id=%s output=db://refined", jobID)
 	return nil
+}
+
+func (w *Worker) loadOrPolishRefinedTimeline(jobID, timelineText, desc string) (string, error) {
+	if w.deps.BlobSvc.HasRefinedTimeline(jobID) {
+		b, err := w.deps.BlobSvc.LoadRefinedTimeline(jobID)
+		if err != nil {
+			w.deps.SetJobFields(jobID, map[string]any{"status_detail": "정제 중간 결과를 불러오지 못했습니다."})
+			return "", err
+		}
+		polishedTimeline := strings.TrimSpace(string(b))
+		if polishedTimeline != "" {
+			w.deps.Logf("[REFINE] reuse refined_timeline job_id=%s", jobID)
+			return polishedTimeline, nil
+		}
+	}
+
+	w.deps.SetJobFields(jobID, map[string]any{
+		"phase":            "전사 정제 중: 문장 다듬기",
+		"progress_percent": 55,
+		"progress_label":   "정제 중",
+	})
+	polishedTimeline, err := w.deps.PolishTranscriptTimeline(timelineText, desc)
+	if err != nil || strings.TrimSpace(polishedTimeline) == "" {
+		if err != nil {
+			w.deps.SetJobFields(jobID, map[string]any{"status_detail": "전사 정제 중 문장 다듬기에 실패했습니다."})
+			w.deps.Errf("refine.polishTranscriptTimeline", err, "job_id=%s", jobID)
+			return "", err
+		}
+		w.deps.SetJobFields(jobID, map[string]any{"status_detail": "전사 정제 중 문장 다듬기 결과가 비어 있습니다."})
+		return "", errors.New("empty refined timeline")
+	}
+	polishedTimeline = strings.TrimSpace(polishedTimeline)
+	if err := w.deps.BlobSvc.SaveRefinedTimeline(jobID, []byte(polishedTimeline)); err != nil {
+		w.deps.SetJobFields(jobID, map[string]any{"status_detail": "정제 중간 결과를 저장하지 못했습니다."})
+		return "", err
+	}
+	w.deps.Logf("[REFINE] saved refined_timeline job_id=%s", jobID)
+	return polishedTimeline, nil
 }
 
 func (w *Worker) buildRefineDescription(job *model.Job) string {
@@ -544,6 +628,64 @@ func (w *Worker) buildRefineDescription(job *model.Job) string {
 		return strings.Join(tagLines, "\n")
 	}
 	return base + "\n\n" + strings.Join(tagLines, "\n")
+}
+
+type refinedValidationPayload struct {
+	Paragraph []struct {
+		Sentence []struct {
+			StartTime string `json:"start_time"`
+			Content   string `json:"content"`
+		} `json:"sentence"`
+	} `json:"paragraph"`
+}
+
+var (
+	timelineLineTimestampRe    = regexp.MustCompile(`\d{2}:\d{2}:\d{2},\d{3}`)
+	refinedSentenceTimestampRe = regexp.MustCompile(`^\[?\d{2}:\d{2}:\d{2},\d{3}\]?$`)
+)
+
+func validateRefinedCoverage(originalTimeline, refinedJSON string) error {
+	originalLineCount := countTimestampedTimelineLines(originalTimeline)
+	if originalLineCount == 0 {
+		return nil
+	}
+	sentenceCount, err := countValidRefinedSentences(refinedJSON)
+	if err != nil {
+		return err
+	}
+	minSentences := (originalLineCount*60 + 99) / 100
+	if sentenceCount < minSentences {
+		return fmt.Errorf("정제 결과 문장 수가 원본 대비 부족합니다. 원본 %d줄, 정제 %d문장", originalLineCount, sentenceCount)
+	}
+	return nil
+}
+
+func countTimestampedTimelineLines(timeline string) int {
+	count := 0
+	for _, line := range strings.Split(strings.ReplaceAll(timeline, "\r\n", "\n"), "\n") {
+		if timelineLineTimestampRe.MatchString(line) && strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	return count
+}
+
+func countValidRefinedSentences(refinedJSON string) (int, error) {
+	var payload refinedValidationPayload
+	if err := json.Unmarshal([]byte(refinedJSON), &payload); err != nil {
+		return 0, fmt.Errorf("정제 결과 JSON을 해석하지 못했습니다: %w", err)
+	}
+	count := 0
+	for i, paragraph := range payload.Paragraph {
+		for j, sentence := range paragraph.Sentence {
+			startTime := strings.TrimSpace(sentence.StartTime)
+			if !refinedSentenceTimestampRe.MatchString(startTime) {
+				return 0, fmt.Errorf("정제 결과 timestamp가 비어 있거나 올바르지 않습니다. paragraph=%d sentence=%d", i+1, j+1)
+			}
+			count++
+		}
+	}
+	return count, nil
 }
 
 func (w *Worker) taskTranscribeDev(ctx context.Context, jobID string, job *model.Job, started time.Time) error {
@@ -621,32 +763,70 @@ func (w *Worker) taskRefiningDev(jobID, timelineText string) error {
 	if job == nil || job.IsTrashed {
 		return nil
 	}
+	if w.deps.BlobSvc == nil {
+		return errors.New("missing blob service")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(w.cfg.JobTimeoutSec)*time.Second)
 	w.setCancel(jobID, cancel)
 	defer func() {
 		cancel()
 		w.setCancel(jobID, nil)
 	}()
-	w.deps.SetJobFields(jobID, map[string]any{
-		"phase":            "DEV 정제 테스트 중",
-		"progress_percent": 10,
-		"progress_label":   "DEV",
-	})
-	if err := w.sleepWithProgress(ctx, 10*time.Second, func(percent int) {
-		w.deps.SetJobFields(jobID, map[string]any{
-			"phase":            "DEV 정제 테스트 중",
-			"progress_percent": percent,
-			"progress_label":   "DEV",
-		})
-	}); err != nil {
-		return err
-	}
 	desc := strings.TrimSpace(w.buildRefineDescription(job))
 	if desc == "" {
 		desc = "입력된 설명이 없습니다."
 	}
 	if strings.TrimSpace(timelineText) == "" {
 		timelineText = "전사 원문이 비어 있습니다."
+	}
+
+	polishedTimeline := ""
+	if w.deps.BlobSvc.HasRefinedTimeline(jobID) {
+		b, err := w.deps.BlobSvc.LoadRefinedTimeline(jobID)
+		if err != nil {
+			w.deps.SetJobFields(jobID, map[string]any{"status_detail": "정제 중간 결과를 불러오지 못했습니다."})
+			return err
+		}
+		polishedTimeline = strings.TrimSpace(string(b))
+	}
+	if polishedTimeline == "" {
+		w.deps.SetJobFields(jobID, map[string]any{
+			"phase":            "전사 정제 중: 문장 다듬기",
+			"progress_percent": 50,
+			"progress_label":   "DEV",
+		})
+		if err := w.sleepWithProgress(ctx, 5*time.Second, func(percent int) {
+			w.deps.SetJobFields(jobID, map[string]any{
+				"phase":            "전사 정제 중: 문장 다듬기",
+				"progress_percent": 10 + percent*45/100,
+				"progress_label":   "DEV",
+			})
+		}); err != nil {
+			return err
+		}
+		polishedTimeline = strings.Join([]string{
+			"[00:00:00,000] DEV 모드에서 다듬은 전사 결과입니다. 사용자 설명: " + desc,
+			"[00:00:10,000] 원본 전사 예시: " + timelineText,
+		}, "\n")
+		if err := w.deps.BlobSvc.SaveRefinedTimeline(jobID, []byte(polishedTimeline)); err != nil {
+			w.deps.SetJobFields(jobID, map[string]any{"status_detail": "정제 중간 결과를 저장하지 못했습니다."})
+			return err
+		}
+	}
+
+	w.deps.SetJobFields(jobID, map[string]any{
+		"phase":            "전사 정제 중: 문단 구성",
+		"progress_percent": 80,
+		"progress_label":   "DEV",
+	})
+	if err := w.sleepWithProgress(ctx, 5*time.Second, func(percent int) {
+		w.deps.SetJobFields(jobID, map[string]any{
+			"phase":            "전사 정제 중: 문단 구성",
+			"progress_percent": 55 + percent*40/100,
+			"progress_label":   "DEV",
+		})
+	}); err != nil {
+		return err
 	}
 	payload := map[string]any{
 		"paragraph": []map[string]any{
@@ -659,7 +839,7 @@ func (w *Worker) taskRefiningDev(jobID, timelineText string) error {
 					},
 					{
 						"start_time": "[00:00:10,000]",
-						"content":    "원본 전사 예시: " + timelineText,
+						"content":    "문장 다듬기 결과 예시: " + polishedTimeline,
 					},
 				},
 			},
@@ -669,16 +849,13 @@ func (w *Worker) taskRefiningDev(jobID, timelineText string) error {
 	if err != nil {
 		return err
 	}
-	if w.deps.BlobSvc == nil {
-		return errors.New("missing blob service")
-	}
 	if err := w.deps.BlobSvc.SaveRefined(jobID, refined); err != nil {
 		return err
 	}
 	if updated := w.deps.GetJob(jobID); updated == nil || updated.IsTrashed {
 		return nil
 	}
-	w.deps.SetJobFields(jobID, map[string]any{"result_refined": "db://refined", "progress_percent": 100, "phase": "", "progress_label": ""})
+	w.deps.SetJobFields(jobID, map[string]any{"result_refined": "db://refined", "progress_percent": 100, "phase": "", "progress_label": "", "status_detail": ""})
 	w.deps.Logf("[REFINE] dev stub done job_id=%s", jobID)
 	return nil
 }

@@ -10,6 +10,7 @@ const (
 	BlobKindPreview            = "preview"
 	BlobKindTranscript         = "transcript"
 	BlobKindTranscriptJSON     = "transcript_json"
+	BlobKindRefinedTimeline    = "refined_timeline"
 	BlobKindRefined            = "refined"
 	BlobKindDocumentJSON       = "document_json"
 	BlobKindDocumentMarkdown   = "document_markdown"
