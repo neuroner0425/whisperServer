@@ -19,9 +19,9 @@ import (
 // pdfChunkIndex persists the resumable progress marker for PDF extraction.
 type pdfChunkIndex struct {
 	MaxPagesPerRequest int   `json:"max_pages_per_request"`
-	TotalChunks        int   `json:"total_chunks"`
 	PageCount          int   `json:"page_count"`
 	LastCompletedChunk int   `json:"last_completed_chunk"`
+	CompletedPages     int   `json:"completed_pages"`
 	UpdatedAtUnix      int64 `json:"updated_at_unix"`
 }
 
@@ -125,18 +125,17 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 		"status_detail": fmt.Sprintf("총 %d페이지", len(imagePaths)),
 	})
 
-	resumeState, err := w.loadResumeState(jobID, len(imagePaths), totalChunks)
+	resumeState, err := w.loadResumeState(jobID, len(imagePaths))
 	if err != nil {
 		w.deps.Errf("pdf.loadResumeState", err, "job_id=%s", jobID)
 		return err
 	}
-	if !resumeState.Valid && resumeState.LastCompletedChunk > 0 {
-		w.clearPDFChunkBlobs(jobID)
+	if !resumeState.Valid {
 		resumeState = pdfResumeState{}
 	}
 
-	chunkResults := make([][]byte, 0, totalChunks)
-	if resumeState.LastCompletedChunk > 0 {
+	chunkResults := make([][]byte, 0, maxInt(totalChunks, resumeState.LastCompletedChunk))
+	if resumeState.Valid && resumeState.LastCompletedChunk > 0 {
 		for i := 1; i <= resumeState.LastCompletedChunk; i++ {
 			b, loadErr := w.deps.BlobSvc.LoadBlob(jobID, pdfChunkJSONKind(i))
 			if loadErr != nil {
@@ -145,23 +144,32 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 			chunkResults = append(chunkResults, b)
 		}
 		w.deps.SetJobFields(jobID, map[string]any{
-			"processed_page_count": processedPagesForChunk(resumeState.LastCompletedChunk, chunks),
+			"processed_page_count": resumeState.CompletedPages,
 			"current_chunk":        resumeState.LastCompletedChunk,
 			"resume_available":     true,
 		})
 	}
 
 	var totalRenderedBytes int64
+	completedPages := resumeState.CompletedPages
+	successfulChunks := resumeState.LastCompletedChunk
+	currentBatchSize := 0
+	currentBatchFailures := 0
+	lastFailureWasRecitation := false
 	// Process the PDF in chunks so large files can resume and respect API limits.
-	for idx := resumeState.LastCompletedChunk; idx < len(chunks); idx++ {
+	for completedPages < len(imagePaths) {
 		if updated := w.deps.GetJob(jobID); updated == nil || updated.IsTrashed {
 			return nil
 		}
 
-		startPage := processedPagesForChunk(idx, chunks) + 1
-		endPage := startPage + len(chunks[idx]) - 1
+		remainingPaths := imagePaths[completedPages:]
+		chunkPlan := buildChunkPlan(remainingPaths, w.cfg.PDFMaxPagesPerRequest, currentBatchSize)
+		totalChunks = successfulChunks + len(chunkPlan)
+		batchPaths := chunkPlan[0]
+		startPage := completedPages + 1
+		endPage := completedPages + len(batchPaths)
 		contextText := ""
-		if idx > 0 && w.deps.BuildConsistencyContext != nil {
+		if successfulChunks > 0 && w.deps.BuildConsistencyContext != nil {
 			merged, mergeErr := w.deps.MergeDocumentJSON(chunkResults...)
 			if mergeErr != nil {
 				return mergeErr
@@ -172,8 +180,8 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 			}
 		}
 
-		images := make([]DocumentPageImage, 0, len(chunks[idx]))
-		for pageOffset, path := range chunks[idx] {
+		images := make([]DocumentPageImage, 0, len(batchPaths))
+		for pageOffset, path := range batchPaths {
 			b, readErr := os.ReadFile(path)
 			if readErr != nil {
 				return readErr
@@ -181,7 +189,7 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 			totalRenderedBytes += int64(len(b))
 			if totalRenderedBytes > w.cfg.PDFMaxRenderedImageBytes {
 				err = fmt.Errorf("rendered image bytes exceeded: %d > %d", totalRenderedBytes, w.cfg.PDFMaxRenderedImageBytes)
-				w.markPDFChunkFailure(jobID, idx+1, totalChunks, startPage, endPage, len(imagePaths), chunks, resumeState.LastCompletedChunk > 0)
+				w.markPDFChunkFailure(jobID, successfulChunks+1, totalChunks, startPage, endPage, len(imagePaths), completedPages, successfulChunks > 0)
 				w.deps.IncJobsTotal("failure")
 				return err
 			}
@@ -191,21 +199,21 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 				Data:      b,
 			})
 		}
-		processedPageCount := processedPagesForChunk(idx, chunks)
+		processedPageCount := completedPages
 		w.deps.SetJobFields(jobID, map[string]any{
-			"phase":                fmt.Sprintf("문서 분석 중... %d/%d 배치", idx+1, totalChunks),
-			"progress_percent":     progressForChunk(idx, totalChunks),
+			"phase":                fmt.Sprintf("문서 분석 중... %d/%d 배치", successfulChunks+1, totalChunks),
+			"progress_percent":     progressForChunk(successfulChunks, totalChunks),
 			"status_detail":        fmt.Sprintf("현재 %d/%d 페이지 처리 완료", processedPageCount, len(imagePaths)),
 			"processed_page_count": processedPageCount,
-			"current_chunk":        idx + 1,
+			"current_chunk":        successfulChunks + 1,
 			"total_chunks":         totalChunks,
-			"resume_available":     idx > 0,
+			"resume_available":     successfulChunks > 0,
 		})
-		w.deps.ReplaceJobPreviewText(jobID, fmt.Sprintf("문서 분석 중...\n배치 %d/%d\n페이지 %d~%d", idx+1, totalChunks, startPage, endPage))
+		w.deps.ReplaceJobPreviewText(jobID, fmt.Sprintf("문서 분석 중...\n배치 %d/%d\n페이지 %d~%d", successfulChunks+1, totalChunks, startPage, endPage))
 
 		batchCtx, batchCancel := context.WithTimeout(ctx, time.Duration(w.cfg.PDFBatchTimeoutSec)*time.Second)
 		result, extractErr := w.deps.ExtractDocumentChunk(batchCtx, DocumentChunk{
-			ChunkIndex:  idx + 1,
+			ChunkIndex:  successfulChunks + 1,
 			TotalChunks: totalChunks,
 			StartPage:   startPage,
 			EndPage:     endPage,
@@ -218,31 +226,57 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 			if errors.Is(extractErr, context.DeadlineExceeded) {
 				statusLabel = "timeout"
 			}
-			w.markPDFChunkFailure(jobID, idx+1, totalChunks, startPage, endPage, len(imagePaths), chunks, idx > 0)
+			lastFailureWasRecitation = isGeminiRecitationError(extractErr)
+			currentBatchFailures++
+			currentBatchSize = len(batchPaths)
+			if currentBatchSize <= 5 || currentBatchFailures < 2 {
+				w.markPDFChunkFailure(jobID, successfulChunks+1, totalChunks, startPage, endPage, len(imagePaths), completedPages, successfulChunks > 0)
+				if currentBatchSize <= 5 {
+					if lastFailureWasRecitation {
+						w.markPDFCopyrightFailure(jobID, completedPages, successfulChunks, totalChunks)
+					}
+					w.deps.IncJobsTotal(statusLabel)
+					return extractErr
+				}
+				w.deps.IncJobsTotal(statusLabel)
+				continue
+			}
+			currentBatchSize = maxInt(1, currentBatchSize/2)
+			currentBatchFailures = 0
+			if currentBatchSize <= 5 {
+				// One more failure at <=5 pages will terminate on the next iteration.
+				w.markPDFChunkFailure(jobID, successfulChunks+1, totalChunks, startPage, minInt(startPage+currentBatchSize-1, len(imagePaths)), len(imagePaths), completedPages, successfulChunks > 0)
+			}
 			w.deps.IncJobsTotal(statusLabel)
-			return extractErr
+			continue
 		}
 
-		if err := w.deps.BlobSvc.SaveBlob(jobID, pdfChunkJSONKind(idx+1), result); err != nil {
+		if err := w.deps.BlobSvc.SaveBlob(jobID, pdfChunkJSONKind(successfulChunks+1), result); err != nil {
 			return err
 		}
-		if err := w.deps.BlobSvc.SaveBlob(jobID, pdfChunkContextKind(idx+1), []byte(contextText)); err != nil {
+		if err := w.deps.BlobSvc.SaveBlob(jobID, pdfChunkContextKind(successfulChunks+1), []byte(contextText)); err != nil {
 			return err
 		}
 		chunkResults = append(chunkResults, result)
 		if err := w.savePDFChunkIndex(jobID, pdfChunkIndex{
 			MaxPagesPerRequest: w.cfg.PDFMaxPagesPerRequest,
-			TotalChunks:        totalChunks,
 			PageCount:          len(imagePaths),
-			LastCompletedChunk: idx + 1,
+			LastCompletedChunk: successfulChunks + 1,
+			CompletedPages:     completedPages + len(batchPaths),
 			UpdatedAtUnix:      time.Now().Unix(),
 		}); err != nil {
 			return err
 		}
-		processedPageCount = processedPagesForChunk(idx+1, chunks)
+		completedPages += len(batchPaths)
+		successfulChunks++
+		currentBatchFailures = 0
+		currentBatchSize = 0
+		processedPageCount = completedPages
 		w.deps.SetJobFields(jobID, map[string]any{
 			"processed_page_count": processedPageCount,
-			"resume_available":     idx+1 < totalChunks,
+			"current_chunk":        successfulChunks,
+			"total_chunks":         totalChunks,
+			"resume_available":     completedPages < len(imagePaths),
 		})
 	}
 
@@ -281,7 +315,7 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 		"phase":                "완료",
 		"status_detail":        "",
 		"processed_page_count": len(imagePaths),
-		"current_chunk":        totalChunks,
+		"current_chunk":        successfulChunks,
 		"total_chunks":         totalChunks,
 		"resume_available":     false,
 	})
@@ -293,9 +327,10 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 type pdfResumeState struct {
 	Valid              bool
 	LastCompletedChunk int
+	CompletedPages     int
 }
 
-func (w *Worker) loadResumeState(jobID string, pageCount, totalChunks int) (pdfResumeState, error) {
+func (w *Worker) loadResumeState(jobID string, pageCount int) (pdfResumeState, error) {
 	if w.deps.BlobSvc == nil {
 		return pdfResumeState{}, nil
 	}
@@ -307,11 +342,11 @@ func (w *Worker) loadResumeState(jobID string, pageCount, totalChunks int) (pdfR
 	if err := json.Unmarshal(b, &idx); err != nil {
 		return pdfResumeState{}, err
 	}
-	if idx.MaxPagesPerRequest != w.cfg.PDFMaxPagesPerRequest || idx.PageCount != pageCount || idx.TotalChunks != totalChunks {
-		return pdfResumeState{Valid: false, LastCompletedChunk: idx.LastCompletedChunk}, nil
+	if idx.PageCount != pageCount {
+		return pdfResumeState{Valid: false, LastCompletedChunk: idx.LastCompletedChunk, CompletedPages: idx.CompletedPages}, nil
 	}
 	if idx.LastCompletedChunk <= 0 {
-		return pdfResumeState{Valid: true}, nil
+		return pdfResumeState{Valid: true, CompletedPages: idx.CompletedPages}, nil
 	}
 	kinds, err := w.deps.BlobSvc.ListKinds(jobID)
 	if err != nil {
@@ -322,22 +357,38 @@ func (w *Worker) loadResumeState(jobID string, pageCount, totalChunks int) (pdfR
 		available[kind] = struct{}{}
 	}
 	if !hasContinuousChunkJSON(available, idx.LastCompletedChunk) {
-		return pdfResumeState{Valid: false, LastCompletedChunk: idx.LastCompletedChunk}, nil
+		return pdfResumeState{Valid: false, LastCompletedChunk: idx.LastCompletedChunk, CompletedPages: idx.CompletedPages}, nil
 	}
-	return pdfResumeState{Valid: true, LastCompletedChunk: idx.LastCompletedChunk}, nil
+	completedPages := idx.CompletedPages
+	if completedPages <= 0 {
+		completedPages = deriveCompletedPagesFromLegacyIndex(idx, pageCount)
+	}
+	return pdfResumeState{Valid: true, LastCompletedChunk: idx.LastCompletedChunk, CompletedPages: completedPages}, nil
 }
 
-func (w *Worker) markPDFChunkFailure(jobID string, chunkIndex, totalChunks, startPage, endPage, totalPages int, chunks [][]string, resumeAvailable bool) {
-	processed := processedPagesForChunk(chunkIndex-1, chunks)
+func (w *Worker) markPDFChunkFailure(jobID string, chunkIndex, totalChunks, startPage, endPage, totalPages int, completedPages int, resumeAvailable bool) {
 	w.deps.SetJobFields(jobID, map[string]any{
 		"status":               w.cfg.StatusFailed,
 		"status_code":          model.JobStatusPDFExtractFailedCode,
 		"phase":                fmt.Sprintf("실패: %d/%d 배치", chunkIndex, totalChunks),
 		"current_chunk":        chunkIndex,
 		"total_chunks":         totalChunks,
-		"processed_page_count": processed,
+		"processed_page_count": completedPages,
 		"resume_available":     resumeAvailable,
 		"status_detail":        fmt.Sprintf("실패: %d/%d 배치 (%d~%d 페이지)", chunkIndex, totalChunks, startPage, endPage),
+	})
+}
+
+func (w *Worker) markPDFCopyrightFailure(jobID string, completedPages, currentChunk, totalChunks int) {
+	w.deps.SetJobFields(jobID, map[string]any{
+		"status":               w.cfg.StatusFailed,
+		"status_code":          model.JobStatusCopyrightBlockedCode,
+		"phase":                "저작권 문제로 추출 불가",
+		"status_detail":        "저작권 문제로 추출 불가",
+		"processed_page_count": completedPages,
+		"current_chunk":        currentChunk,
+		"total_chunks":         totalChunks,
+		"resume_available":     completedPages > 0,
 	})
 }
 
@@ -402,6 +453,24 @@ func splitPagePaths(paths []string, maxChunkSize int) [][]string {
 	return out
 }
 
+func buildChunkPlan(paths []string, maxChunkSize int, firstChunkSize int) [][]string {
+	if len(paths) == 0 {
+		return nil
+	}
+	if firstChunkSize > 0 {
+		if firstChunkSize > len(paths) {
+			firstChunkSize = len(paths)
+		}
+		first := append([]string(nil), paths[:firstChunkSize]...)
+		if firstChunkSize == len(paths) {
+			return [][]string{first}
+		}
+		rest := splitPagePaths(paths[firstChunkSize:], maxChunkSize)
+		return append([][]string{first}, rest...)
+	}
+	return splitPagePaths(paths, maxChunkSize)
+}
+
 // progressForChunk converts chunk progress into a coarse job percent.
 func progressForChunk(idx, total int) int {
 	if total <= 0 {
@@ -425,6 +494,29 @@ func processedPagesForChunk(completedChunks int, chunks [][]string) int {
 	return processed
 }
 
+func deriveCompletedPagesFromLegacyIndex(idx pdfChunkIndex, pageCount int) int {
+	if idx.LastCompletedChunk <= 0 || idx.MaxPagesPerRequest <= 0 || pageCount <= 0 {
+		return 0
+	}
+	placeholder := make([]string, pageCount)
+	chunks := splitPagePaths(placeholder, idx.MaxPagesPerRequest)
+	return processedPagesForChunk(idx.LastCompletedChunk, chunks)
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 // hasContinuousChunkJSON checks that chunk JSON blobs exist without gaps up to the marker.
 func hasContinuousChunkJSON(kinds map[string]struct{}, lastCompletedChunk int) bool {
 	for i := 1; i <= lastCompletedChunk; i++ {
@@ -433,6 +525,14 @@ func hasContinuousChunkJSON(kinds map[string]struct{}, lastCompletedChunk int) b
 		}
 	}
 	return true
+}
+
+func isGeminiRecitationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToUpper(err.Error())
+	return strings.Contains(msg, "FINISH_REASON=RECITATION") || strings.Contains(msg, "RECITATION")
 }
 
 func (w *Worker) taskExtractPDFDev(jobID string, started time.Time, pageCount int) error {

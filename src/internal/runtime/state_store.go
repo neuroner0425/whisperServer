@@ -448,7 +448,8 @@ func deriveJobPhase(statusCode int) string {
 		model.JobStatusPDFConvertFailedCode,
 		model.JobStatusTranscribeFailedCode,
 		model.JobStatusRefineFailedCode,
-		model.JobStatusPDFExtractFailedCode:
+		model.JobStatusPDFExtractFailedCode,
+		model.JobStatusCopyrightBlockedCode:
 		return model.JobStatusName(statusCode)
 	default:
 		return "대기 중"

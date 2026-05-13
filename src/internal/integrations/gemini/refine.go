@@ -178,7 +178,7 @@ func (r *Runtime) generateRefine(idx int, systemPrompt, responseMIMEType string,
 	}
 	text := strings.TrimSpace(result.Text())
 	if text == "" {
-		err = errors.New("empty response text")
+		err = emptyResponseError(result)
 		r.onFailure(idx, err)
 		return "", err
 	}

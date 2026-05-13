@@ -17,6 +17,7 @@ const STATUS_PDF_CONVERT_FAILED = 62
 const STATUS_TRANSCRIBE_FAILED = 63
 const STATUS_REFINE_FAILED = 64
 const STATUS_PDF_EXTRACT_FAILED = 65
+const STATUS_COPYRIGHT_BLOCKED = 66
 
 export function buildJobStatusText(job: JobStatusLike) {
   const statusCode = job.StatusCode ?? 0
@@ -31,7 +32,8 @@ export function buildJobStatusText(job: JobStatusLike) {
     statusCode === STATUS_PDF_CONVERT_FAILED ||
     statusCode === STATUS_TRANSCRIBE_FAILED ||
     statusCode === STATUS_REFINE_FAILED ||
-    statusCode === STATUS_PDF_EXTRACT_FAILED
+    statusCode === STATUS_PDF_EXTRACT_FAILED ||
+    statusCode === STATUS_COPYRIGHT_BLOCKED
   ) {
     return detail ? `${status || phase} (${detail})` : status || phase || '-'
   }
