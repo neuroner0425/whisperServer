@@ -31,6 +31,8 @@ type refineSentence struct {
 
 var refineStartTimeRe = regexp.MustCompile(`^\[?\d{2}:\d{2}:\d{2},\d{3}\]?$`)
 
+const refineRequestTimeout = 180 * time.Second
+
 // PolishTranscriptTimeline preserves timestamped lines while correcting STT text.
 func (r *Runtime) PolishTranscriptTimeline(rawText, description string) (string, error) {
 	systemPrompt, err := r.refineTimelineSystemPrompt()
@@ -100,17 +102,12 @@ func (r *Runtime) requestRefine(prompt, systemPrompt, responseMIMEType string, r
 
 	var lastErr error = errors.New("gemini request failed")
 	maxAttempts := clientCount * 3
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		idx, waitFor := r.nextReadyClient(time.Now())
-		if idx < 0 {
-			if waitFor > 3*time.Second {
-				waitFor = 3 * time.Second
-			}
-			if waitFor > 0 {
-				time.Sleep(waitFor)
-			}
-			continue
+	for attempt := 0; attempt < maxAttempts; {
+		idx, waitErr := r.waitForReadyClient(context.Background())
+		if waitErr != nil {
+			return "", waitErr
 		}
+		attempt++
 
 		text, genErr := r.generateRefine(idx, systemPrompt, responseMIMEType, responseSchema, prompt)
 		if genErr == nil && strings.TrimSpace(text) != "" {
@@ -118,13 +115,6 @@ func (r *Runtime) requestRefine(prompt, systemPrompt, responseMIMEType string, r
 		}
 		lastErr = genErr
 	}
-	r.mu.Lock()
-	for i := range r.clients {
-		if r.clients[i].failCount > 0 {
-			r.clients[i].cooldownUntil = time.Time{}
-		}
-	}
-	r.mu.Unlock()
 	return "", lastErr
 }
 
@@ -139,16 +129,16 @@ func (r *Runtime) generateRefine(idx int, systemPrompt, responseMIMEType string,
 	keySuffix := maskedKeySuffix(r.clients[idx].key)
 	r.mu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), refineRequestTimeout)
 	defer cancel()
 
 	cfg := &genai.GenerateContentConfig{
-		Temperature: genai.Ptr[float32](0.7),
+		Temperature: genai.Ptr[float32](0.9),
 		SystemInstruction: &genai.Content{
 			Parts: []*genai.Part{{Text: systemPrompt}},
 		},
 		ThinkingConfig: &genai.ThinkingConfig{
-			ThinkingLevel: genai.ThinkingLevelHigh,
+			ThinkingLevel: genai.ThinkingLevelMedium,
 		},
 	}
 	if strings.TrimSpace(responseMIMEType) != "" {

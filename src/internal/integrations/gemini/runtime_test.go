@@ -1,6 +1,7 @@
 package gemini
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -40,5 +41,23 @@ func TestOnFailureSetsMinimumGlobalCooldown(t *testing.T) {
 	wait := rt.globalCooldownUntil.Sub(now)
 	if wait < 9*time.Second {
 		t.Fatalf("expected global cooldown close to 10s, got %s", wait)
+	}
+}
+
+func TestWaitForReadyClientReturnsContextErrorDuringCooldown(t *testing.T) {
+	now := time.Now()
+	rt := &Runtime{
+		clients:             []geminiKeyClient{{key: "k1"}},
+		globalCooldownUntil: now.Add(time.Minute),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	idx, err := rt.waitForReadyClient(ctx)
+	if err == nil {
+		t.Fatalf("expected context error, got idx=%d", idx)
+	}
+	if idx != -1 {
+		t.Fatalf("expected no selected client, got %d", idx)
 	}
 }
