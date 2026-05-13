@@ -59,3 +59,28 @@ func TestSplitPagePathsBalancesChunksWithinLimit(t *testing.T) {
 		t.Fatalf("expected all chunk sizes to stay <= 50, got %d/%d/%d", len(chunks101[0]), len(chunks101[1]), len(chunks101[2]))
 	}
 }
+
+func TestBuildChunkPlanWithReducedFirstChunk(t *testing.T) {
+	paths := make([]string, 60)
+	for i := range paths {
+		paths[i] = "p"
+	}
+	chunks := buildChunkPlan(paths, 30, 15)
+	if len(chunks) != 3 {
+		t.Fatalf("expected 3 chunks, got %d", len(chunks))
+	}
+	if len(chunks[0]) != 15 || len(chunks[1]) != 23 || len(chunks[2]) != 22 {
+		t.Fatalf("expected 15/23/22 after reduced first chunk, got %d/%d/%d", len(chunks[0]), len(chunks[1]), len(chunks[2]))
+	}
+}
+
+func TestDeriveCompletedPagesFromLegacyIndex(t *testing.T) {
+	idx := pdfChunkIndex{
+		MaxPagesPerRequest: 50,
+		PageCount:          105,
+		LastCompletedChunk: 1,
+	}
+	if got := deriveCompletedPagesFromLegacyIndex(idx, 105); got != 35 {
+		t.Fatalf("expected legacy completed pages to be 35, got %d", got)
+	}
+}

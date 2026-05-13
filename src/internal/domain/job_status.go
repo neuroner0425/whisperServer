@@ -13,6 +13,7 @@ const (
 	JobStatusTranscribeFailedCode   = 63
 	JobStatusRefineFailedCode       = 64
 	JobStatusPDFExtractFailedCode   = 65
+	JobStatusCopyrightBlockedCode   = 66
 )
 
 // JobStatusName converts a numeric code into the localized status label.
@@ -40,6 +41,8 @@ func JobStatusName(code int) string {
 		return "정제 실패"
 	case JobStatusPDFExtractFailedCode:
 		return "PDF 추출 실패"
+	case JobStatusCopyrightBlockedCode:
+		return "저작권 문제로 추출 불가"
 	default:
 		return ""
 	}
@@ -70,6 +73,8 @@ func JobStatusCode(name string) int {
 		return JobStatusRefineFailedCode
 	case "PDF 추출 실패":
 		return JobStatusPDFExtractFailedCode
+	case "저작권 문제로 추출 불가":
+		return JobStatusCopyrightBlockedCode
 	default:
 		return 0
 	}

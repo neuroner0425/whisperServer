@@ -96,7 +96,8 @@ func isRetryableFailureStatus(statusCode int, status string, failedLabel string)
 		model.JobStatusPDFConvertFailedCode,
 		model.JobStatusTranscribeFailedCode,
 		model.JobStatusRefineFailedCode,
-		model.JobStatusPDFExtractFailedCode:
+		model.JobStatusPDFExtractFailedCode,
+		model.JobStatusCopyrightBlockedCode:
 		return true
 	}
 	return strings.TrimSpace(status) == strings.TrimSpace(failedLabel)

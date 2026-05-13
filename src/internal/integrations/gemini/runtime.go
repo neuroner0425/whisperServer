@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +39,8 @@ type Runtime struct {
 	index   int
 	load    sync.Once
 
+	globalCooldownUntil time.Time
+
 	transcriptPromptOnce sync.Once
 	transcriptPromptText string
 	transcriptPromptErr  error
@@ -66,6 +69,8 @@ type geminiKeyClient struct {
 }
 
 var legacyTimelineLineRe = regexp.MustCompile(`^\[(\d{2}:\d{2}:\d{2})\.(\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2})\.(\d{3})\]\s*(.*)$`)
+
+const minGeminiRetryInterval = 10 * time.Second
 
 // New creates a Gemini runtime with lazy client initialization.
 func New(cfg Config) *Runtime {
@@ -132,6 +137,9 @@ func (r *Runtime) nextReadyClient(now time.Time) (int, time.Duration) {
 	if len(r.clients) == 0 {
 		return -1, 0
 	}
+	if wait := r.globalCooldownUntil.Sub(now); wait > 0 {
+		return -1, wait
+	}
 
 	start := r.index
 	var minWait time.Duration
@@ -194,8 +202,116 @@ func (r *Runtime) onFailure(idx int, err error) {
 	if !isRetryableGeminiError(err) {
 		backoff = 5 * time.Second
 	}
-	c.cooldownUntil = time.Now().Add(backoff)
+	now := time.Now()
+	c.cooldownUntil = now.Add(backoff)
+	globalBackoff := minGeminiRetryInterval
+	if globalBackoff > backoff {
+		backoff = globalBackoff
+	}
+	if until := now.Add(globalBackoff); until.After(r.globalCooldownUntil) {
+		r.globalCooldownUntil = until
+	}
 	r.errf("gemini.generate", err, "api_key_suffix=%s cooldown=%s fail_count=%d", maskedKeySuffix(c.key), backoff, c.failCount)
+}
+
+func emptyResponseError(result *genai.GenerateContentResponse) error {
+	return fmt.Errorf("empty response text (%s)", summarizeGenerateContentResponse(result))
+}
+
+func summarizeGenerateContentResponse(result *genai.GenerateContentResponse) string {
+	if result == nil {
+		return "nil_result"
+	}
+
+	parts := []string{
+		"candidates=" + strconv.Itoa(len(result.Candidates)),
+	}
+	if strings.TrimSpace(result.ModelVersion) != "" {
+		parts = append(parts, "model_version="+strings.TrimSpace(result.ModelVersion))
+	}
+	if strings.TrimSpace(result.ResponseID) != "" {
+		parts = append(parts, "response_id="+strings.TrimSpace(result.ResponseID))
+	}
+	if result.UsageMetadata != nil {
+		parts = append(parts,
+			fmt.Sprintf("tokens[prompt=%d,candidates=%d,thoughts=%d,total=%d]",
+				result.UsageMetadata.PromptTokenCount,
+				result.UsageMetadata.CandidatesTokenCount,
+				result.UsageMetadata.ThoughtsTokenCount,
+				result.UsageMetadata.TotalTokenCount,
+			),
+		)
+	}
+	if result.PromptFeedback != nil {
+		promptBits := []string{}
+		if result.PromptFeedback.BlockReason != "" {
+			promptBits = append(promptBits, "block_reason="+string(result.PromptFeedback.BlockReason))
+		}
+		if strings.TrimSpace(result.PromptFeedback.BlockReasonMessage) != "" {
+			promptBits = append(promptBits, "block_message="+strings.TrimSpace(result.PromptFeedback.BlockReasonMessage))
+		}
+		if len(result.PromptFeedback.SafetyRatings) > 0 {
+			promptBits = append(promptBits, "safety="+summarizeSafetyRatings(result.PromptFeedback.SafetyRatings))
+		}
+		if len(promptBits) > 0 {
+			parts = append(parts, "prompt_feedback{"+strings.Join(promptBits, ",")+"}")
+		}
+	}
+	if len(result.Candidates) > 0 && result.Candidates[0] != nil {
+		cand := result.Candidates[0]
+		candBits := []string{
+			"finish_reason=" + string(cand.FinishReason),
+			"token_count=" + strconv.Itoa(int(cand.TokenCount)),
+		}
+		if strings.TrimSpace(cand.FinishMessage) != "" {
+			candBits = append(candBits, "finish_message="+strings.TrimSpace(cand.FinishMessage))
+		}
+		if cand.Content == nil {
+			candBits = append(candBits, "content=nil")
+		} else {
+			candBits = append(candBits, "parts="+strconv.Itoa(len(cand.Content.Parts)))
+			textParts := 0
+			nonEmptyTextParts := 0
+			for _, part := range cand.Content.Parts {
+				if part == nil {
+					continue
+				}
+				if part.Text != "" {
+					textParts++
+					if strings.TrimSpace(part.Text) != "" {
+						nonEmptyTextParts++
+					}
+				}
+			}
+			candBits = append(candBits,
+				"text_parts="+strconv.Itoa(textParts),
+				"non_empty_text_parts="+strconv.Itoa(nonEmptyTextParts),
+			)
+		}
+		if len(cand.SafetyRatings) > 0 {
+			candBits = append(candBits, "safety="+summarizeSafetyRatings(cand.SafetyRatings))
+		}
+		parts = append(parts, "candidate0{"+strings.Join(candBits, ",")+"}")
+	}
+	return strings.Join(parts, " ")
+}
+
+func summarizeSafetyRatings(ratings []*genai.SafetyRating) string {
+	if len(ratings) == 0 {
+		return ""
+	}
+	out := make([]string, 0, len(ratings))
+	for _, rating := range ratings {
+		if rating == nil {
+			continue
+		}
+		item := string(rating.Category) + ":" + string(rating.Probability)
+		if rating.Blocked {
+			item += ":blocked"
+		}
+		out = append(out, item)
+	}
+	return strings.Join(out, "|")
 }
 
 func (r *Runtime) ExtractDocumentChunk(ctx context.Context, chunk worker.DocumentChunk, consistencyContext string) ([]byte, error) {
@@ -282,7 +398,7 @@ func (r *Runtime) generateDocument(ctx context.Context, idx int, systemPrompt st
 		return nil, err
 	}
 	if result == nil || strings.TrimSpace(result.Text()) == "" {
-		err = errors.New("empty response text")
+		err = emptyResponseError(result)
 		r.onFailure(idx, err)
 		return nil, err
 	}
