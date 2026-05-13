@@ -70,7 +70,10 @@ type geminiKeyClient struct {
 
 var legacyTimelineLineRe = regexp.MustCompile(`^\[(\d{2}:\d{2}:\d{2})\.(\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2})\.(\d{3})\]\s*(.*)$`)
 
-const minGeminiRetryInterval = 10 * time.Second
+const (
+	geminiClientInitTimeout = 60 * time.Second
+	minGeminiRetryInterval  = 10 * time.Second
+)
 
 // New creates a Gemini runtime with lazy client initialization.
 func New(cfg Config) *Runtime {
@@ -104,7 +107,7 @@ func (r *Runtime) loadKeys() {
 				return
 			}
 			seen[k] = struct{}{}
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), geminiClientInitTimeout)
 			defer cancel()
 			c, err := genai.NewClient(ctx, &genai.ClientConfig{
 				APIKey:  k,
@@ -155,6 +158,30 @@ func (r *Runtime) nextReadyClient(now time.Time) (int, time.Duration) {
 		}
 	}
 	return -1, minWait
+}
+
+func (r *Runtime) waitForReadyClient(ctx context.Context) (int, error) {
+	for {
+		idx, waitFor := r.nextReadyClient(time.Now())
+		if idx >= 0 {
+			return idx, nil
+		}
+		if waitFor <= 0 {
+			waitFor = minGeminiRetryInterval
+		}
+		timer := time.NewTimer(waitFor)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return -1, ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 // normalizeRefineInputText converts legacy timestamp lines into the current prompt format.
@@ -335,17 +362,12 @@ func (r *Runtime) ExtractDocumentChunk(ctx context.Context, chunk worker.Documen
 	instructionText := buildDocumentChunkPrompt(chunk, consistencyContext)
 	var lastErr error = errors.New("gemini document request failed")
 	maxAttempts := clientCount * 3
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		idx, waitFor := r.nextReadyClient(time.Now())
-		if idx < 0 {
-			if waitFor > 3*time.Second {
-				waitFor = 3 * time.Second
-			}
-			if waitFor > 0 {
-				time.Sleep(waitFor)
-			}
-			continue
+	for attempt := 0; attempt < maxAttempts; {
+		idx, waitErr := r.waitForReadyClient(ctx)
+		if waitErr != nil {
+			return nil, waitErr
 		}
+		attempt++
 		result, genErr := r.generateDocument(ctx, idx, systemPrompt, schema, instructionText, chunk)
 		if genErr == nil && len(result) > 0 {
 			return result, nil
@@ -382,7 +404,7 @@ func (r *Runtime) generateDocument(ctx context.Context, idx int, systemPrompt st
 			Parts: parts,
 		}},
 		&genai.GenerateContentConfig{
-			Temperature: genai.Ptr[float32](0.7),
+			Temperature: genai.Ptr[float32](0.9),
 			SystemInstruction: &genai.Content{
 				Parts: []*genai.Part{{Text: systemPrompt}},
 			},
