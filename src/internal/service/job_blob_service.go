@@ -234,6 +234,11 @@ func (s *JobBlobService) DeleteRefinedTimeline(jobID string) {
 	s.DeleteJSON(jobID, s.d.BlobKindRefinedTimeline)
 }
 
+// SaveRefineArtifact stores a refinement diagnostic or intermediate payload.
+func (s *JobBlobService) SaveRefineArtifact(jobID, kind, data string) error {
+	return s.SaveJSON(jobID, kind, data)
+}
+
 // LoadTranscriptTimelineText renders transcript JSON into the timeline text used by refinement.
 func (s *JobBlobService) LoadTranscriptTimelineText(jobID string) (string, error) {
 	data, err := s.LoadJSON(jobID, s.d.BlobKindTranscriptJSON)
