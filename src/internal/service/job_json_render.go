@@ -42,7 +42,7 @@ func RenderTranscriptTimelineText(raw string) (string, error) {
 		if text == "" {
 			continue
 		}
-		lines = append(lines, segment.From+" ~ "+segment.To+` "`+text+`"`)
+		lines = append(lines, "["+strings.TrimSpace(segment.From)+"] "+text)
 	}
 	return strings.Join(lines, "\n"), nil
 }

@@ -516,11 +516,15 @@ func (w *Worker) taskRefining(jobID, timelineText string) error {
 		return nil
 	}
 	desc := w.buildRefineDescription(job)
+	w.saveRefineTextArtifact(jobID, "refine_input_timeline", timelineText)
 
 	polishedTimeline, err := w.loadOrPolishRefinedTimeline(jobID, timelineText, desc)
 	if err != nil {
+		w.saveRefineDiagnostics(jobID, "polish_failure", timelineText, "", "")
 		return err
 	}
+	w.saveRefineTextArtifact(jobID, "refine_polished_timeline_candidate", polishedTimeline)
+	w.saveRefineDiagnostics(jobID, "polish", timelineText, polishedTimeline, "")
 	w.deps.SetJobFields(jobID, map[string]any{
 		"phase":            "전사 정제 중: 문단 구성",
 		"progress_percent": 80,
@@ -536,9 +540,13 @@ func (w *Worker) taskRefining(jobID, timelineText string) error {
 			w.deps.Logf("[REFINE] empty result job_id=%s", jobID)
 			err = errors.New("empty refined result")
 		}
+		w.saveRefineDiagnostics(jobID, "structure_failure", polishedTimeline, "", "")
 		return err
 	}
+	w.saveRefineTextArtifact(jobID, "refine_structured_candidate", refined)
+	w.saveRefineDiagnostics(jobID, "structure", polishedTimeline, "", refined)
 	if err := validateRefinedCoverage(timelineText, refined); err != nil {
+		w.saveRefineDiagnostics(jobID, "coverage_failure", timelineText, "", refined)
 		w.deps.SetJobFields(jobID, map[string]any{"status_detail": err.Error()})
 		return err
 	}
@@ -559,6 +567,79 @@ func (w *Worker) taskRefining(jobID, timelineText string) error {
 	})
 	w.deps.Logf("[REFINE] done job_id=%s output=db://refined", jobID)
 	return nil
+}
+
+type refineDiagnostics struct {
+	Step                 string   `json:"step"`
+	OriginalLineCount    int      `json:"original_line_count"`
+	OriginalFirstTimes   []string `json:"original_first_times,omitempty"`
+	OriginalLastTimes    []string `json:"original_last_times,omitempty"`
+	PolishedLineCount    int      `json:"polished_line_count,omitempty"`
+	PolishedFirstTimes   []string `json:"polished_first_times,omitempty"`
+	PolishedLastTimes    []string `json:"polished_last_times,omitempty"`
+	RefinedSentenceCount int      `json:"refined_sentence_count,omitempty"`
+	RefinedFirstTimes    []string `json:"refined_first_times,omitempty"`
+	RefinedLastTimes     []string `json:"refined_last_times,omitempty"`
+	MissingFromOutput    []string `json:"missing_from_output,omitempty"`
+	ExtraOutputTimes     []string `json:"extra_output_times,omitempty"`
+	DuplicateOutputTimes []string `json:"duplicate_output_times,omitempty"`
+	CreatedAt            string   `json:"created_at"`
+}
+
+func (w *Worker) saveRefineTextArtifact(jobID, kind, data string) {
+	if w.deps.BlobSvc == nil || strings.TrimSpace(data) == "" {
+		return
+	}
+	if err := w.deps.BlobSvc.SaveRefineArtifact(jobID, kind, data); err != nil && w.deps.Errf != nil {
+		w.deps.Errf("refine.saveArtifact", err, "job_id=%s kind=%s", jobID, kind)
+	}
+}
+
+func (w *Worker) saveRefineDiagnostics(jobID, step, originalTimeline, polishedTimeline, refinedJSON string) {
+	if w.deps.BlobSvc == nil {
+		return
+	}
+	diag := buildRefineDiagnostics(step, originalTimeline, polishedTimeline, refinedJSON)
+	b, err := json.MarshalIndent(diag, "", "  ")
+	if err != nil {
+		if w.deps.Errf != nil {
+			w.deps.Errf("refine.marshalDiagnostics", err, "job_id=%s step=%s", jobID, step)
+		}
+		return
+	}
+	nowKind := "refine_diagnostics_" + time.Now().Format("20060102_150405_000000000")
+	for _, kind := range []string{"refine_diagnostics", nowKind} {
+		if err := w.deps.BlobSvc.SaveRefineArtifact(jobID, kind, string(b)); err != nil && w.deps.Errf != nil {
+			w.deps.Errf("refine.saveDiagnostics", err, "job_id=%s kind=%s", jobID, kind)
+		}
+	}
+}
+
+func buildRefineDiagnostics(step, originalTimeline, polishedTimeline, refinedJSON string) refineDiagnostics {
+	originalTimes := extractTimelineTimestamps(originalTimeline)
+	polishedTimes := extractTimelineTimestamps(polishedTimeline)
+	refinedTimes, _ := extractRefinedSentenceTimestamps(refinedJSON)
+	compareBase := originalTimes
+	compareOutput := polishedTimes
+	if len(refinedTimes) > 0 {
+		compareOutput = refinedTimes
+	}
+	return refineDiagnostics{
+		Step:                 step,
+		OriginalLineCount:    len(originalTimes),
+		OriginalFirstTimes:   firstN(originalTimes, 5),
+		OriginalLastTimes:    lastN(originalTimes, 5),
+		PolishedLineCount:    len(polishedTimes),
+		PolishedFirstTimes:   firstN(polishedTimes, 5),
+		PolishedLastTimes:    lastN(polishedTimes, 5),
+		RefinedSentenceCount: len(refinedTimes),
+		RefinedFirstTimes:    firstN(refinedTimes, 5),
+		RefinedLastTimes:     lastN(refinedTimes, 5),
+		MissingFromOutput:    limitStrings(missingTimes(compareBase, compareOutput), 100),
+		ExtraOutputTimes:     limitStrings(missingTimes(compareOutput, compareBase), 100),
+		DuplicateOutputTimes: limitStrings(duplicateTimes(compareOutput), 100),
+		CreatedAt:            time.Now().Format(time.RFC3339),
+	}
 }
 
 func (w *Worker) loadOrPolishRefinedTimeline(jobID, timelineText, desc string) (string, error) {
@@ -686,6 +767,102 @@ func countValidRefinedSentences(refinedJSON string) (int, error) {
 		}
 	}
 	return count, nil
+}
+
+func extractTimelineTimestamps(timeline string) []string {
+	out := []string{}
+	for _, line := range strings.Split(strings.ReplaceAll(timeline, "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		m := timelineLineTimestampRe.FindString(line)
+		if m == "" {
+			continue
+		}
+		out = append(out, normalizeTimestamp(m))
+	}
+	return out
+}
+
+func extractRefinedSentenceTimestamps(refinedJSON string) ([]string, error) {
+	if strings.TrimSpace(refinedJSON) == "" {
+		return nil, nil
+	}
+	var payload refinedValidationPayload
+	if err := json.Unmarshal([]byte(refinedJSON), &payload); err != nil {
+		return nil, err
+	}
+	out := []string{}
+	for _, paragraph := range payload.Paragraph {
+		for _, sentence := range paragraph.Sentence {
+			startTime := normalizeTimestamp(sentence.StartTime)
+			if startTime == "" {
+				continue
+			}
+			out = append(out, startTime)
+		}
+	}
+	return out, nil
+}
+
+func normalizeTimestamp(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.TrimPrefix(value, "[")
+	value = strings.TrimSuffix(value, "]")
+	if !timelineLineTimestampRe.MatchString(value) {
+		return ""
+	}
+	return value
+}
+
+func firstN(values []string, n int) []string {
+	if len(values) <= n {
+		return values
+	}
+	return values[:n]
+}
+
+func lastN(values []string, n int) []string {
+	if len(values) <= n {
+		return values
+	}
+	return values[len(values)-n:]
+}
+
+func missingTimes(want, got []string) []string {
+	counts := map[string]int{}
+	for _, value := range got {
+		counts[value]++
+	}
+	missing := []string{}
+	for _, value := range want {
+		if counts[value] > 0 {
+			counts[value]--
+			continue
+		}
+		missing = append(missing, value)
+	}
+	return missing
+}
+
+func duplicateTimes(values []string) []string {
+	seen := map[string]int{}
+	dupes := []string{}
+	for _, value := range values {
+		seen[value]++
+		if seen[value] == 2 {
+			dupes = append(dupes, value)
+		}
+	}
+	return dupes
+}
+
+func limitStrings(values []string, limit int) []string {
+	if len(values) <= limit {
+		return values
+	}
+	return values[:limit]
 }
 
 func (w *Worker) taskTranscribeDev(ctx context.Context, jobID string, job *model.Job, started time.Time) error {

@@ -22,9 +22,11 @@ The provided timeline text is an STT result. It contains typos, spacing errors, 
    - Do not split one input line into multiple unrelated output lines unless the original line clearly contains multiple independent sentences under the same timestamp.
 
 4. **Timeline Integrity:**
-   - Preserve every original timestamp or timestamp range exactly as provided.
+   - The input format is `[HH:MM:SS,mmm] text`.
+   - Return exactly one output line for each input line.
+   - Preserve every original bracketed timestamp exactly as provided.
    - Preserve the original line order.
-   - Each output line must begin with the timestamp or timestamp range from the corresponding input line.
+   - Each output line must begin with the timestamp from the corresponding input line.
    - Do not invent new timestamps or remove existing timestamps.
 
 # Output Format

@@ -47,7 +47,8 @@ func (r *Runtime) PolishTranscriptTimeline(rawText, description string) (string,
 	prompt += "[Task]\n"
 	prompt += "Correct the transcript line by line while preserving every spoken detail and the original line order.\n"
 	prompt += "Return plain text only. Do not return JSON or Markdown.\n"
-	prompt += "Each output line must begin with the original timestamp or timestamp range from the corresponding input line.\n"
+	prompt += "Each input line is one timeline item in the format [HH:MM:SS,mmm] text.\n"
+	prompt += "Return exactly one output line for each input line, in the same order, beginning with the same bracketed timestamp.\n"
 	prompt += "Do not summarize, merge unrelated lines, or omit speech content.\n\n"
 	prompt += "[Original Timeline]\n\"\"\"\n" + normalizeRefineInputText(rawText) + "\n\"\"\"\n"
 
@@ -75,7 +76,9 @@ func (r *Runtime) StructureTranscriptParagraphs(polishedTimeline, description st
 	}
 	prompt += "[Task]\n"
 	prompt += "Use only the polished timeline below. Build paragraphs in the existing response schema.\n"
-	prompt += "Every sentence start_time must come from the polished timeline timestamps.\n"
+	prompt += "Each polished timeline line is one sentence candidate in the format [HH:MM:SS,mmm] text.\n"
+	prompt += "Create exactly one JSON sentence object for each timeline line, in the same order.\n"
+	prompt += "Every sentence start_time must be the bracketed timestamp from its line.\n"
 	prompt += "Do not summarize away content or invent timestamps.\n\n"
 	prompt += "[Polished Timeline]\n\"\"\"\n" + normalizeRefineInputText(polishedTimeline) + "\n\"\"\"\n"
 
@@ -133,7 +136,7 @@ func (r *Runtime) generateRefine(idx int, systemPrompt, responseMIMEType string,
 	defer cancel()
 
 	cfg := &genai.GenerateContentConfig{
-		Temperature: genai.Ptr[float32](0.9),
+		Temperature: genai.Ptr[float32](0.6),
 		SystemInstruction: &genai.Content{
 			Parts: []*genai.Part{{Text: systemPrompt}},
 		},

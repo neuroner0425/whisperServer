@@ -16,6 +16,20 @@ func TestRenderTranscriptMarkdown(t *testing.T) {
 	}
 }
 
+func TestRenderTranscriptTimelineTextUsesStartTimestampLines(t *testing.T) {
+	raw := `{"segments":[{"from":"00:00:00,000","to":"00:00:01,000","text":" 안녕하세요 "},{"from":"00:00:01,000","to":"00:00:02,000","text":" 반갑습니다 "},{"from":"00:00:02,000","to":"00:00:03,000","text":"  "}]}`
+
+	got, err := RenderTranscriptTimelineText(raw)
+	if err != nil {
+		t.Fatalf("RenderTranscriptTimelineText() error = %v", err)
+	}
+
+	want := "[00:00:00,000] 안녕하세요\n[00:00:01,000] 반갑습니다"
+	if got != want {
+		t.Fatalf("RenderTranscriptTimelineText() = %q, want %q", got, want)
+	}
+}
+
 func TestRenderRefinedMarkdown(t *testing.T) {
 	raw := `{"paragraph":[{"paragraph_summary":"첫 번째 요약","sentence":[{"start_time":"[00:00:00,000]","content":" 안녕하세요 "},{"start_time":"[00:00:01,000]","content":" 반갑습니다 "} ]},{"paragraph_summary":"두 번째 요약","sentence":[{"start_time":"[00:00:02,000]","content":" 다음 문장입니다 "}]}]}`
 

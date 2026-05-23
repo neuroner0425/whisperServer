@@ -14,6 +14,7 @@ The provided timeline has already been corrected line by line. Your job is to or
 2. **Sentence Preservation:**
    - Use the refined sentence text from the polished timeline as the source of truth.
    - You may make only minimal connective cleanup if it is required for valid sentence boundaries.
+   - Create exactly one `sentence` object for each timestamped line.
    - Do not merge multiple timestamped lines into one sentence if that would remove a timestamp.
    - Do not split a sentence in a way that requires inventing a new timestamp.
 
@@ -27,7 +28,8 @@ The provided timeline has already been corrected line by line. Your job is to or
 
 4. **Timeline Integrity:**
    - Never arbitrarily modify or omit the timestamps assigned to each sentence.
-   - Each `sentence.start_time` must come from the polished timeline.
+   - The polished timeline format is `[HH:MM:SS,mmm] text`.
+   - Each `sentence.start_time` must be the bracketed timestamp from the corresponding polished timeline line.
    - Maintain precise timeline mapping for every sentence, even when grouping sentences into paragraphs.
 
 # Output Format
