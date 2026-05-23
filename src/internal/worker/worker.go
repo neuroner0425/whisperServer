@@ -651,6 +651,10 @@ func (w *Worker) loadOrPolishRefinedTimeline(jobID, timelineText, desc string) (
 		}
 		polishedTimeline := strings.TrimSpace(string(b))
 		if polishedTimeline != "" {
+			if err := validateTimelineCoverage(timelineText, polishedTimeline); err != nil {
+				w.deps.SetJobFields(jobID, map[string]any{"status_detail": err.Error()})
+				return "", err
+			}
 			w.deps.Logf("[REFINE] reuse refined_timeline job_id=%s", jobID)
 			return polishedTimeline, nil
 		}
@@ -672,6 +676,10 @@ func (w *Worker) loadOrPolishRefinedTimeline(jobID, timelineText, desc string) (
 		return "", errors.New("empty refined timeline")
 	}
 	polishedTimeline = strings.TrimSpace(polishedTimeline)
+	if err := validateTimelineCoverage(timelineText, polishedTimeline); err != nil {
+		w.deps.SetJobFields(jobID, map[string]any{"status_detail": err.Error()})
+		return "", err
+	}
 	if err := w.deps.BlobSvc.SaveRefinedTimeline(jobID, []byte(polishedTimeline)); err != nil {
 		w.deps.SetJobFields(jobID, map[string]any{"status_detail": "정제 중간 결과를 저장하지 못했습니다."})
 		return "", err
@@ -726,17 +734,43 @@ var (
 )
 
 func validateRefinedCoverage(originalTimeline, refinedJSON string) error {
-	originalLineCount := countTimestampedTimelineLines(originalTimeline)
-	if originalLineCount == 0 {
+	originalTimes := extractTimelineTimestamps(originalTimeline)
+	if len(originalTimes) == 0 {
 		return nil
 	}
-	sentenceCount, err := countValidRefinedSentences(refinedJSON)
+	if _, err := countValidRefinedSentences(refinedJSON); err != nil {
+		return err
+	}
+	refinedTimes, err := extractRefinedSentenceTimestamps(refinedJSON)
 	if err != nil {
 		return err
 	}
-	minSentences := (originalLineCount*60 + 99) / 100
-	if sentenceCount < minSentences {
-		return fmt.Errorf("정제 결과 문장 수가 원본 대비 부족합니다. 원본 %d줄, 정제 %d문장", originalLineCount, sentenceCount)
+	if err := compareTimestampSequence(originalTimes, refinedTimes); err != nil {
+		return fmt.Errorf("정제 결과 timestamp가 원본과 일치하지 않습니다: %w", err)
+	}
+	return nil
+}
+
+func validateTimelineCoverage(originalTimeline, polishedTimeline string) error {
+	originalTimes := extractTimelineTimestamps(originalTimeline)
+	polishedTimes := extractTimelineTimestamps(polishedTimeline)
+	if len(originalTimes) == 0 {
+		return nil
+	}
+	if err := compareTimestampSequence(originalTimes, polishedTimes); err != nil {
+		return fmt.Errorf("정제 중간 결과 timestamp가 원본과 일치하지 않습니다: %w", err)
+	}
+	return nil
+}
+
+func compareTimestampSequence(want, got []string) error {
+	if len(want) != len(got) {
+		return fmt.Errorf("원본 %d개, 결과 %d개", len(want), len(got))
+	}
+	for i := range want {
+		if want[i] != got[i] {
+			return fmt.Errorf("%d번째 timestamp 불일치: 원본 %s, 결과 %s", i+1, want[i], got[i])
+		}
 	}
 	return nil
 }
