@@ -8,14 +8,15 @@ import (
 	"whisperserver/src/internal/service"
 )
 
-func TestValidateRefinedCoverageAcceptsEnoughSentences(t *testing.T) {
+func TestValidateRefinedCoverageAcceptsExactTimestampCoverage(t *testing.T) {
 	timeline := "[00:00:00,000] 첫 번째 문장\n[00:00:05,000] 두 번째 문장\n[00:00:10,000] 세 번째 문장"
 	refined := `{
   "paragraph": [
     {
       "sentence": [
         {"start_time": "[00:00:00,000]", "content": "첫 번째 문장"},
-        {"start_time": "[00:00:05,000]", "content": "두 번째 문장"}
+        {"start_time": "[00:00:05,000]", "content": "두 번째 문장"},
+        {"start_time": "[00:00:10,000]", "content": "세 번째 문장"}
       ]
     }
   ]
@@ -25,7 +26,7 @@ func TestValidateRefinedCoverageAcceptsEnoughSentences(t *testing.T) {
 	}
 }
 
-func TestValidateRefinedCoverageRejectsLowSentenceCoverage(t *testing.T) {
+func TestValidateRefinedCoverageRejectsMissingTimestamp(t *testing.T) {
 	timeline := "[00:00:00,000] 1\n[00:00:05,000] 2\n[00:00:10,000] 3\n[00:00:15,000] 4\n[00:00:20,000] 5"
 	refined := `{
   "paragraph": [
@@ -38,7 +39,15 @@ func TestValidateRefinedCoverageRejectsLowSentenceCoverage(t *testing.T) {
   ]
 }`
 	if err := validateRefinedCoverage(timeline, refined); err == nil {
-		t.Fatalf("expected low coverage error")
+		t.Fatalf("expected missing timestamp error")
+	}
+}
+
+func TestValidateTimelineCoverageRejectsMissingTimestamp(t *testing.T) {
+	original := "[00:00:00,000] 1\n[00:00:05,000] 2\n[00:00:10,000] 3"
+	polished := "[00:00:00,000] 1\n[00:00:10,000] 3"
+	if err := validateTimelineCoverage(original, polished); err == nil {
+		t.Fatalf("expected missing timestamp error")
 	}
 }
 

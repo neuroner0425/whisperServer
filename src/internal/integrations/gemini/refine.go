@@ -29,7 +29,20 @@ type refineSentence struct {
 	Content   string `json:"content"`
 }
 
-var refineStartTimeRe = regexp.MustCompile(`^\[?\d{2}:\d{2}:\d{2},\d{3}\]?$`)
+type timelineSentence struct {
+	StartTime string
+	Content   string
+}
+
+type paragraphMarker struct {
+	StartTime string
+	Summary   string
+}
+
+var (
+	refineStartTimeRe = regexp.MustCompile(`^\[?\d{2}:\d{2}:\d{2},\d{3}\]?$`)
+	timelineLineRe    = regexp.MustCompile(`^\[?(\d{2}:\d{2}:\d{2},\d{3})\]?\s*(.*)$`)
+)
 
 const refineRequestTimeout = 180 * time.Second
 
@@ -65,7 +78,7 @@ func (r *Runtime) StructureTranscriptParagraphs(polishedTimeline, description st
 	if err != nil {
 		return "", err
 	}
-	responseSchema, err := r.transcriptResponseSchema()
+	sentences, err := parseTimelineSentences(polishedTimeline)
 	if err != nil {
 		return "", err
 	}
@@ -75,14 +88,24 @@ func (r *Runtime) StructureTranscriptParagraphs(polishedTimeline, description st
 		prompt += "[Reference Context]\n\"\"\"\n" + strings.TrimSpace(description) + "\n\"\"\"\n\n"
 	}
 	prompt += "[Task]\n"
-	prompt += "Use only the polished timeline below. Build paragraphs in the existing response schema.\n"
-	prompt += "Each polished timeline line is one sentence candidate in the format [HH:MM:SS,mmm] text.\n"
-	prompt += "Create exactly one JSON sentence object for each timeline line, in the same order.\n"
-	prompt += "Every sentence start_time must be the bracketed timestamp from its line.\n"
-	prompt += "Do not summarize away content or invent timestamps.\n\n"
+	prompt += "Use only the polished timeline below. Decide paragraph boundaries and write a short paragraph summary for each boundary.\n"
+	prompt += "Return plain text only. Do not return JSON, Markdown, bullets, numbering, or explanations.\n"
+	prompt += "Each output line must use this exact format: [HH:MM:SS,mmm] paragraph summary.\n"
+	prompt += "The first output line must start with the first timeline timestamp.\n"
+	prompt += "Every output timestamp must be copied exactly from one timeline line.\n"
+	prompt += "Do not include sentence content in the output; only paragraph start timestamps and summaries.\n"
+	prompt += "Prefer paragraphs of 4 to 8 timeline lines. Start a new paragraph on topic changes.\n\n"
 	prompt += "[Polished Timeline]\n\"\"\"\n" + normalizeRefineInputText(polishedTimeline) + "\n\"\"\"\n"
 
-	return r.requestRefine(prompt, systemPrompt, "application/json", responseSchema)
+	plan, err := r.requestRefine(prompt, systemPrompt, "", nil)
+	if err != nil {
+		return "", err
+	}
+	markers, err := parseParagraphMarkers(plan, sentences)
+	if err != nil {
+		return "", err
+	}
+	return buildRefinedJSONFromTimeline(sentences, markers)
 }
 
 // RefineTranscript preserves the old single-call API as a wrapper around the two-step flow.
@@ -136,7 +159,7 @@ func (r *Runtime) generateRefine(idx int, systemPrompt, responseMIMEType string,
 	defer cancel()
 
 	cfg := &genai.GenerateContentConfig{
-		Temperature: genai.Ptr[float32](0.6),
+		Temperature: genai.Ptr[float32](0.2),
 		SystemInstruction: &genai.Content{
 			Parts: []*genai.Part{{Text: systemPrompt}},
 		},
@@ -224,4 +247,113 @@ func normalizePolishedTimeline(raw string) (string, error) {
 		return "", errors.New("empty polished timeline")
 	}
 	return strings.Join(out, "\n"), nil
+}
+
+func parseTimelineSentences(timeline string) ([]timelineSentence, error) {
+	lines := strings.Split(strings.ReplaceAll(strings.TrimSpace(timeline), "\r\n", "\n"), "\n")
+	out := make([]timelineSentence, 0, len(lines))
+	for i, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "```") {
+			continue
+		}
+		m := timelineLineRe.FindStringSubmatch(line)
+		if len(m) != 3 {
+			return nil, fmt.Errorf("invalid timeline line %d: %q", i+1, line)
+		}
+		content := strings.TrimSpace(strings.Trim(m[2], `"`))
+		if content == "" {
+			return nil, fmt.Errorf("empty timeline content at line %d", i+1)
+		}
+		out = append(out, timelineSentence{
+			StartTime: "[" + m[1] + "]",
+			Content:   content,
+		})
+	}
+	if len(out) == 0 {
+		return nil, errors.New("empty timeline")
+	}
+	return out, nil
+}
+
+func parseParagraphMarkers(raw string, sentences []timelineSentence) ([]paragraphMarker, error) {
+	valid := make(map[string]int, len(sentences))
+	for i, sentence := range sentences {
+		valid[sentence.StartTime] = i
+	}
+
+	lines := strings.Split(strings.ReplaceAll(strings.TrimSpace(raw), "\r\n", "\n"), "\n")
+	out := []paragraphMarker{}
+	lastIndex := -1
+	seen := map[string]struct{}{}
+	for i, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "```") {
+			continue
+		}
+		line = strings.TrimPrefix(line, "- ")
+		line = strings.TrimPrefix(line, "* ")
+		m := timelineLineRe.FindStringSubmatch(line)
+		if len(m) != 3 {
+			return nil, fmt.Errorf("invalid paragraph marker line %d: %q", i+1, line)
+		}
+		startTime := "[" + m[1] + "]"
+		index, ok := valid[startTime]
+		if !ok {
+			return nil, fmt.Errorf("paragraph marker timestamp not found in timeline: %s", startTime)
+		}
+		if _, exists := seen[startTime]; exists {
+			return nil, fmt.Errorf("duplicate paragraph marker timestamp: %s", startTime)
+		}
+		if index <= lastIndex {
+			return nil, fmt.Errorf("paragraph markers are not in timeline order at %s", startTime)
+		}
+		summary := strings.TrimSpace(m[2])
+		if summary == "" {
+			summary = "문단"
+		}
+		out = append(out, paragraphMarker{StartTime: startTime, Summary: summary})
+		seen[startTime] = struct{}{}
+		lastIndex = index
+	}
+	if len(out) == 0 {
+		return nil, errors.New("empty paragraph marker result")
+	}
+	if out[0].StartTime != sentences[0].StartTime {
+		out = append([]paragraphMarker{{
+			StartTime: sentences[0].StartTime,
+			Summary:   out[0].Summary,
+		}}, out...)
+	}
+	return out, nil
+}
+
+func buildRefinedJSONFromTimeline(sentences []timelineSentence, markers []paragraphMarker) (string, error) {
+	markerByTime := make(map[string]string, len(markers))
+	for _, marker := range markers {
+		markerByTime[marker.StartTime] = marker.Summary
+	}
+
+	result := refineResponse{}
+	for _, sentence := range sentences {
+		if summary, ok := markerByTime[sentence.StartTime]; ok || len(result.Paragraph) == 0 {
+			if !ok {
+				summary = "문단"
+			}
+			result.Paragraph = append(result.Paragraph, refineParagraph{
+				ParagraphSummary: summary,
+			})
+		}
+		last := len(result.Paragraph) - 1
+		result.Paragraph[last].Sentence = append(result.Paragraph[last].Sentence, refineSentence{
+			StartTime: sentence.StartTime,
+			Content:   sentence.Content,
+		})
+	}
+
+	normalized, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(normalized), nil
 }
