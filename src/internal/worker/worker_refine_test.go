@@ -129,6 +129,84 @@ func TestTaskRefiningPreservesRefinedTimelineOnStructureFailure(t *testing.T) {
 	}
 }
 
+func TestTaskRefiningRepairsChangedGeneratedTimestamps(t *testing.T) {
+	store := map[string]string{}
+	var structuredInput string
+	w := newRefineTestWorker(store, func(string, string) (string, error) {
+		return "[00:00:00,050] 다듬은 첫 문장\n[00:00:05,050] 다듬은 둘째 문장", nil
+	}, func(timeline, _ string) (string, error) {
+		structuredInput = timeline
+		return `{"paragraph":[{"sentence":[{"start_time":"[00:00:00,000]","content":"다듬은 첫 문장"},{"start_time":"[00:00:05,000]","content":"다듬은 둘째 문장"}]}]}`, nil
+	})
+
+	err := w.taskRefining("job1", "[00:00:00,000] 원문 1\n[00:00:05,000] 원문 2")
+	if err != nil {
+		t.Fatalf("expected repaired timestamp result to succeed, got %v", err)
+	}
+	want := "[00:00:00,000] 다듬은 첫 문장\n[00:00:05,000] 다듬은 둘째 문장"
+	if structuredInput != want || store["refined_timeline"] != want {
+		t.Fatalf("expected original timestamps restored, structured=%q saved=%q", structuredInput, store["refined_timeline"])
+	}
+	if store["refine_polished_timeline_raw_candidate"] == "" {
+		t.Fatalf("expected raw timestamp-changing response to be recorded")
+	}
+}
+
+func TestRepairTimelineTimestampsAllowsOneSecondDriftWhenLinesAreMissing(t *testing.T) {
+	original := make([]string, 0, 100)
+	polished := make([]string, 0, 99)
+	for i := 0; i < 100; i++ {
+		second := i * 3
+		line := fmt.Sprintf("[00:%02d:%02d,000] line %d", second/60, second%60, i)
+		original = append(original, line)
+		if i != 50 {
+			polished = append(polished, fmt.Sprintf("[00:%02d:%02d,500] refined %d", second/60, second%60, i))
+		}
+	}
+
+	repaired, changed, err := repairTimelineTimestamps(strings.Join(original, "\n"), strings.Join(polished, "\n"))
+	if err != nil || !changed {
+		t.Fatalf("expected timestamp drift to be repaired, changed=%v err=%v", changed, err)
+	}
+	if err := validateTimelineCoverage(strings.Join(original, "\n"), repaired); err != nil {
+		t.Fatalf("expected repaired output with one omitted line to pass, got %v", err)
+	}
+	if strings.Contains(repaired, ",500]") {
+		t.Fatalf("expected all matched timestamps to be restored to source values")
+	}
+}
+
+func TestRepairTimelineTimestampsRejectsAmbiguousOneSecondMatch(t *testing.T) {
+	original := "[00:00:00,000] a\n[00:00:00,800] b\n[00:00:05,000] c"
+	polished := "[00:00:00,400] combined\n[00:00:05,000] c"
+
+	_, _, err := repairTimelineTimestamps(original, polished)
+	if err == nil {
+		t.Fatalf("expected timestamp close to multiple source sentences to be rejected")
+	}
+}
+
+func TestTaskRefiningDiscardsInvalidCachedTimelineAndRegenerates(t *testing.T) {
+	store := map[string]string{"refined_timeline": "[00:00:00,000] 오래된 문장\n[00:00:01,000] 추가 문장"}
+	var polishCalls int
+	w := newRefineTestWorker(store, func(string, string) (string, error) {
+		polishCalls++
+		return "[00:00:00,000] 새 문장", nil
+	}, func(string, _ string) (string, error) {
+		return `{"paragraph":[{"sentence":[{"start_time":"[00:00:00,000]","content":"새 문장"}]}]}`, nil
+	})
+
+	if err := w.taskRefining("job1", "[00:00:00,000] 원문"); err != nil {
+		t.Fatalf("expected invalid cache to be regenerated, got %v", err)
+	}
+	if polishCalls != 1 {
+		t.Fatalf("expected a fresh polish call, got %d", polishCalls)
+	}
+	if store["refine_invalid_cached_timeline"] == "" || store["refined_timeline"] != "[00:00:00,000] 새 문장" {
+		t.Fatalf("expected invalid cache recorded and replaced, store=%v", store)
+	}
+}
+
 func TestTaskRefiningDoesNotSaveRefinedTimelineOnPolishFailure(t *testing.T) {
 	store := map[string]string{}
 	var structureCalls int
@@ -186,6 +264,9 @@ func newRefineTestWorker(
 		SaveJobJSON: func(_ string, kind string, data string) error {
 			jsonStore[kind] = data
 			return nil
+		},
+		DeleteJobJSON: func(_ string, kind string) {
+			delete(jsonStore, kind)
 		},
 		BlobKindRefinedTimeline: "refined_timeline",
 		BlobKindRefined:         "refined",
