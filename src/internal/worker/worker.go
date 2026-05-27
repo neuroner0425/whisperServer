@@ -657,12 +657,30 @@ func (w *Worker) loadOrPolishRefinedTimeline(jobID, timelineText, desc string) (
 		}
 		polishedTimeline := strings.TrimSpace(string(b))
 		if polishedTimeline != "" {
-			if err := validateTimelineCoverage(timelineText, polishedTimeline); err != nil {
-				w.deps.SetJobFields(jobID, map[string]any{"status_detail": err.Error()})
-				return "", err
+			polishedTimeline, repaired, err := repairTimelineTimestamps(timelineText, polishedTimeline)
+			if err != nil {
+				w.saveRefineTextArtifact(jobID, "refine_invalid_cached_timeline", polishedTimeline)
+				w.deps.BlobSvc.DeleteRefinedTimeline(jobID)
+				w.deps.Logf("[REFINE] discarded ambiguous refined_timeline job_id=%s", jobID)
+				polishedTimeline = ""
 			}
-			w.deps.Logf("[REFINE] reuse refined_timeline job_id=%s", jobID)
-			return polishedTimeline, nil
+			if repaired {
+				if err := w.deps.BlobSvc.SaveRefinedTimeline(jobID, []byte(polishedTimeline)); err != nil {
+					return "", err
+				}
+				w.deps.Logf("[REFINE] repaired cached refined_timeline timestamps job_id=%s", jobID)
+			}
+			if polishedTimeline != "" {
+				if err := validateTimelineCoverage(timelineText, polishedTimeline); err == nil {
+					w.deps.Logf("[REFINE] reuse refined_timeline job_id=%s", jobID)
+					return polishedTimeline, nil
+				}
+			}
+			if polishedTimeline != "" {
+				w.saveRefineTextArtifact(jobID, "refine_invalid_cached_timeline", polishedTimeline)
+				w.deps.BlobSvc.DeleteRefinedTimeline(jobID)
+				w.deps.Logf("[REFINE] discarded invalid refined_timeline job_id=%s", jobID)
+			}
 		}
 	}
 
@@ -682,6 +700,16 @@ func (w *Worker) loadOrPolishRefinedTimeline(jobID, timelineText, desc string) (
 		return "", errors.New("empty refined timeline")
 	}
 	polishedTimeline = strings.TrimSpace(polishedTimeline)
+	w.saveRefineTextArtifact(jobID, "refine_polished_timeline_raw_candidate", polishedTimeline)
+	var repaired bool
+	polishedTimeline, repaired, err = repairTimelineTimestamps(timelineText, polishedTimeline)
+	if err != nil {
+		w.deps.SetJobFields(jobID, map[string]any{"status_detail": err.Error()})
+		return "", err
+	}
+	if repaired {
+		w.deps.Logf("[REFINE] restored generated timeline timestamps job_id=%s", jobID)
+	}
 	if err := validateTimelineCoverage(timelineText, polishedTimeline); err != nil {
 		w.deps.SetJobFields(jobID, map[string]any{"status_detail": err.Error()})
 		return "", err
@@ -818,6 +846,94 @@ func compareTimestampSequence(want, got []string) error {
 		lastPosition = position
 	}
 	return nil
+}
+
+func repairTimelineTimestamps(originalTimeline, polishedTimeline string) (string, bool, error) {
+	originalTimes := extractTimelineTimestamps(originalTimeline)
+	lines := strings.Split(strings.ReplaceAll(strings.TrimSpace(polishedTimeline), "\r\n", "\n"), "\n")
+	polishedTimes := extractTimelineTimestamps(polishedTimeline)
+	if len(originalTimes) == 0 || len(lines) != len(polishedTimes) {
+		return polishedTimeline, false, nil
+	}
+
+	replacements := make([]string, len(polishedTimes))
+	copy(replacements, polishedTimes)
+	if len(originalTimes) == len(polishedTimes) {
+		copy(replacements, originalTimes)
+	} else {
+		const toleranceMilliseconds = int64(1000)
+		originalPositions := make(map[string]int, len(originalTimes))
+		reserved := make(map[int]bool, len(polishedTimes))
+		for i, timestamp := range originalTimes {
+			originalPositions[timestamp] = i
+		}
+		for _, timestamp := range polishedTimes {
+			if position, ok := originalPositions[timestamp]; ok {
+				reserved[position] = true
+			}
+		}
+		lastPosition := -1
+		used := map[int]bool{}
+		for i, timestamp := range polishedTimes {
+			if position, ok := originalPositions[timestamp]; ok {
+				if position > lastPosition {
+					lastPosition = position
+					used[position] = true
+				}
+				continue
+			}
+			candidates := make([]int, 0, 2)
+			for position, originalTimestamp := range originalTimes {
+				if position <= lastPosition || reserved[position] || used[position] {
+					continue
+				}
+				if timestampDistanceMilliseconds(timestamp, originalTimestamp) <= toleranceMilliseconds {
+					candidates = append(candidates, position)
+				}
+			}
+			if len(candidates) > 1 {
+				return polishedTimeline, false, fmt.Errorf("정제 중간 결과 timestamp가 여러 원본 문장과 1초 이내로 일치하여 대응을 확정할 수 없습니다: %s", timestamp)
+			}
+			if len(candidates) == 1 {
+				position := candidates[0]
+				replacements[i] = originalTimes[position]
+				lastPosition = position
+				used[position] = true
+			}
+		}
+	}
+
+	changed := false
+	repaired := make([]string, 0, len(lines))
+	for i, line := range lines {
+		match := timelineLineTimestampRe.FindStringIndex(line)
+		if len(match) != 2 {
+			return polishedTimeline, false, nil
+		}
+		if replacements[i] != polishedTimes[i] {
+			changed = true
+		}
+		prefix := line[:match[0]]
+		suffix := line[match[1]:]
+		repaired = append(repaired, prefix+replacements[i]+suffix)
+	}
+	if !changed {
+		return polishedTimeline, false, nil
+	}
+	return strings.Join(repaired, "\n"), true, nil
+}
+
+func timestampDistanceMilliseconds(a, b string) int64 {
+	parse := func(value string) int64 {
+		var hours, minutes, seconds, milliseconds int64
+		_, _ = fmt.Sscanf(normalizeTimestamp(value), "%d:%d:%d,%d", &hours, &minutes, &seconds, &milliseconds)
+		return (((hours*60)+minutes)*60+seconds)*1000 + milliseconds
+	}
+	diff := parse(a) - parse(b)
+	if diff < 0 {
+		return -diff
+	}
+	return diff
 }
 
 func countTimestampedTimelineLines(timeline string) int {
