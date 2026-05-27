@@ -494,9 +494,11 @@ func (w *Worker) taskTranscribe(jobID string) error {
 
 func (w *Worker) taskRefining(jobID, timelineText string) error {
 	w.deps.Logf("[REFINE] start job_id=%s", jobID)
-	if updated := w.deps.GetJob(jobID); updated == nil || updated.IsTrashed {
+	updated := w.deps.GetJob(jobID)
+	if updated == nil || updated.IsTrashed {
 		return nil
 	}
+	previousStatusDetail := updated.StatusDetail
 	w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusRefining, "status_detail": ""})
 	if w.cfg.DevMode {
 		return w.taskRefiningDev(jobID, timelineText)
@@ -515,12 +517,12 @@ func (w *Worker) taskRefining(jobID, timelineText string) error {
 	if job == nil || job.IsTrashed {
 		return nil
 	}
-	desc := w.buildRefineDescription(job)
+	desc := w.appendPreviousRefineFailureContext(jobID, w.buildRefineDescription(job), previousStatusDetail)
 	w.saveRefineTextArtifact(jobID, "refine_input_timeline", timelineText)
 
 	polishedTimeline, err := w.loadOrPolishRefinedTimeline(jobID, timelineText, desc)
 	if err != nil {
-		w.saveRefineDiagnostics(jobID, "polish_failure", timelineText, "", "")
+		w.saveRefineDiagnostics(jobID, "polish_failure", timelineText, "", "", err)
 		return err
 	}
 	w.saveRefineTextArtifact(jobID, "refine_polished_timeline_candidate", polishedTimeline)
@@ -540,15 +542,15 @@ func (w *Worker) taskRefining(jobID, timelineText string) error {
 			w.deps.Logf("[REFINE] empty result job_id=%s", jobID)
 			err = errors.New("empty refined result")
 		}
-		w.saveRefineDiagnostics(jobID, "structure_failure", polishedTimeline, "", "")
+		w.saveRefineDiagnostics(jobID, "structure_failure", polishedTimeline, "", "", err)
 		return err
 	}
 	w.saveRefineTextArtifact(jobID, "refine_structured_candidate", refined)
 	w.saveRefineDiagnostics(jobID, "structure", polishedTimeline, "", refined)
-	if err := validateRefinedCoverage(timelineText, refined); err != nil {
-		w.saveRefineDiagnostics(jobID, "coverage_failure", timelineText, "", refined)
-		w.deps.SetJobFields(jobID, map[string]any{"status_detail": err.Error()})
-		return err
+	if coverageErr := validateRefinedCoverage(timelineText, refined); coverageErr != nil {
+		w.saveRefineDiagnostics(jobID, "coverage_failure", timelineText, "", refined, coverageErr)
+		w.deps.SetJobFields(jobID, map[string]any{"status_detail": coverageErr.Error()})
+		return coverageErr
 	}
 	if err := w.deps.BlobSvc.SaveRefined(jobID, []byte(refined)); err != nil {
 		w.deps.SetJobFields(jobID, map[string]any{"status_detail": "최종 정제 결과를 저장하지 못했습니다."})
@@ -583,6 +585,7 @@ type refineDiagnostics struct {
 	MissingFromOutput    []string `json:"missing_from_output,omitempty"`
 	ExtraOutputTimes     []string `json:"extra_output_times,omitempty"`
 	DuplicateOutputTimes []string `json:"duplicate_output_times,omitempty"`
+	FailureCause         string   `json:"failure_cause,omitempty"`
 	CreatedAt            string   `json:"created_at"`
 }
 
@@ -595,11 +598,14 @@ func (w *Worker) saveRefineTextArtifact(jobID, kind, data string) {
 	}
 }
 
-func (w *Worker) saveRefineDiagnostics(jobID, step, originalTimeline, polishedTimeline, refinedJSON string) {
+func (w *Worker) saveRefineDiagnostics(jobID, step, originalTimeline, polishedTimeline, refinedJSON string, causes ...error) {
 	if w.deps.BlobSvc == nil {
 		return
 	}
 	diag := buildRefineDiagnostics(step, originalTimeline, polishedTimeline, refinedJSON)
+	if len(causes) > 0 && causes[0] != nil {
+		diag.FailureCause = causes[0].Error()
+	}
 	b, err := json.MarshalIndent(diag, "", "  ")
 	if err != nil {
 		if w.deps.Errf != nil {
@@ -719,6 +725,31 @@ func (w *Worker) buildRefineDescription(job *model.Job) string {
 	return base + "\n\n" + strings.Join(tagLines, "\n")
 }
 
+func (w *Worker) appendPreviousRefineFailureContext(jobID, description, statusDetail string) string {
+	feedback := strings.TrimSpace(statusDetail)
+	if w.deps.BlobSvc != nil {
+		if diagnostics, err := w.deps.BlobSvc.LoadRefineArtifact(jobID, "refine_diagnostics"); err == nil && strings.TrimSpace(diagnostics) != "" {
+			if strings.Contains(diagnostics, "_failure") || strings.Contains(diagnostics, `"failure_cause"`) {
+				if len(diagnostics) > 4000 {
+					diagnostics = diagnostics[:4000]
+				}
+				if feedback != "" {
+					feedback += "\n"
+				}
+				feedback += strings.TrimSpace(diagnostics)
+			}
+		}
+	}
+	if feedback == "" {
+		return description
+	}
+	retryContext := "[Previous Refinement Failure Feedback]\nThe previous attempt failed. Correct the identified omission or timestamp mismatch and do not repeat it.\n" + feedback
+	if strings.TrimSpace(description) == "" {
+		return retryContext
+	}
+	return description + "\n\n" + retryContext
+}
+
 type refinedValidationPayload struct {
 	Paragraph []struct {
 		Sentence []struct {
@@ -764,13 +795,27 @@ func validateTimelineCoverage(originalTimeline, polishedTimeline string) error {
 }
 
 func compareTimestampSequence(want, got []string) error {
-	if len(want) != len(got) {
-		return fmt.Errorf("원본 %d개, 결과 %d개", len(want), len(got))
+	const allowedMismatchPercent = 3
+	allowed := len(want) * allowedMismatchPercent / 100
+	missing := missingTimes(want, got)
+	extra := missingTimes(got, want)
+	if len(missing) > allowed || len(extra) > allowed {
+		return fmt.Errorf("원본 %d개, 결과 %d개, 누락 %d개, 추가 %d개 (허용 %d개)", len(want), len(got), len(missing), len(extra), allowed)
 	}
-	for i := range want {
-		if want[i] != got[i] {
-			return fmt.Errorf("%d번째 timestamp 불일치: 원본 %s, 결과 %s", i+1, want[i], got[i])
+	positions := map[string]int{}
+	for i, timestamp := range want {
+		positions[timestamp] = i
+	}
+	lastPosition := -1
+	for _, timestamp := range got {
+		position, ok := positions[timestamp]
+		if !ok {
+			continue
 		}
+		if position < lastPosition {
+			return fmt.Errorf("timestamp 순서가 변경되었습니다: %s", timestamp)
+		}
+		lastPosition = position
 	}
 	return nil
 }

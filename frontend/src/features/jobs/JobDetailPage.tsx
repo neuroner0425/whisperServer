@@ -198,10 +198,10 @@ export function JobDetailPage() {
   }, [data])
   const transcriptSegments = useMemo(() => {
     const segments = parseTranscriptSegmentsJSON(transcriptSourceJSON)
-    if (segments.length > 0 || data?.view !== 'preview') {
+    if (segments.length > 0 || data?.view === 'result') {
       return segments
     }
-    return parseTranscriptSegmentsText(data.preview_text || '')
+    return parseTranscriptSegmentsText(data?.preview_text || '')
   }, [data?.preview_text, data?.view, transcriptSourceJSON])
   const refinedParagraphs = useMemo(
     () => parseRefinedParagraphs(data?.view === 'result' && data?.result_kind === 'refined' ? data?.result_json || '' : ''),

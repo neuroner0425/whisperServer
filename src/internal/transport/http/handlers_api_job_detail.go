@@ -116,6 +116,19 @@ func (h JobDetailHandlers) DetailJSON() echo.HandlerFunc {
 			return c.JSON(http.StatusOK, payload)
 		}
 
+		// A refinement failure does not invalidate the completed original transcript.
+		if job.StatusCode == model.JobStatusRefineFailedCode && job.FileType != "pdf" && h.BlobSvc.HasTranscriptJSON(jobID) {
+			if b, err := h.BlobSvc.LoadTranscriptJSON(jobID); err == nil {
+				payload["view"] = "result"
+				payload["result_json"] = string(b)
+				payload["result_kind"] = "transcript_json"
+				payload["variant"] = "original"
+				payload["has_refined"] = false
+				payload["download_text_url"] = "/download/" + jobID
+			}
+			return c.JSON(http.StatusOK, payload)
+		}
+
 		// Refining jobs expose the original transcript as a preview source.
 		if (job.Status == h.StatusRefiningPending || job.Status == h.StatusRefining) && h.BlobSvc.HasTranscriptJSON(jobID) {
 			if b, err := h.BlobSvc.LoadTranscriptJSON(jobID); err == nil {

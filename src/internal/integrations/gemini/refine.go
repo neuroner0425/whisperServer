@@ -159,7 +159,7 @@ func (r *Runtime) generateRefine(idx int, systemPrompt, responseMIMEType string,
 	defer cancel()
 
 	cfg := &genai.GenerateContentConfig{
-		Temperature: genai.Ptr[float32](0.2),
+		Temperature: genai.Ptr[float32](0.7),
 		SystemInstruction: &genai.Content{
 			Parts: []*genai.Part{{Text: systemPrompt}},
 		},

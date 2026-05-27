@@ -51,3 +51,14 @@ func TestSplitOnCRLF(t *testing.T) {
 		t.Fatalf("unexpected split result: advance=%d token=%q err=%v", advance, token, err)
 	}
 }
+
+func TestNormalizeLivePreviewTimelineLine(t *testing.T) {
+	got, ok := normalizeLivePreviewTimelineLine(`[00:00:01.230 --> 00:00:03.450] 안녕하세요`)
+	if !ok {
+		t.Fatalf("expected live timeline line to parse")
+	}
+	want := "00:00:01,230 --> 00:00:03,450 안녕하세요"
+	if got != want {
+		t.Fatalf("normalizeLivePreviewTimelineLine() = %q, want %q", got, want)
+	}
+}

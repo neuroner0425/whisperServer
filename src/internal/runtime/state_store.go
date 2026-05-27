@@ -148,7 +148,7 @@ func (s *stateStore) AppendJobPreviewLine(id, line string) {
 	if line == "" {
 		return
 	}
-	const maxPreviewChars = 40000
+	const maxPreviewChars = 2 * 1024 * 1024
 
 	s.mu.Lock()
 	defer s.mu.Unlock()

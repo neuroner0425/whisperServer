@@ -239,6 +239,11 @@ func (s *JobBlobService) SaveRefineArtifact(jobID, kind, data string) error {
 	return s.SaveJSON(jobID, kind, data)
 }
 
+// LoadRefineArtifact loads a refinement diagnostic or intermediate payload.
+func (s *JobBlobService) LoadRefineArtifact(jobID, kind string) (string, error) {
+	return s.LoadJSON(jobID, kind)
+}
+
 // LoadTranscriptTimelineText renders transcript JSON into the timeline text used by refinement.
 func (s *JobBlobService) LoadTranscriptTimelineText(jobID string) (string, error) {
 	data, err := s.LoadJSON(jobID, s.d.BlobKindTranscriptJSON)

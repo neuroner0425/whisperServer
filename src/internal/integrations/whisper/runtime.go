@@ -40,6 +40,8 @@ type Runtime struct {
 	cfg Config
 }
 
+var livePreviewTimelineRe = regexp.MustCompile(`^\[?(\d{2}:\d{2}:\d{2})[.,](\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2})[.,](\d{3})\]?\s*(.*)$`)
+
 // New creates a Whisper runtime around the provided CLI configuration.
 func New(cfg Config) *Runtime {
 	return &Runtime{cfg: cfg}
@@ -147,10 +149,8 @@ func (r *Runtime) Run(ctx context.Context, jobID, wavPath string, totalSec *int)
 		if percent < maxPercent {
 			percent = maxPercent
 		}
-		if previewBytes, readErr := os.ReadFile(outputPath); readErr == nil && len(previewBytes) > 0 {
-			r.previewText(jobID, string(previewBytes))
-		} else {
-			r.previewLine(jobID, line)
+		if previewLine, ok := normalizeLivePreviewTimelineLine(line); ok {
+			r.previewLine(jobID, previewLine)
 		}
 		if percent == lastPercent {
 			sawTimeline = true
@@ -206,6 +206,18 @@ func (r *Runtime) Run(ctx context.Context, jobID, wavPath string, totalSec *int)
 	_ = os.Remove(outputJSONPath)
 	r.logf("[WHISPER] done job_id=%s", jobID)
 	return RunResult{TimelineText: timelineText, TranscriptJSON: slimJSON}, nil
+}
+
+func normalizeLivePreviewTimelineLine(line string) (string, bool) {
+	m := livePreviewTimelineRe.FindStringSubmatch(strings.TrimSpace(line))
+	if len(m) != 6 {
+		return "", false
+	}
+	text := strings.TrimSpace(m[5])
+	if text == "" {
+		return "", false
+	}
+	return fmt.Sprintf("%s,%s --> %s,%s %s", m[1], m[2], m[3], m[4], text), true
 }
 
 // logf emits integration logs when configured.
