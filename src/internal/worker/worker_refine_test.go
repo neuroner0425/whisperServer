@@ -2,6 +2,8 @@ package worker
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	model "whisperserver/src/internal/domain"
@@ -48,6 +50,21 @@ func TestValidateTimelineCoverageRejectsMissingTimestamp(t *testing.T) {
 	polished := "[00:00:00,000] 1\n[00:00:10,000] 3"
 	if err := validateTimelineCoverage(original, polished); err == nil {
 		t.Fatalf("expected missing timestamp error")
+	}
+}
+
+func TestValidateTimelineCoverageAllowsUpToThreePercentMissing(t *testing.T) {
+	original := make([]string, 0, 100)
+	polished := make([]string, 0, 97)
+	for i := 0; i < 100; i++ {
+		line := fmt.Sprintf("[00:%02d:%02d,000] line", i/60, i%60)
+		original = append(original, line)
+		if i < 97 {
+			polished = append(polished, line)
+		}
+	}
+	if err := validateTimelineCoverage(strings.Join(original, "\n"), strings.Join(polished, "\n")); err != nil {
+		t.Fatalf("expected 3 percent missing timestamps to pass, got %v", err)
 	}
 }
 
@@ -130,6 +147,27 @@ func TestTaskRefiningDoesNotSaveRefinedTimelineOnPolishFailure(t *testing.T) {
 	}
 	if structureCalls != 0 {
 		t.Fatalf("expected structure step to be skipped, got %d calls", structureCalls)
+	}
+}
+
+func TestTaskRefiningIncludesPreviousDiagnosticsInRetryDescription(t *testing.T) {
+	store := map[string]string{
+		"refined_timeline":   "[00:00:00,000] 다듬은 문장",
+		"refine_diagnostics": `{"step":"coverage_failure","missing_from_output":["00:00:01,000"]}`,
+	}
+	var description string
+	w := newRefineTestWorker(store, func(string, string) (string, error) {
+		return "", nil
+	}, func(_ string, desc string) (string, error) {
+		description = desc
+		return `{"paragraph":[{"sentence":[{"start_time":"[00:00:00,000]","content":"다듬은 문장"}]}]}`, nil
+	})
+
+	if err := w.taskRefining("job1", "[00:00:00,000] 원문"); err != nil {
+		t.Fatalf("expected retry success, got %v", err)
+	}
+	if !strings.Contains(description, "Previous Refinement Failure Feedback") || !strings.Contains(description, "coverage_failure") {
+		t.Fatalf("expected previous diagnostics in refine description, got %q", description)
 	}
 }
 

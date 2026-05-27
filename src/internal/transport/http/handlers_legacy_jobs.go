@@ -188,7 +188,9 @@ func (h LegacyJobsHandlers) downloadVariant(c echo.Context, variant string) erro
 	if job == nil || job.OwnerID != u.ID || job.IsTrashed {
 		return echo.NewHTTPError(http.StatusNotFound, "다운로드할 결과가 없습니다.")
 	}
-	if strings.TrimSpace(h.StatusCompleted) != "" && job.Status != h.StatusCompleted {
+	refinementFailedWithOriginal := job.StatusCode == model.JobStatusRefineFailedCode &&
+		job.FileType != "pdf" && variant != "refined" && h.BlobSvc.HasTranscriptJSON(jobID)
+	if strings.TrimSpace(h.StatusCompleted) != "" && job.Status != h.StatusCompleted && !refinementFailedWithOriginal {
 		return echo.NewHTTPError(http.StatusNotFound, "다운로드할 결과가 없습니다.")
 	}
 
