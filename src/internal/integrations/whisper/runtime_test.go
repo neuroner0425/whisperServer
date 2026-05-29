@@ -62,3 +62,43 @@ func TestNormalizeLivePreviewTimelineLine(t *testing.T) {
 		t.Fatalf("normalizeLivePreviewTimelineLine() = %q, want %q", got, want)
 	}
 }
+
+func TestVADFallbackReasonDetectsLargeTimelineGap(t *testing.T) {
+	segments := []transcriptSegment{
+		{Timestamps: transcriptTimestamps{From: "00:00:00,000", To: "00:00:05,000"}},
+		{Timestamps: transcriptTimestamps{From: "00:00:36,001", To: "00:00:40,000"}},
+	}
+	if got := vadFallbackReason(segments); !strings.Contains(got, "timeline_gap") {
+		t.Fatalf("expected timeline_gap fallback reason, got %q", got)
+	}
+}
+
+func TestVADFallbackReasonDetectsLongSegment(t *testing.T) {
+	segments := []transcriptSegment{
+		{Timestamps: transcriptTimestamps{From: "00:00:00,000", To: "00:01:01,001"}},
+	}
+	if got := vadFallbackReason(segments); !strings.Contains(got, "segment_duration") {
+		t.Fatalf("expected segment_duration fallback reason, got %q", got)
+	}
+}
+
+func TestVADFallbackReasonAllowsNormalTimeline(t *testing.T) {
+	segments := []transcriptSegment{
+		{Timestamps: transcriptTimestamps{From: "00:00:00,000", To: "00:00:10,000"}},
+		{Timestamps: transcriptTimestamps{From: "00:00:30,000", To: "00:00:45,000"}},
+	}
+	if got := vadFallbackReason(segments); got != "" {
+		t.Fatalf("expected no fallback reason, got %q", got)
+	}
+}
+
+func TestNeedsVADFallbackTranscriptJSONSkipsFallbackSource(t *testing.T) {
+	raw := []byte(`{"source":"vad_off_fallback","segments":[{"from":"00:00:00,000","to":"00:00:05,000","text":"a"},{"from":"00:01:00,000","to":"00:01:05,000","text":"b"}]}`)
+	got, err := NeedsVADFallbackTranscriptJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "" {
+		t.Fatalf("expected fallback source to be skipped, got %q", got)
+	}
+}
