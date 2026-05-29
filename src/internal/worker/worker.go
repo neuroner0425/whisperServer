@@ -186,6 +186,11 @@ func (w *Worker) RequeuePending(jobs map[string]*model.Job) {
 		if job == nil || job.IsTrashed {
 			continue
 		}
+		if w.shouldRequeueVADFallback(id, job) {
+			w.resetForVADFallbackRetranscribe(id, job)
+			w.EnqueueTranscribe(id)
+			continue
+		}
 		switch job.Status {
 		case w.cfg.StatusPending, w.cfg.StatusRunning:
 			if job.FileType == "pdf" && w.deps.BlobSvc != nil && w.deps.BlobSvc.HasPDFOriginal(id) {
@@ -198,6 +203,74 @@ func (w *Worker) RequeuePending(jobs map[string]*model.Job) {
 				w.EnqueueRefine(id)
 			}
 		}
+	}
+}
+
+func (w *Worker) shouldRequeueVADFallback(jobID string, job *model.Job) bool {
+	if job == nil || job.FileType == "pdf" || w.deps.BlobSvc == nil {
+		return false
+	}
+	if !w.deps.BlobSvc.HasAudioAAC(jobID) || !w.deps.BlobSvc.HasTranscriptJSON(jobID) {
+		return false
+	}
+	if !w.isVADFallbackRequeueStatus(job) {
+		return false
+	}
+	data, err := w.deps.BlobSvc.LoadTranscriptJSON(jobID)
+	if err != nil {
+		w.deps.Errf("worker.vadFallback.loadTranscriptJSON", err, "job_id=%s", jobID)
+		return false
+	}
+	reason, err := intwhisper.NeedsVADFallbackTranscriptJSON(data)
+	if err != nil {
+		w.deps.Errf("worker.vadFallback.inspectTranscriptJSON", err, "job_id=%s", jobID)
+		return false
+	}
+	if reason == "" {
+		return false
+	}
+	w.deps.Logf("[WORKER] queued VAD-off retranscribe job_id=%s reason=%s", jobID, reason)
+	return true
+}
+
+func (w *Worker) resetForVADFallbackRetranscribe(jobID string, job *model.Job) {
+	w.deps.SetJobFields(jobID, map[string]any{
+		"result":           "",
+		"result_refined":   "",
+		"status":           w.cfg.StatusPending,
+		"status_code":      model.JobStatusPendingCode,
+		"phase":            "",
+		"progress_percent": 0,
+		"progress_label":   "",
+		"preview_text":     "",
+		"started_at":       "",
+		"started_ts":       0,
+		"completed_at":     "",
+		"completed_ts":     0,
+		"duration":         "",
+		"status_detail":    "VAD 누락 감지로 재전사 대기",
+	})
+	w.deps.BlobSvc.DeletePreview(jobID)
+	w.deps.BlobSvc.DeleteRefinedTimeline(jobID)
+	w.deps.BlobSvc.DeleteRefined(jobID)
+	if job != nil && job.RefineEnabled {
+		w.deps.Logf("[WORKER] VAD fallback retranscribe will re-run refine job_id=%s", jobID)
+	}
+}
+
+func (w *Worker) isVADFallbackRequeueStatus(job *model.Job) bool {
+	if job == nil {
+		return false
+	}
+	switch job.StatusCode {
+	case model.JobStatusCompletedCode, model.JobStatusRefiningPendingCode, model.JobStatusRefiningCode, model.JobStatusRefineFailedCode:
+		return true
+	}
+	switch job.Status {
+	case w.cfg.StatusCompleted, w.cfg.StatusRefiningPending, w.cfg.StatusRefining, model.JobStatusName(model.JobStatusRefineFailedCode):
+		return true
+	default:
+		return false
 	}
 }
 
@@ -377,10 +450,12 @@ func (w *Worker) taskTranscribe(jobID string) error {
 	w.deps.Logf("[TRANSCRIBE] start job_id=%s input=db://wav", jobID)
 	started := time.Now()
 	w.deps.SetJobFields(jobID, map[string]any{
-		"status":       w.cfg.StatusRunning,
-		"started_at":   started.Format("2006-01-02 15:04:05"),
-		"started_ts":   float64(started.Unix()),
-		"preview_text": "",
+		"status":        w.cfg.StatusRunning,
+		"status_code":   model.JobStatusRunningCode,
+		"status_detail": "",
+		"started_at":    started.Format("2006-01-02 15:04:05"),
+		"started_ts":    float64(started.Unix()),
+		"preview_text":  "",
 	})
 	if w.deps.BlobSvc == nil {
 		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusTranscribeFailedCode})
@@ -477,14 +552,15 @@ func (w *Worker) taskTranscribe(jobID string) error {
 	}
 
 	w.deps.SetJobFields(jobID, map[string]any{
-		"status":       nextStatus,
-		"status_code":  model.JobStatusCode(nextStatus),
-		"result":       "db://transcript_json",
-		"phase":        "",
-		"preview_text": "",
-		"completed_at": completed.Format("2006-01-02 15:04:05"),
-		"completed_ts": float64(completed.Unix()),
-		"duration":     intutil.FormatSeconds(int(completed.Sub(started).Seconds())),
+		"status":        nextStatus,
+		"status_code":   model.JobStatusCode(nextStatus),
+		"result":        "db://transcript_json",
+		"status_detail": "",
+		"phase":         "",
+		"preview_text":  "",
+		"completed_at":  completed.Format("2006-01-02 15:04:05"),
+		"completed_ts":  float64(completed.Unix()),
+		"duration":      intutil.FormatSeconds(int(completed.Sub(started).Seconds())),
 	})
 	_ = os.Remove(wavPath)
 	w.deps.Logf("[TRANSCRIBE] cleaned input file job_id=%s", jobID)

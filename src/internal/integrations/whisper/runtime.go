@@ -42,6 +42,12 @@ type Runtime struct {
 
 var livePreviewTimelineRe = regexp.MustCompile(`^\[?(\d{2}:\d{2}:\d{2})[.,](\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2})[.,](\d{3})\]?\s*(.*)$`)
 
+const (
+	vadFallbackMaxStartGapSec   = 30
+	vadFallbackMaxSegmentDurSec = 60
+	transcriptSourceVADFallback = "vad_off_fallback"
+)
+
 // New creates a Whisper runtime around the provided CLI configuration.
 func New(cfg Config) *Runtime {
 	return &Runtime{cfg: cfg}
@@ -79,34 +85,58 @@ func (r *Runtime) Run(ctx context.Context, jobID, wavPath string, totalSec *int)
 		return RunResult{}, err
 	}
 
-	// Build the CLI command using the bundled model and VAD assets.
-	cmd := exec.CommandContext(ctx, r.cfg.WhisperCLI,
+	result, segments, err := r.runAttempt(ctx, jobID, wavPath, outputPath, outputJSONPath, modelBin, vadModel, totalSec, true)
+	if err != nil {
+		return RunResult{}, err
+	}
+	if reason := vadFallbackReason(segments); reason != "" {
+		r.logf("[WHISPER] retry without VAD job_id=%s reason=%s", jobID, reason)
+		r.phase(jobID, "전사 재시도 중", 0, "전사 재시도 중...")
+		result, _, err = r.runAttempt(ctx, jobID, wavPath, outputPath, outputJSONPath, modelBin, vadModel, totalSec, false)
+		if err != nil {
+			return RunResult{}, err
+		}
+	}
+
+	_ = os.Remove(outputPath)
+	_ = os.Remove(outputJSONPath)
+	r.logf("[WHISPER] done job_id=%s", jobID)
+	return result, nil
+}
+
+func (r *Runtime) runAttempt(ctx context.Context, jobID, wavPath, outputPath, outputJSONPath, modelBin, vadModel string, totalSec *int, useVAD bool) (RunResult, []transcriptSegment, error) {
+	args := []string{
 		"-m", modelBin,
 		"-l", "ko",
 		"--max-context", "0",
 		"--no-speech-thold", "0.01",
 		"--suppress-nst",
-		"--vad",
-		"--vad-model", vadModel,
-		"--vad-threshold", "0.01",
 		"--output-txt",
 		"--output-json",
 		wavPath,
-	)
+	}
+	if useVAD {
+		args = append(args[:6], append([]string{
+			"--vad",
+			"--vad-model", vadModel,
+			"--vad-threshold", "0.01",
+		}, args[6:]...)...)
+	}
+	cmd := exec.CommandContext(ctx, r.cfg.WhisperCLI, args...)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		r.errf("whisper.stdoutPipe", err, "job_id=%s", jobID)
-		return RunResult{}, err
+		return RunResult{}, nil, err
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		r.errf("whisper.stderrPipe", err, "job_id=%s", jobID)
-		return RunResult{}, err
+		return RunResult{}, nil, err
 	}
 	if err := cmd.Start(); err != nil {
 		r.errf("whisper.start", err, "job_id=%s", jobID)
-		return RunResult{}, err
+		return RunResult{}, nil, err
 	}
 
 	r.phase(jobID, "전처리 중", 0, "전처리 중...")
@@ -172,14 +202,14 @@ func (r *Runtime) Run(ctx context.Context, jobID, wavPath string, totalSec *int)
 	if err := cmd.Wait(); err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			r.errf("whisper.wait", context.DeadlineExceeded, "job_id=%s timeout_sec=%d", jobID, r.cfg.JobTimeoutSec)
-			return RunResult{}, context.DeadlineExceeded
+			return RunResult{}, nil, context.DeadlineExceeded
 		}
 		if strings.TrimSpace(lastDiagnosticLine) != "" {
 			r.errf("whisper.wait", err, "job_id=%s stderr=%s", jobID, lastDiagnosticLine)
 		} else {
 			r.errf("whisper.wait", err, "job_id=%s", jobID)
 		}
-		return RunResult{}, err
+		return RunResult{}, nil, err
 	}
 	if sawTimeline {
 		r.phase(jobID, "전사 완료", 100, "전사 완료")
@@ -189,23 +219,24 @@ func (r *Runtime) Run(ctx context.Context, jobID, wavPath string, totalSec *int)
 	b, err := os.ReadFile(outputPath)
 	if err != nil {
 		r.errf("whisper.readOutput", err, "job_id=%s path=%s", jobID, outputPath)
-		return RunResult{}, err
+		return RunResult{}, nil, err
 	}
-	timelineText, err := buildTimelineTranscriptText(outputJSONPath)
-	if err != nil {
-		r.errf("whisper.buildTimelineTranscript", err, "job_id=%s path=%s", jobID, outputJSONPath)
-		return RunResult{}, err
-	}
-	slimJSON, err := buildSlimTranscriptJSON(outputJSONPath)
+	segments, err := loadTranscriptSegments(outputJSONPath)
 	if err != nil {
 		r.errf("whisper.readOutputJSON", err, "job_id=%s path=%s", jobID, outputJSONPath)
-		return RunResult{}, err
+		return RunResult{}, nil, err
+	}
+	timelineText := buildTimelineTranscriptTextFromSegments(segments)
+	source := ""
+	if !useVAD {
+		source = transcriptSourceVADFallback
+	}
+	slimJSON, err := buildSlimTranscriptJSONFromSegments(segments, source)
+	if err != nil {
+		return RunResult{}, nil, err
 	}
 	r.previewText(jobID, string(b))
-	_ = os.Remove(outputPath)
-	_ = os.Remove(outputJSONPath)
-	r.logf("[WHISPER] done job_id=%s", jobID)
-	return RunResult{TimelineText: timelineText, TranscriptJSON: slimJSON}, nil
+	return RunResult{TimelineText: timelineText, TranscriptJSON: slimJSON}, segments, nil
 }
 
 func normalizeLivePreviewTimelineLine(line string) (string, bool) {
@@ -291,21 +322,26 @@ func splitOnCRLF(data []byte, atEOF bool) (advance int, token []byte, err error)
 
 // whisperJSONOutput is the raw JSON shape written by the Whisper CLI.
 type whisperJSONOutput struct {
-	Transcription []struct {
-		Timestamps struct {
-			From string `json:"from"`
-			To   string `json:"to"`
-		} `json:"timestamps"`
-		Offsets struct {
-			From int `json:"from"`
-			To   int `json:"to"`
-		} `json:"offsets"`
-		Text string `json:"text"`
-	} `json:"transcription"`
+	Transcription []transcriptSegment `json:"transcription"`
+}
+
+type transcriptSegment struct {
+	Timestamps transcriptTimestamps `json:"timestamps"`
+	Offsets    struct {
+		From int `json:"from"`
+		To   int `json:"to"`
+	} `json:"offsets"`
+	Text string `json:"text"`
+}
+
+type transcriptTimestamps struct {
+	From string `json:"from"`
+	To   string `json:"to"`
 }
 
 // slimTranscriptJSON is the smaller JSON shape persisted by this application.
 type slimTranscriptJSON struct {
+	Source   string                  `json:"source,omitempty"`
 	Segments []slimTranscriptSegment `json:"segments"`
 }
 
@@ -316,13 +352,40 @@ type slimTranscriptSegment struct {
 	Text string `json:"text"`
 }
 
+// NeedsVADFallbackTranscriptJSON reports whether a persisted transcript has the
+// large timeline gaps that indicate VAD likely removed too much audio.
+func NeedsVADFallbackTranscriptJSON(data []byte) (string, error) {
+	var parsed slimTranscriptJSON
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return "", err
+	}
+	if parsed.Source == transcriptSourceVADFallback {
+		return "", nil
+	}
+	segments := make([]transcriptSegment, 0, len(parsed.Segments))
+	for _, item := range parsed.Segments {
+		segments = append(segments, transcriptSegment{
+			Timestamps: transcriptTimestamps{
+				From: item.From,
+				To:   item.To,
+			},
+			Text: item.Text,
+		})
+	}
+	return vadFallbackReason(segments), nil
+}
+
 // buildSlimTranscriptJSON converts raw Whisper JSON into the persisted compact form.
 func buildSlimTranscriptJSON(path string) ([]byte, error) {
 	segments, err := loadTranscriptSegments(path)
 	if err != nil {
 		return nil, err
 	}
-	out := slimTranscriptJSON{Segments: make([]slimTranscriptSegment, 0, len(segments))}
+	return buildSlimTranscriptJSONFromSegments(segments, "")
+}
+
+func buildSlimTranscriptJSONFromSegments(segments []transcriptSegment, source string) ([]byte, error) {
+	out := slimTranscriptJSON{Source: source, Segments: make([]slimTranscriptSegment, 0, len(segments))}
 	for _, item := range segments {
 		out.Segments = append(out.Segments, slimTranscriptSegment{
 			From: item.Timestamps.From,
@@ -339,6 +402,10 @@ func buildTimelineTranscriptText(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return buildTimelineTranscriptTextFromSegments(segments), nil
+}
+
+func buildTimelineTranscriptTextFromSegments(segments []transcriptSegment) string {
 	lines := make([]string, 0, len(segments))
 	for _, item := range segments {
 		text := strings.TrimSpace(item.Text)
@@ -347,21 +414,11 @@ func buildTimelineTranscriptText(path string) (string, error) {
 		}
 		lines = append(lines, fmt.Sprintf(`%s : "%s"`, item.Timestamps.From, text))
 	}
-	return strings.Join(lines, "\n"), nil
+	return strings.Join(lines, "\n")
 }
 
 // loadTranscriptSegments loads raw transcript segments from Whisper JSON output.
-func loadTranscriptSegments(path string) ([]struct {
-	Timestamps struct {
-		From string `json:"from"`
-		To   string `json:"to"`
-	} `json:"timestamps"`
-	Offsets struct {
-		From int `json:"from"`
-		To   int `json:"to"`
-	} `json:"offsets"`
-	Text string `json:"text"`
-}, error) {
+func loadTranscriptSegments(path string) ([]transcriptSegment, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -371,4 +428,46 @@ func loadTranscriptSegments(path string) ([]struct {
 		return nil, err
 	}
 	return source.Transcription, nil
+}
+
+func vadFallbackReason(segments []transcriptSegment) string {
+	var prevStart float64
+	hasPrev := false
+	for i, segment := range segments {
+		start, ok := parseWhisperTimestampSeconds(segment.Timestamps.From)
+		if !ok {
+			continue
+		}
+		end, ok := parseWhisperTimestampSeconds(segment.Timestamps.To)
+		if ok && end-start > vadFallbackMaxSegmentDurSec {
+			return fmt.Sprintf("segment_duration=%.2fs index=%d", end-start, i)
+		}
+		if hasPrev && start-prevStart > vadFallbackMaxStartGapSec {
+			return fmt.Sprintf("timeline_gap=%.2fs index=%d", start-prevStart, i)
+		}
+		prevStart = start
+		hasPrev = true
+	}
+	return ""
+}
+
+func parseWhisperTimestampSeconds(value string) (float64, bool) {
+	parts := strings.Split(value, ":")
+	if len(parts) != 3 {
+		return 0, false
+	}
+	hours, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, false
+	}
+	minutes, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, false
+	}
+	secondsPart := strings.ReplaceAll(parts[2], ",", ".")
+	seconds, err := strconv.ParseFloat(secondsPart, 64)
+	if err != nil {
+		return 0, false
+	}
+	return float64(hours*3600+minutes*60) + seconds, true
 }
