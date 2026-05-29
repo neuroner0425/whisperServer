@@ -22,23 +22,24 @@ import (
 
 // Config defines worker runtime settings and status labels.
 type Config struct {
-	SplitTaskQueues          bool
-	TmpFolder                string
-	ModelDir                 string
-	WhisperCLI               string
-	JobTimeoutSec            int
-	PDFBatchTimeoutSec       int
-	PDFMaxPages              int
-	PDFMaxPagesPerRequest    int
-	PDFMaxRenderedImageBytes int64
-	DevMode                  bool
-	ProgressRe               *regexp.Regexp
-	StatusPending            string
-	StatusRunning            string
-	StatusRefiningPending    string
-	StatusRefining           string
-	StatusCompleted          string
-	StatusFailed             string
+	SplitTaskQueues             bool
+	RequeueVADFallbackOnStartup bool
+	TmpFolder                   string
+	ModelDir                    string
+	WhisperCLI                  string
+	JobTimeoutSec               int
+	PDFBatchTimeoutSec          int
+	PDFMaxPages                 int
+	PDFMaxPagesPerRequest       int
+	PDFMaxRenderedImageBytes    int64
+	DevMode                     bool
+	ProgressRe                  *regexp.Regexp
+	StatusPending               string
+	StatusRunning               string
+	StatusRefiningPending       string
+	StatusRefining              string
+	StatusCompleted             string
+	StatusFailed                string
 }
 
 // DocumentPageImage is one rendered PDF page passed to Gemini extraction.
@@ -186,7 +187,7 @@ func (w *Worker) RequeuePending(jobs map[string]*model.Job) {
 		if job == nil || job.IsTrashed {
 			continue
 		}
-		if w.shouldRequeueVADFallback(id, job) {
+		if w.cfg.RequeueVADFallbackOnStartup && w.shouldRequeueVADFallback(id, job) {
 			w.resetForVADFallbackRetranscribe(id, job)
 			w.EnqueueTranscribe(id)
 			continue
