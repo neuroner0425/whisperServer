@@ -1,6 +1,8 @@
 package util
 
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -20,6 +22,32 @@ var ErrUploadTooLarge = errors.New("upload too large")
 
 // wavTranscriptionFilter is the default ffmpeg filter chain used before Whisper.
 const wavTranscriptionFilter = "highpass=f=80,lowpass=f=7000,dynaudnorm=f=150:g=15:p=0.95:m=10,alimiter=limit=0.95"
+
+const (
+	phaseDetectSampleRate       = 16000
+	phaseDetectWindowFrames     = phaseDetectSampleRate
+	phaseDetectMinActiveDB      = -50.0
+	phaseDetectMaxCorrelation   = -0.8
+	phaseDetectMinSideOverMidDB = 12.0
+	phaseDetectMinFlaggedRatio  = 0.15
+	phaseDetectMinFlaggedSecs   = 3
+)
+
+// PhaseCancellationReport summarizes stereo phase-cancellation risk for an audio file.
+type PhaseCancellationReport struct {
+	Windows              int
+	ActiveWindows        int
+	FlaggedWindows       int
+	FlaggedRatio         float64
+	GlobalCorrelation    float64
+	GlobalLeftDB         float64
+	GlobalRightDB        float64
+	GlobalMidDB          float64
+	GlobalSideDB         float64
+	GlobalSideMinusMidDB float64
+	PreferredMonoChannel int
+	ShouldUseChannelMono bool
+}
 
 // DetectFileType classifies uploads using only their filename extension.
 func DetectFileType(name string) string {
@@ -90,6 +118,13 @@ func SaveUploadWithLimit(h *multipart.FileHeader, dst string, maxBytes int64, ch
 
 // ConvertToWav normalizes arbitrary media into the mono 16k WAV expected by Whisper.
 func ConvertToWav(src, dst string) error {
+	if report, err := DetectPhaseCancellation(src); err == nil && report.ShouldUseChannelMono {
+		return convertToWavUsingChannel(src, dst, report.PreferredMonoChannel)
+	}
+	return convertToWavUsingNormalDownmix(src, dst)
+}
+
+func convertToWavUsingNormalDownmix(src, dst string) error {
 	filteredArgs := []string{
 		"-y",
 		"-i", src,
@@ -120,6 +155,236 @@ func ConvertToWav(src, dst string) error {
 		}
 	}
 }
+
+func convertToWavUsingChannel(src, dst string, channel int) error {
+	if channel != 1 {
+		channel = 0
+	}
+	channelFilter := fmt.Sprintf("pan=mono|c0=c%d", channel)
+	filteredArgs := []string{
+		"-y",
+		"-i", src,
+		"-vn",
+		"-ar", "16000",
+		"-c:a", "pcm_s16le",
+		"-af", channelFilter + "," + wavTranscriptionFilter,
+		dst,
+	}
+	if out, err := runFFmpeg(filteredArgs...); err == nil {
+		return nil
+	} else {
+		plainArgs := []string{
+			"-y",
+			"-i", src,
+			"-vn",
+			"-ar", "16000",
+			"-c:a", "pcm_s16le",
+			"-af", channelFilter,
+			dst,
+		}
+		if fallbackOut, fallbackErr := runFFmpeg(plainArgs...); fallbackErr == nil {
+			return nil
+		} else {
+			return fmt.Errorf("ffmpeg channel conversion failed: %s; fallback failed: %s", out, fallbackOut)
+		}
+	}
+}
+
+// DetectPhaseCancellation scans stereo PCM windows for destructive L+R mono downmix risk.
+func DetectPhaseCancellation(src string) (PhaseCancellationReport, error) {
+	cmd := exec.Command(
+		"ffmpeg",
+		"-hide_banner",
+		"-nostats",
+		"-v", "error",
+		"-i", src,
+		"-vn",
+		"-f", "f32le",
+		"-acodec", "pcm_f32le",
+		"-ac", "2",
+		"-ar", strconv.Itoa(phaseDetectSampleRate),
+		"-",
+	)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return PhaseCancellationReport{}, err
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return PhaseCancellationReport{}, err
+	}
+
+	detector := newPhaseCancellationDetector()
+	buf := make([]byte, 64*1024)
+	carry := make([]byte, 0, 8)
+	for {
+		n, readErr := stdout.Read(buf)
+		if n > 0 {
+			chunk := buf[:n]
+			if len(carry) > 0 {
+				merged := make([]byte, 0, len(carry)+len(chunk))
+				merged = append(merged, carry...)
+				merged = append(merged, chunk...)
+				chunk = merged
+				carry = carry[:0]
+			}
+			full := len(chunk) - len(chunk)%8
+			if full > 0 {
+				detector.writeFrames(chunk[:full])
+			}
+			if full < len(chunk) {
+				carry = append(carry, chunk[full:]...)
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			_ = cmd.Wait()
+			return PhaseCancellationReport{}, readErr
+		}
+	}
+	if err := cmd.Wait(); err != nil {
+		return PhaseCancellationReport{}, fmt.Errorf("ffmpeg phase scan failed: %w | output=%s", err, strings.TrimSpace(stderr.String()))
+	}
+	return detector.buildReport(), nil
+}
+
+type phaseCancellationDetector struct {
+	window phaseStats
+	global phaseStats
+	report PhaseCancellationReport
+}
+
+type phaseStats struct {
+	n         int
+	sumL      float64
+	sumR      float64
+	sumLL     float64
+	sumRR     float64
+	sumLR     float64
+	sumMidSq  float64
+	sumSideSq float64
+}
+
+type phaseMetrics struct {
+	correlation    float64
+	leftDB         float64
+	rightDB        float64
+	midDB          float64
+	sideDB         float64
+	sideMinusMidDB float64
+}
+
+func newPhaseCancellationDetector() *phaseCancellationDetector {
+	return &phaseCancellationDetector{report: PhaseCancellationReport{PreferredMonoChannel: 0}}
+}
+
+func (d *phaseCancellationDetector) writeFrames(data []byte) {
+	for off := 0; off+7 < len(data); off += 8 {
+		left := float64(math.Float32frombits(binary.LittleEndian.Uint32(data[off : off+4])))
+		right := float64(math.Float32frombits(binary.LittleEndian.Uint32(data[off+4 : off+8])))
+		d.window.add(left, right)
+		d.global.add(left, right)
+		if d.window.n >= phaseDetectWindowFrames {
+			d.finishWindow()
+		}
+	}
+}
+
+func (d *phaseCancellationDetector) finishWindow() {
+	if d.window.n == 0 {
+		return
+	}
+	metrics := d.window.metrics()
+	d.report.Windows++
+	active := metrics.midDB > phaseDetectMinActiveDB || metrics.sideDB > phaseDetectMinActiveDB
+	if active {
+		d.report.ActiveWindows++
+	}
+	if active &&
+		metrics.correlation < phaseDetectMaxCorrelation &&
+		metrics.sideDB > phaseDetectMinActiveDB &&
+		metrics.sideMinusMidDB > phaseDetectMinSideOverMidDB {
+		d.report.FlaggedWindows++
+	}
+	d.window = phaseStats{}
+}
+
+func (d *phaseCancellationDetector) buildReport() PhaseCancellationReport {
+	d.finishWindow()
+	report := d.report
+	if report.ActiveWindows > 0 {
+		report.FlaggedRatio = float64(report.FlaggedWindows) / float64(report.ActiveWindows)
+	}
+	global := d.global.metrics()
+	report.GlobalCorrelation = global.correlation
+	report.GlobalLeftDB = global.leftDB
+	report.GlobalRightDB = global.rightDB
+	report.GlobalMidDB = global.midDB
+	report.GlobalSideDB = global.sideDB
+	report.GlobalSideMinusMidDB = global.sideMinusMidDB
+	if report.GlobalRightDB > report.GlobalLeftDB+1 {
+		report.PreferredMonoChannel = 1
+	}
+	report.ShouldUseChannelMono =
+		(report.FlaggedWindows >= phaseDetectMinFlaggedSecs || report.FlaggedWindows == report.ActiveWindows) &&
+			report.FlaggedRatio >= phaseDetectMinFlaggedRatio &&
+			report.GlobalSideMinusMidDB >= phaseDetectMinSideOverMidDB/2
+	return report
+}
+
+func (s *phaseStats) add(left, right float64) {
+	mid := (left + right) / 2
+	side := (left - right) / 2
+	s.n++
+	s.sumL += left
+	s.sumR += right
+	s.sumLL += left * left
+	s.sumRR += right * right
+	s.sumLR += left * right
+	s.sumMidSq += mid * mid
+	s.sumSideSq += side * side
+}
+
+func (s phaseStats) metrics() phaseMetrics {
+	if s.n == 0 {
+		return phaseMetrics{leftDB: negInfDB(), rightDB: negInfDB(), midDB: negInfDB(), sideDB: negInfDB()}
+	}
+	n := float64(s.n)
+	leftMean := s.sumL / n
+	rightMean := s.sumR / n
+	leftVariance := s.sumLL/n - leftMean*leftMean
+	rightVariance := s.sumRR/n - rightMean*rightMean
+	correlation := 0.0
+	if leftVariance > 0 && rightVariance > 0 {
+		correlation = (s.sumLR/n - leftMean*rightMean) / math.Sqrt(leftVariance*rightVariance)
+	}
+	leftRMS := math.Sqrt(s.sumLL / n)
+	rightRMS := math.Sqrt(s.sumRR / n)
+	midRMS := math.Sqrt(s.sumMidSq / n)
+	sideRMS := math.Sqrt(s.sumSideSq / n)
+	midDB := rmsDB(midRMS)
+	sideDB := rmsDB(sideRMS)
+	return phaseMetrics{
+		correlation:    correlation,
+		leftDB:         rmsDB(leftRMS),
+		rightDB:        rmsDB(rightRMS),
+		midDB:          midDB,
+		sideDB:         sideDB,
+		sideMinusMidDB: sideDB - midDB,
+	}
+}
+
+func rmsDB(rms float64) float64 {
+	if rms <= 0 {
+		return negInfDB()
+	}
+	return 20 * math.Log10(rms)
+}
+
+func negInfDB() float64 { return -240 }
 
 // ConvertToAac creates the AAC derivative kept for replay and retries.
 func ConvertToAac(src, dst string) error {
