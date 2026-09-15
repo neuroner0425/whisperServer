@@ -762,7 +762,7 @@ build_backend() {
 
   (
     cd "${PROJECT_ROOT}"
-    go build -o "${BIN_FILE}" ./src/cmd/server
+    CGO_ENABLED=0 go build -buildvcs=false -ldflags="-s -w" -o "${BIN_FILE}" ./src/cmd/server
   )
 
   echo "[OK] Backend build complete: ${BIN_FILE}"
