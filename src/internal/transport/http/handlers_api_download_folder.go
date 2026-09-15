@@ -15,13 +15,19 @@ import (
 	"whisperserver/src/internal/service"
 )
 
+type CompletedJobRecord struct {
+	ID  string
+	Job *model.Job
+}
+
 // FolderDownloadHandlers bundles all completed results from a folder subtree into a zip.
 type FolderDownloadHandlers struct {
-	CurrentUserOrUnauthorized func(echo.Context) (*User, bool)
-	FolderSvc                 *service.FolderService
-	BlobSvc                   *service.JobBlobService
-	JobsSnapshot              func() map[string]*model.Job
-	CollectFolderSubtree      func(userID string, folderIDs []string, trashFolders bool) map[string]struct{}
+	CurrentUserOrUnauthorized    func(echo.Context) (*User, bool)
+	FolderSvc                    *service.FolderService
+	BlobSvc                      *service.JobBlobService
+	JobsSnapshot                 func() map[string]*model.Job
+	ListCompletedJobsByFolderIDs func(ownerID string, folderIDs []string) ([]CompletedJobRecord, error)
+	CollectFolderSubtree         func(userID string, folderIDs []string, trashFolders bool) map[string]struct{}
 
 	StatusCompleted string
 }
@@ -29,7 +35,7 @@ type FolderDownloadHandlers struct {
 // Handler creates and streams the folder result archive on demand.
 func (h FolderDownloadHandlers) Handler() echo.HandlerFunc {
 	return func(c echo.Context) error {
-		if h.CurrentUserOrUnauthorized == nil || h.FolderSvc == nil || h.BlobSvc == nil || h.JobsSnapshot == nil || h.CollectFolderSubtree == nil {
+		if h.CurrentUserOrUnauthorized == nil || h.FolderSvc == nil || h.BlobSvc == nil || (h.JobsSnapshot == nil && h.ListCompletedJobsByFolderIDs == nil) || h.CollectFolderSubtree == nil {
 			return c.NoContent(http.StatusServiceUnavailable)
 		}
 		u, ok := h.CurrentUserOrUnauthorized(c)
@@ -47,15 +53,36 @@ func (h FolderDownloadHandlers) Handler() echo.HandlerFunc {
 
 		subtree := h.CollectFolderSubtree(u.ID, []string{folderID}, false)
 		subtree[folderID] = struct{}{}
-		snapshot := h.JobsSnapshot()
+
+		var targetJobs []CompletedJobRecord
+		if h.ListCompletedJobsByFolderIDs != nil {
+			fIDs := make([]string, 0, len(subtree))
+			for fid := range subtree {
+				fIDs = append(fIDs, fid)
+			}
+			records, err := h.ListCompletedJobsByFolderIDs(u.ID, fIDs)
+			if err == nil {
+				targetJobs = records
+			}
+		} else if h.JobsSnapshot != nil {
+			snapshot := h.JobsSnapshot()
+			for id, job := range snapshot {
+				if job == nil || job.OwnerID != u.ID || job.IsTrashed || job.Status != h.StatusCompleted {
+					continue
+				}
+				if _, ok := subtree[NormalizeFolderID(job.FolderID)]; ok {
+					targetJobs = append(targetJobs, CompletedJobRecord{ID: id, Job: job})
+				}
+			}
+		}
+
 		buf := bytes.NewBuffer(nil)
 		zw := zip.NewWriter(buf)
 		added := 0
-		for id, job := range snapshot {
-			if job == nil || job.OwnerID != u.ID || job.IsTrashed || job.Status != h.StatusCompleted {
-				continue
-			}
-			if _, ok := subtree[NormalizeFolderID(job.FolderID)]; !ok {
+		for _, rec := range targetJobs {
+			id := rec.ID
+			job := rec.Job
+			if job == nil {
 				continue
 			}
 			var (

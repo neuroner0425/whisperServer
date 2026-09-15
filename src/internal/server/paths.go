@@ -33,6 +33,14 @@ var (
 	pdfToolPDFInfo                string
 	pdfToolPDFToPPM               string
 
+	storageType       string
+	s3Endpoint        string
+	s3Region          string
+	s3Bucket          string
+	s3AccessKeyID     string
+	s3SecretAccessKey string
+	s3UseSSL          bool
+
 	progressRe = regexp.MustCompile(`\[(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)\s*-->`)
 )
 

@@ -33,3 +33,26 @@ type FolderRow struct {
 	ParentID  string
 	UpdatedAt string
 }
+
+// PagedJobQueryParams defines query filter, sort, and pagination parameters.
+type PagedJobQueryParams struct {
+	UserID       string
+	FolderID     string
+	FilterFolder bool
+	IsTrashed    bool
+	SearchQuery  string
+	Tag          string
+	SortBy       string
+	SortOrder    string
+	Page         int
+	PageSize     int
+}
+
+// PagedJobRowsResult bundles the page of rows with total counts.
+type PagedJobRowsResult struct {
+	Rows       []JobRow
+	TotalItems int
+	TotalPages int
+	Page       int
+	PageSize   int
+}

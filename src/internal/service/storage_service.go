@@ -10,9 +10,24 @@ type JobBlobUsage struct {
 	BlobCount int
 }
 
+// StorageJobItem is the service-layer storage row with both usage and job metadata.
+type StorageJobItem struct {
+	JobID       string
+	Filename    string
+	FileType    string
+	FolderID    string
+	IsTrashed   bool
+	UploadedTS  float64
+	StartedTS   float64
+	CompletedTS float64
+	SizeBytes   int64
+	BlobCount   int
+}
+
 // StorageServiceDeps provides repository callbacks used by storage queries.
 type StorageServiceDeps struct {
-	ListJobBlobUsageByOwner func(ownerID string) ([]JobBlobUsage, error)
+	ListJobBlobUsageByOwner     func(ownerID string) ([]JobBlobUsage, error)
+	ListStorageJobItemsByOwner func(ownerID string) ([]StorageJobItem, error)
 }
 
 // StorageService exposes storage usage queries to HTTP handlers.
@@ -35,4 +50,19 @@ func (s *StorageService) UsageByOwner(ownerID string) ([]JobBlobUsage, error) {
 		return nil, NewHTTPError(http.StatusInternalServerError, "저장용량 정보를 불러오지 못했습니다.")
 	}
 	return usages, nil
+}
+
+// ListStorageItemsByOwner returns aggregated blob usage and job metadata for every job owned by the user.
+func (s *StorageService) ListStorageItemsByOwner(ownerID string) ([]StorageJobItem, error) {
+	if s == nil {
+		return nil, NewHTTPError(http.StatusServiceUnavailable, "서비스를 사용할 수 없습니다.")
+	}
+	if s.d.ListStorageJobItemsByOwner != nil {
+		items, err := s.d.ListStorageJobItemsByOwner(ownerID)
+		if err != nil {
+			return nil, NewHTTPError(http.StatusInternalServerError, "저장용량 정보를 불러오지 못했습니다.")
+		}
+		return items, nil
+	}
+	return nil, nil
 }

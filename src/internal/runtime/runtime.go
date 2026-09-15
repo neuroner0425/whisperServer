@@ -13,17 +13,22 @@ import (
 
 // Config wires runtime state to persistence, folders, and notifications.
 type Config struct {
-	TmpFolder             string
-	Now                   func() time.Time
-	LoadJobs              func() (map[string]*model.Job, error)
-	SaveJobs              func(map[string]*model.Job) error
-	DeleteJobBlobs        func(string)
-	SaveJobBlob           func(string, string, []byte) error
-	ListAllFoldersByOwner func(string, bool) ([]model.Folder, error)
-	GetFolderByID         func(string, string) (*model.Folder, error)
-	SetFolderTrashed      func(string, string, bool) error
-	Notify                func(string, string, map[string]any)
-	Errf                  func(string, error, string, ...any)
+	TmpFolder                  string
+	Now                        func() time.Time
+	LoadJobs                   func() (map[string]*model.Job, error)
+	GetJobByID                 func(string) (*model.Job, error)
+	GetOwnerIDsByJobIDs        func([]string) ([]string, error)
+	SaveJob                    func(string, *model.Job) error
+	DeleteJobs                 func([]string) error
+	SaveJobs                   func(map[string]*model.Job) error
+	DeleteJobBlobs             func(string)
+	SaveJobBlob                func(string, string, []byte) error
+	MarkJobsTrashedByFolderIDs func(string, []string, float64) error
+	ListAllFoldersByOwner      func(string, bool) ([]model.Folder, error)
+	GetFolderByID              func(string, string) (*model.Folder, error)
+	SetFolderTrashed           func(string, string, bool) error
+	Notify                     func(string, string, map[string]any)
+	Errf                       func(string, error, string, ...any)
 }
 
 // Runtime owns process-local job state, SSE broadcasting, and queue integration.
@@ -49,15 +54,20 @@ func New(cfg Config) *Runtime {
 		setFolderTrashed:      cfg.SetFolderTrashed,
 	}
 	rt.state = newStateStore(stateDeps{
-		Now:            cfg.Now,
-		LoadJobs:       cfg.LoadJobs,
-		SaveJobs:       cfg.SaveJobs,
-		DeleteJobBlobs: cfg.DeleteJobBlobs,
-		SaveJobBlob:    cfg.SaveJobBlob,
-		Notify:         broker.Notify,
-		CancelJob:      rt.CancelJob,
-		RemoveTempWav:  rt.RemoveTempWav,
-		Errf:           cfg.Errf,
+		Now:                        cfg.Now,
+		LoadJobs:                   cfg.LoadJobs,
+		GetJobByID:                 cfg.GetJobByID,
+		GetOwnerIDsByJobIDs:        cfg.GetOwnerIDsByJobIDs,
+		SaveJob:                    cfg.SaveJob,
+		DeleteJobsDB:               cfg.DeleteJobs,
+		SaveJobs:                   cfg.SaveJobs,
+		DeleteJobBlobs:             cfg.DeleteJobBlobs,
+		SaveJobBlob:                cfg.SaveJobBlob,
+		MarkJobsTrashedByFolderIDs: cfg.MarkJobsTrashedByFolderIDs,
+		Notify:                     broker.Notify,
+		CancelJob:                  rt.CancelJob,
+		RemoveTempWav:              rt.RemoveTempWav,
+		Errf:                       cfg.Errf,
 	})
 	return rt
 }
@@ -202,3 +212,28 @@ func (r *Runtime) ReplaceJobPreviewText(id, text string) { r.state.ReplaceJobPre
 
 // UploadedTS returns the uploaded timestamp for sorting and snapshot versioning.
 func (r *Runtime) UploadedTS(id string) float64 { return r.state.UploadedTS(id) }
+
+// UpdateProgress updates volatile in-flight progress in memory and emits notifications without DB writes.
+func (r *Runtime) UpdateProgress(id, phase string, percent int, label string) {
+	r.state.UpdateProgress(id, phase, percent, label)
+}
+
+// TransitionStatus records a lifecycle state transition, persists it to DB, and emits notifications.
+func (r *Runtime) TransitionStatus(id, status string, statusCode int, extraFields map[string]any) {
+	r.state.TransitionStatus(id, status, statusCode, extraFields)
+}
+
+// MutateMetadata applies user metadata changes, persists them to DB, and emits notifications.
+func (r *Runtime) MutateMetadata(id string, fields map[string]any) {
+	r.state.MutateMetadata(id, fields)
+}
+
+// GetActiveJob returns a clone of the job if it is currently in an active or in-flight state.
+func (r *Runtime) GetActiveJob(id string) *model.Job {
+	return r.state.GetActiveJob(id)
+}
+
+// ActiveJobsSnapshot returns a snapshot map of jobs that are currently active in memory.
+func (r *Runtime) ActiveJobsSnapshot() map[string]*model.Job {
+	return r.state.ActiveJobsSnapshot()
+}

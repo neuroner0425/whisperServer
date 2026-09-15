@@ -85,6 +85,28 @@ func newAppServices() appServices {
 			}
 			return out, nil
 		},
+		ListStorageJobItemsByOwner: func(ownerID string) ([]service.StorageJobItem, error) {
+			items, err := store.ListStorageJobItemsByOwner(ownerID)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]service.StorageJobItem, 0, len(items))
+			for _, it := range items {
+				out = append(out, service.StorageJobItem{
+					JobID:       it.JobID,
+					Filename:    it.Filename,
+					FileType:    it.FileType,
+					FolderID:    it.FolderID,
+					IsTrashed:   it.IsTrashed,
+					UploadedTS:  it.UploadedTS,
+					StartedTS:   it.StartedTS,
+					CompletedTS: it.CompletedTS,
+					SizeBytes:   it.SizeBytes,
+					BlobCount:   it.BlobCount,
+				})
+			}
+			return out, nil
+		},
 	})
 	var notify func(string, string, map[string]any)
 	if runtime != nil && runtime.Broker() != nil {
@@ -154,7 +176,7 @@ func newAppServices() appServices {
 		Logf:          procLogf,
 		Errf:          procErrf,
 		OnPhase: func(jobID, phase string, percent int, label string) {
-			runtime.SetJobFields(jobID, map[string]any{"phase": phase, "progress_percent": percent, "progress_label": label})
+			runtime.UpdateProgress(jobID, phase, percent, label)
 		},
 		OnPreviewLine: runtime.AppendJobPreviewLine,
 		OnPreviewText: runtime.ReplaceJobPreviewText,

@@ -161,3 +161,45 @@ JWT_EXP_HOURS=24
 # - Required for HTTPS production deployments.
 # - Browsers will not send Secure cookies over plain HTTP.
 AUTH_COOKIE_SECURE=false
+
+
+###############################################################################
+# Storage (Object Storage / MinIO / AWS S3)
+###############################################################################
+
+# Storage driver type.
+#
+# s3:
+# - Uses MinIO or AWS S3 to store media blobs (audio_aac, pdf_original).
+# - Required settings: S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY.
+#
+# local:
+# - Stores media files in local directory (.run/storage/).
+# - Useful for offline testing without MinIO/S3.
+STORAGE_TYPE=s3
+
+# S3/MinIO endpoint.
+# - Local MinIO: localhost:9000
+# - AWS S3: s3.ap-northeast-2.amazonaws.com (or empty for default AWS endpoint)
+S3_ENDPOINT=localhost:9000
+
+# S3 region.
+# - Local MinIO: us-east-1
+# - AWS S3: e.g. ap-northeast-2
+S3_REGION=us-east-1
+
+# S3 bucket name.
+# The bucket is created automatically on startup if it does not already exist.
+S3_BUCKET=whisper-blobs
+
+# S3 Access Key ID (or MinIO root username).
+S3_ACCESS_KEY_ID=test
+
+# S3 Secret Access Key (or MinIO root password).
+S3_SECRET_ACCESS_KEY=test1234!
+
+# Whether to use SSL (HTTPS).
+# - false: For local MinIO over plain HTTP.
+# - true: For AWS S3 or MinIO over HTTPS.
+S3_USE_SSL=false
+
