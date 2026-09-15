@@ -18,10 +18,12 @@ type TrashHandlers struct {
 
 	BuildJobRowsForUser func(userID, q, tag, folderID string, trashed bool) []JobRow
 
-	JobsSnapshot func() map[string]*model.Job
-	GetJob       func(string) *model.Job
-	SetJobFields func(string, map[string]any)
-	DeleteJobsFn func([]string)
+	JobsSnapshot        func() map[string]*model.Job
+	ListTrashedJobIDs   func(ownerID string) ([]string, error)
+	FilterJobIDsByOwner func(ownerID string, ids []string, trashedOnly bool) ([]string, error)
+	GetJob              func(string) *model.Job
+	SetJobFields        func(string, map[string]any)
+	DeleteJobsFn        func([]string)
 
 	EnqueueTranscribe func(string)
 	EnqueueRefine     func(string)
@@ -39,6 +41,7 @@ type TrashHandlers struct {
 // List returns trashed jobs together with trashed folders for the current user.
 func (h TrashHandlers) List() echo.HandlerFunc {
 	return func(c echo.Context) error {
+		disableCache(c)
 		if h.CurrentUserOrUnauthorized == nil || h.FolderSvc == nil || h.BuildJobRowsForUser == nil {
 			return c.NoContent(http.StatusServiceUnavailable)
 		}
@@ -52,6 +55,31 @@ func (h TrashHandlers) List() echo.HandlerFunc {
 			"job_items": rows,
 			"folders":   folders,
 		})
+	}
+}
+
+// RestoreFolder restores a trashed folder and notifies the file browser.
+func (h TrashHandlers) RestoreFolder() echo.HandlerFunc {
+	return func(c echo.Context) error {
+		if h.CurrentUserOrUnauthorized == nil || h.NotifyFilesChanged == nil || h.FolderSvc == nil {
+			return c.NoContent(http.StatusServiceUnavailable)
+		}
+		u, ok := h.CurrentUserOrUnauthorized(c)
+		if !ok || u == nil {
+			return nil
+		}
+		folderID := strings.TrimSpace(c.Param("folder_id"))
+		f, err := h.FolderSvc.Restore(u.ID, folderID)
+		if err != nil {
+			return toEchoHTTPError(err, http.StatusBadRequest, "폴더 복구 실패")
+		}
+		if f != nil {
+			if err := h.FolderSvc.TouchAncestors(u.ID, f.ParentID); err != nil && h.Errf != nil {
+				h.Errf("api.folder.restoreTouchParent", err, "owner_id=%s folder_id=%s parent_id=%s", u.ID, folderID, f.ParentID)
+			}
+		}
+		h.NotifyFilesChanged(u.ID)
+		return c.JSON(http.StatusOK, map[string]string{"folder_id": folderID, "status": "restored"})
 	}
 }
 
@@ -91,39 +119,17 @@ func (h TrashHandlers) RestoreJob() echo.HandlerFunc {
 		if err := h.FolderSvc.TouchAncestors(u.ID, folderID); err != nil && h.Errf != nil {
 			h.Errf("api.job.restoreTouchFolder", err, "owner_id=%s job_id=%s folder_id=%s", u.ID, jobID, folderID)
 		}
+		if h.NotifyFilesChanged != nil {
+			h.NotifyFilesChanged(u.ID)
+		}
 		return c.JSON(http.StatusOK, map[string]string{"job_id": jobID, "status": "restored"})
-	}
-}
-
-// RestoreFolder restores a trashed folder and notifies the file browser.
-func (h TrashHandlers) RestoreFolder() echo.HandlerFunc {
-	return func(c echo.Context) error {
-		if h.CurrentUserOrUnauthorized == nil || h.NotifyFilesChanged == nil || h.FolderSvc == nil {
-			return c.NoContent(http.StatusServiceUnavailable)
-		}
-		u, ok := h.CurrentUserOrUnauthorized(c)
-		if !ok || u == nil {
-			return nil
-		}
-		folderID := strings.TrimSpace(c.Param("folder_id"))
-		f, err := h.FolderSvc.Restore(u.ID, folderID)
-		if err != nil {
-			return toEchoHTTPError(err, http.StatusBadRequest, "폴더 복구 실패")
-		}
-		if f != nil {
-			if err := h.FolderSvc.TouchAncestors(u.ID, f.ParentID); err != nil && h.Errf != nil {
-				h.Errf("api.folder.restoreTouchParent", err, "owner_id=%s folder_id=%s parent_id=%s", u.ID, folderID, f.ParentID)
-			}
-		}
-		h.NotifyFilesChanged(u.ID)
-		return c.JSON(http.StatusOK, map[string]string{"folder_id": folderID, "status": "restored"})
 	}
 }
 
 // Clear permanently removes every trashed job and folder owned by the user.
 func (h TrashHandlers) Clear() echo.HandlerFunc {
 	return func(c echo.Context) error {
-		if h.CurrentUserOrUnauthorized == nil || h.FolderSvc == nil || h.JobsSnapshot == nil || h.DeleteJobsFn == nil || h.NotifyFilesChanged == nil {
+		if h.CurrentUserOrUnauthorized == nil || h.FolderSvc == nil || (h.JobsSnapshot == nil && h.ListTrashedJobIDs == nil) || h.DeleteJobsFn == nil || h.NotifyFilesChanged == nil {
 			return c.NoContent(http.StatusServiceUnavailable)
 		}
 		u, ok := h.CurrentUserOrUnauthorized(c)
@@ -131,14 +137,21 @@ func (h TrashHandlers) Clear() echo.HandlerFunc {
 			return nil
 		}
 
-		// Collect job IDs from the in-memory snapshot before deleting blobs and rows.
-		snapshot := h.JobsSnapshot()
-		toDelete := make([]string, 0)
-		for id, job := range snapshot {
-			if job != nil && job.OwnerID == u.ID && job.IsTrashed {
-				toDelete = append(toDelete, id)
+		var toDelete []string
+		if h.ListTrashedJobIDs != nil {
+			ids, err := h.ListTrashedJobIDs(u.ID)
+			if err == nil {
+				toDelete = ids
+			}
+		} else if h.JobsSnapshot != nil {
+			snapshot := h.JobsSnapshot()
+			for id, job := range snapshot {
+				if job != nil && job.OwnerID == u.ID && job.IsTrashed {
+					toDelete = append(toDelete, id)
+				}
 			}
 		}
+
 		h.DeleteJobsFn(toDelete)
 		if err := h.FolderSvc.DeleteTrashed(u.ID); err != nil {
 			return toEchoHTTPError(err, http.StatusInternalServerError, "휴지통 비우기 실패")
@@ -154,7 +167,7 @@ func (h TrashHandlers) Clear() echo.HandlerFunc {
 // DeleteTrashJobs permanently deletes only the selected trashed jobs.
 func (h TrashHandlers) DeleteTrashJobs() echo.HandlerFunc {
 	return func(c echo.Context) error {
-		if h.CurrentUserOrUnauthorized == nil || h.JobsSnapshot == nil || h.DeleteJobsFn == nil || h.NotifyFilesChanged == nil {
+		if h.CurrentUserOrUnauthorized == nil || (h.JobsSnapshot == nil && h.GetJob == nil && h.FilterJobIDsByOwner == nil) || h.DeleteJobsFn == nil || h.NotifyFilesChanged == nil {
 			return c.NoContent(http.StatusServiceUnavailable)
 		}
 		u, ok := h.CurrentUserOrUnauthorized(c)
@@ -169,15 +182,34 @@ func (h TrashHandlers) DeleteTrashJobs() echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusBadRequest, "잘못된 요청입니다.")
 		}
 
-		snapshot := h.JobsSnapshot()
-		toDelete := make([]string, 0, len(body.JobIDs))
-		for _, id := range body.JobIDs {
-			id = strings.TrimSpace(id)
-			job := snapshot[id]
-			if job == nil || job.OwnerID != u.ID || !job.IsTrashed {
-				continue
+		cleanIDs := make([]string, 0, len(body.JobIDs))
+		for _, rawID := range body.JobIDs {
+			if id := strings.TrimSpace(rawID); id != "" {
+				cleanIDs = append(cleanIDs, id)
 			}
-			toDelete = append(toDelete, id)
+		}
+
+		var toDelete []string
+		if h.FilterJobIDsByOwner != nil {
+			matched, err := h.FilterJobIDsByOwner(u.ID, cleanIDs, true)
+			if err != nil {
+				return echo.NewHTTPError(http.StatusInternalServerError, "삭제 대상 조회에 실패했습니다.")
+			}
+			toDelete = matched
+		} else {
+			for _, id := range cleanIDs {
+				if h.GetJob != nil {
+					job := h.GetJob(id)
+					if job != nil && job.OwnerID == u.ID && job.IsTrashed {
+						toDelete = append(toDelete, id)
+					}
+				} else if h.JobsSnapshot != nil {
+					job := h.JobsSnapshot()[id]
+					if job != nil && job.OwnerID == u.ID && job.IsTrashed {
+						toDelete = append(toDelete, id)
+					}
+				}
+			}
 		}
 
 		h.DeleteJobsFn(toDelete)
@@ -192,7 +224,7 @@ func (h TrashHandlers) DeleteTrashJobs() echo.HandlerFunc {
 // DeleteJobs permanently deletes selected jobs owned by the user, regardless of trash state.
 func (h TrashHandlers) DeleteJobs() echo.HandlerFunc {
 	return func(c echo.Context) error {
-		if h.CurrentUserOrUnauthorized == nil || h.JobsSnapshot == nil || h.DeleteJobsFn == nil || h.NotifyFilesChanged == nil {
+		if h.CurrentUserOrUnauthorized == nil || (h.JobsSnapshot == nil && h.GetJob == nil && h.FilterJobIDsByOwner == nil) || h.DeleteJobsFn == nil || h.NotifyFilesChanged == nil {
 			return c.NoContent(http.StatusServiceUnavailable)
 		}
 		u, ok := h.CurrentUserOrUnauthorized(c)
@@ -207,15 +239,34 @@ func (h TrashHandlers) DeleteJobs() echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusBadRequest, "잘못된 요청입니다.")
 		}
 
-		snapshot := h.JobsSnapshot()
-		toDelete := make([]string, 0, len(body.JobIDs))
-		for _, id := range body.JobIDs {
-			id = strings.TrimSpace(id)
-			job := snapshot[id]
-			if job == nil || job.OwnerID != u.ID {
-				continue
+		cleanIDs := make([]string, 0, len(body.JobIDs))
+		for _, rawID := range body.JobIDs {
+			if id := strings.TrimSpace(rawID); id != "" {
+				cleanIDs = append(cleanIDs, id)
 			}
-			toDelete = append(toDelete, id)
+		}
+
+		var toDelete []string
+		if h.FilterJobIDsByOwner != nil {
+			matched, err := h.FilterJobIDsByOwner(u.ID, cleanIDs, false)
+			if err != nil {
+				return echo.NewHTTPError(http.StatusInternalServerError, "삭제 대상 조회에 실패했습니다.")
+			}
+			toDelete = matched
+		} else {
+			for _, id := range cleanIDs {
+				if h.GetJob != nil {
+					job := h.GetJob(id)
+					if job != nil && job.OwnerID == u.ID {
+						toDelete = append(toDelete, id)
+					}
+				} else if h.JobsSnapshot != nil {
+					job := h.JobsSnapshot()[id]
+					if job != nil && job.OwnerID == u.ID {
+						toDelete = append(toDelete, id)
+					}
+				}
+			}
 		}
 
 		h.DeleteJobsFn(toDelete)

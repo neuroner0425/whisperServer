@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -17,6 +18,7 @@ type StorageHandlers struct {
 
 	CurrentUserOrUnauthorized func(echo.Context) (*User, bool)
 	JobsSnapshot              func() map[string]*model.Job
+	GetJob                    func(string) *model.Job
 	StorageSvc                *service.StorageService
 	FolderSvc                 *service.FolderService
 }
@@ -35,7 +37,7 @@ type storageItem struct {
 func (h StorageHandlers) Handler() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		disableCache(c)
-		if h.CurrentUserOrUnauthorized == nil || h.JobsSnapshot == nil || h.StorageSvc == nil || h.FolderSvc == nil {
+		if h.CurrentUserOrUnauthorized == nil || (h.JobsSnapshot == nil && h.GetJob == nil) || h.StorageSvc == nil || h.FolderSvc == nil {
 			return c.NoContent(http.StatusServiceUnavailable)
 		}
 
@@ -44,42 +46,84 @@ func (h StorageHandlers) Handler() echo.HandlerFunc {
 			return nil
 		}
 
-		usages, err := h.StorageSvc.UsageByOwner(u.ID)
-		if err != nil {
-			return toEchoHTTPError(err, http.StatusInternalServerError, "저장용량 정보를 불러오지 못했습니다.")
-		}
-
 		allFolders, _ := h.FolderSvc.ListAll(u.ID, false)
 		folderMap := make(map[string]string, len(allFolders))
 		for _, folder := range allFolders {
 			folderMap[folder.ID] = folder.Name
 		}
 
-		snapshot := h.JobsSnapshot()
-		items := make([]storageItem, 0, len(usages))
+		var items []storageItem
 		var usedBytes int64
-		for _, usage := range usages {
-			job := snapshot[usage.JobID]
-			if job == nil || job.OwnerID != u.ID {
-				continue
-			}
-			folderName := "내 파일"
-			if job.IsTrashed {
-				folderName = "휴지통"
-			} else if folderID := strings.TrimSpace(job.FolderID); folderID != "" {
-				if name, ok := folderMap[folderID]; ok {
-					folderName = name
+
+		// 1. Try single bulk query (N+1 query elimination)
+		storageItems, err := h.StorageSvc.ListStorageItemsByOwner(u.ID)
+		if err != nil {
+			return toEchoHTTPError(err, http.StatusInternalServerError, "저장용량 정보를 불러오지 못했습니다.")
+		}
+
+		if storageItems != nil {
+			items = make([]storageItem, 0, len(storageItems))
+			for _, row := range storageItems {
+				folderName := "내 파일"
+				if row.IsTrashed {
+					folderName = "휴지통"
+				} else if folderID := strings.TrimSpace(row.FolderID); folderID != "" {
+					if name, ok := folderMap[folderID]; ok {
+						folderName = name
+					}
 				}
+				items = append(items, storageItem{
+					ID:         row.JobID,
+					Filename:   row.Filename,
+					FileType:   row.FileType,
+					FolderName: folderName,
+					UpdatedAt:  formatStorageTS(row.CompletedTS, row.StartedTS, row.UploadedTS),
+					SizeBytes:  row.SizeBytes,
+				})
+				usedBytes += row.SizeBytes
 			}
-			items = append(items, storageItem{
-				ID:         usage.JobID,
-				Filename:   job.Filename,
-				FileType:   job.FileType,
-				FolderName: folderName,
-				UpdatedAt:  storageItemUpdatedAt(job),
-				SizeBytes:  usage.Bytes,
-			})
-			usedBytes += usage.Bytes
+		} else {
+			// Fallback for mock/legacy deps
+			usages, err := h.StorageSvc.UsageByOwner(u.ID)
+			if err != nil {
+				return toEchoHTTPError(err, http.StatusInternalServerError, "저장용량 정보를 불러오지 못했습니다.")
+			}
+
+			var snapshot map[string]*model.Job
+			if h.JobsSnapshot != nil {
+				snapshot = h.JobsSnapshot()
+			}
+
+			items = make([]storageItem, 0, len(usages))
+			for _, usage := range usages {
+				var job *model.Job
+				if snapshot != nil {
+					job = snapshot[usage.JobID]
+				}
+				if job == nil && h.GetJob != nil {
+					job = h.GetJob(usage.JobID)
+				}
+				if job == nil || job.OwnerID != u.ID {
+					continue
+				}
+				folderName := "내 파일"
+				if job.IsTrashed {
+					folderName = "휴지통"
+				} else if folderID := strings.TrimSpace(job.FolderID); folderID != "" {
+					if name, ok := folderMap[folderID]; ok {
+						folderName = name
+					}
+				}
+				items = append(items, storageItem{
+					ID:         usage.JobID,
+					Filename:   job.Filename,
+					FileType:   job.FileType,
+					FolderName: folderName,
+					UpdatedAt:  storageItemUpdatedAt(job),
+					SizeBytes:  usage.Bytes,
+				})
+				usedBytes += usage.Bytes
+			}
 		}
 
 		sort.Slice(items, func(i, j int) bool {
@@ -116,6 +160,21 @@ func storageItemUpdatedAt(job *model.Job) string {
 		return job.StartedAt
 	}
 	return job.UploadedAt
+}
+
+// formatStorageTS formats the best available timestamp into the display format.
+func formatStorageTS(completedTS, startedTS, uploadedTS float64) string {
+	ts := completedTS
+	if ts <= 0 {
+		ts = startedTS
+	}
+	if ts <= 0 {
+		ts = uploadedTS
+	}
+	if ts <= 0 {
+		return ""
+	}
+	return time.Unix(int64(ts), 0).Format("2006-01-02 15:04:05")
 }
 
 // maxInt64 returns the larger of two int64 values.

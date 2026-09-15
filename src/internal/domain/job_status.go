@@ -79,3 +79,37 @@ func JobStatusCode(name string) int {
 		return 0
 	}
 }
+
+// IsActiveStatusCode reports whether the status code represents an active/in-flight job.
+func IsActiveStatusCode(code int) bool {
+	switch code {
+	case JobStatusPendingCode, JobStatusRunningCode, JobStatusRefiningPendingCode, JobStatusRefiningCode:
+		return true
+	default:
+		return false
+	}
+}
+
+// JobPhase returns a display phase label derived from the status code.
+func JobPhase(statusCode int) string {
+	switch statusCode {
+	case JobStatusRunningCode:
+		return "전사 중"
+	case JobStatusRefiningPendingCode:
+		return "정제 대기 중"
+	case JobStatusRefiningCode:
+		return "정제 중"
+	case JobStatusCompletedCode:
+		return JobStatusName(statusCode)
+	case JobStatusFailedCode,
+		JobStatusAudioConvertFailedCode,
+		JobStatusPDFConvertFailedCode,
+		JobStatusTranscribeFailedCode,
+		JobStatusRefineFailedCode,
+		JobStatusPDFExtractFailedCode,
+		JobStatusCopyrightBlockedCode:
+		return JobStatusName(statusCode)
+	default:
+		return "대기 중"
+	}
+}

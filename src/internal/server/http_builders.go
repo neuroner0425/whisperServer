@@ -15,6 +15,9 @@ import (
 func newFilesQuery() filequery.Query {
 	return filequery.Query{
 		JobsSnapshot:           jobsSnapshot,
+		GetActiveJob:           appRuntime.GetActiveJob,
+		QueryJobsPaged:         store.QueryJobsPaged,
+		JobBlobUsageMapForJobs: store.JobBlobUsageMapForJobIDs,
 		UploadedTS:             appRuntime.UploadedTS,
 		ListAllFoldersByOwner:  store.ListAllFoldersByOwner,
 		JobBlobUsageMapByOwner: store.JobBlobUsageMapByOwner,

@@ -69,6 +69,7 @@ func buildRouteHandlers(svc appServices, spaIndex echo.HandlerFunc) httptranspor
 			CurrentUserName:           currentUserName,
 			FolderSvc:                 svc.folderSvc,
 			TagSvc:                    svc.tagSvc,
+			BuildPagedJobRows:         filesQ.BuildPagedJobRowsForUser,
 			BuildRecentJobRows:        filesQ.BuildRecentJobRowsForUser,
 			BuildJobRows:              filesQ.BuildJobRowsForUser,
 			BuildFolderRows:           filesQ.BuildFolderRowsForUser,
@@ -86,6 +87,7 @@ func buildRouteHandlers(svc appServices, spaIndex echo.HandlerFunc) httptranspor
 			CapacityBytes:             10 * 1024 * 1024 * 1024,
 			CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized,
 			JobsSnapshot:              jobsSnapshot,
+			GetJob:                    svc.runtime.GetJob,
 			StorageSvc:                svc.storageSvc,
 			FolderSvc:                 svc.folderSvc,
 		}.Handler(),
@@ -112,18 +114,36 @@ func buildRouteHandlers(svc appServices, spaIndex echo.HandlerFunc) httptranspor
 		APITagsDelete:      httptransport.TagsHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, TagSvc: svc.tagSvc, RemoveTagFromOwnerJobs: svc.runtime.RemoveTagFromOwnerJobs, Logf: procLogf, Errf: procErrf}.Delete(),
 		APIUpdateJobTags:   httptransport.TagsHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, TagSvc: svc.tagSvc, GetJob: svc.runtime.GetJob, SetJobFields: svc.runtime.SetJobFields, Logf: procLogf, Errf: procErrf}.UpdateJobTags(),
 		APITrashList:       httptransport.TrashHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, FolderSvc: svc.folderSvc, BlobSvc: svc.blobSvc, BuildJobRowsForUser: filesQ.BuildJobRowsForUser}.List(),
-		APITrashClear:      httptransport.TrashHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, FolderSvc: svc.folderSvc, BlobSvc: svc.blobSvc, JobsSnapshot: jobsSnapshot, DeleteJobsFn: svc.runtime.DeleteJobs, NotifyFilesChanged: svc.lifecycle.NotifyFilesChanged}.Clear(),
-		APITrashJobsDelete: httptransport.TrashHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, FolderSvc: svc.folderSvc, BlobSvc: svc.blobSvc, JobsSnapshot: jobsSnapshot, DeleteJobsFn: svc.runtime.DeleteJobs, NotifyFilesChanged: svc.lifecycle.NotifyFilesChanged}.DeleteTrashJobs(),
-		APIJobsDelete:      httptransport.TrashHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, JobsSnapshot: jobsSnapshot, DeleteJobsFn: svc.runtime.DeleteJobs, NotifyFilesChanged: svc.lifecycle.NotifyFilesChanged}.DeleteJobs(),
+		APITrashClear:      httptransport.TrashHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, FolderSvc: svc.folderSvc, BlobSvc: svc.blobSvc, JobsSnapshot: jobsSnapshot, ListTrashedJobIDs: store.ListTrashedJobIDs, DeleteJobsFn: svc.runtime.DeleteJobs, NotifyFilesChanged: svc.lifecycle.NotifyFilesChanged}.Clear(),
+		APITrashJobsDelete: httptransport.TrashHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, FolderSvc: svc.folderSvc, BlobSvc: svc.blobSvc, JobsSnapshot: jobsSnapshot, GetJob: svc.runtime.GetJob, FilterJobIDsByOwner: store.FilterJobIDsByOwner, DeleteJobsFn: svc.runtime.DeleteJobs, NotifyFilesChanged: svc.lifecycle.NotifyFilesChanged}.DeleteTrashJobs(),
+		APIJobsDelete:      httptransport.TrashHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, JobsSnapshot: jobsSnapshot, GetJob: svc.runtime.GetJob, FilterJobIDsByOwner: store.FilterJobIDsByOwner, DeleteJobsFn: svc.runtime.DeleteJobs, NotifyFilesChanged: svc.lifecycle.NotifyFilesChanged}.DeleteJobs(),
 		APIRestoreJob:      httptransport.TrashHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, FolderSvc: svc.folderSvc, BlobSvc: svc.blobSvc, GetJob: svc.runtime.GetJob, SetJobFields: svc.runtime.SetJobFields, EnqueueTranscribe: svc.runtime.EnqueueTranscribe, EnqueueRefine: svc.runtime.EnqueueRefine, EnqueuePDFExtract: svc.runtime.EnqueuePDFExtract, StatusPending: statusPending, StatusRefiningPending: statusRefiningPending, Logf: procLogf, Errf: procErrf}.RestoreJob(),
 		APIRestoreFolder:   httptransport.TrashHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, FolderSvc: svc.folderSvc, NotifyFilesChanged: svc.lifecycle.NotifyFilesChanged, Errf: procErrf}.RestoreFolder(),
 		APIBatchMove:       httptransport.MoveHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, FolderSvc: svc.folderSvc, GetJob: svc.runtime.GetJob, SetJobFields: svc.runtime.SetJobFields, NotifyFilesChanged: svc.lifecycle.NotifyFilesChanged, Errf: procErrf}.BatchMove(),
-		APIDownloadFolder:  httptransport.FolderDownloadHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, JobsSnapshot: jobsSnapshot, CollectFolderSubtree: collectFolderSubtree, StatusCompleted: statusCompleted, FolderSvc: svc.folderSvc, BlobSvc: svc.blobSvc}.Handler(),
-		APIUpload:          uploadH.PostJSON(),
-		APICreateFolder:    httptransport.FolderMutationHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, FolderSvc: svc.folderSvc, NotifyFilesChanged: svc.lifecycle.NotifyFilesChanged, Errf: procErrf}.Create(),
-		APIRenameFolder:    httptransport.FolderMutationHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, FolderSvc: svc.folderSvc, NotifyFilesChanged: svc.lifecycle.NotifyFilesChanged, Errf: procErrf}.Rename(),
-		APITrashFolder:     httptransport.FolderMutationHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, FolderSvc: svc.folderSvc, NotifyFilesChanged: svc.lifecycle.NotifyFilesChanged, CollectFolderSubtree: collectFolderSubtree, JobsSnapshot: jobsSnapshot, DeleteJobsFn: svc.runtime.DeleteJobs, Errf: procErrf}.Trash(),
-		APIRenameJob:       httptransport.JobMutationHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, FolderSvc: svc.folderSvc, GetJob: svc.runtime.GetJob, SetJobFields: svc.runtime.SetJobFields}.Rename(),
-		APITrashJob:        httptransport.JobMutationHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, FolderSvc: svc.folderSvc, GetJob: svc.runtime.GetJob, MarkJobTrashed: svc.lifecycle.MarkTrashed, Errf: procErrf}.Trash(),
+		APIDownloadFolder: httptransport.FolderDownloadHandlers{
+			CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized,
+			JobsSnapshot:              jobsSnapshot,
+			ListCompletedJobsByFolderIDs: func(ownerID string, folderIDs []string) ([]httptransport.CompletedJobRecord, error) {
+				recs, err := store.ListCompletedJobsByFolderIDs(ownerID, folderIDs)
+				if err != nil {
+					return nil, err
+				}
+				out := make([]httptransport.CompletedJobRecord, len(recs))
+				for i, r := range recs {
+					out[i] = httptransport.CompletedJobRecord{ID: r.ID, Job: r.Job}
+				}
+				return out, nil
+			},
+			CollectFolderSubtree: collectFolderSubtree,
+			StatusCompleted:      statusCompleted,
+			FolderSvc:            svc.folderSvc,
+			BlobSvc:              svc.blobSvc,
+		}.Handler(),
+		APIUpload:       uploadH.PostJSON(),
+		APICreateFolder: httptransport.FolderMutationHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, FolderSvc: svc.folderSvc, NotifyFilesChanged: svc.lifecycle.NotifyFilesChanged, Errf: procErrf}.Create(),
+		APIRenameFolder: httptransport.FolderMutationHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, FolderSvc: svc.folderSvc, NotifyFilesChanged: svc.lifecycle.NotifyFilesChanged, Errf: procErrf}.Rename(),
+		APITrashFolder:  httptransport.FolderMutationHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, FolderSvc: svc.folderSvc, NotifyFilesChanged: svc.lifecycle.NotifyFilesChanged, CollectFolderSubtree: collectFolderSubtree, JobsSnapshot: jobsSnapshot, ListJobIDsByFolderIDs: store.ListJobIDsByFolderIDs, DeleteJobsFn: svc.runtime.DeleteJobs, Errf: procErrf}.Trash(),
+		APIRenameJob:    httptransport.JobMutationHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, FolderSvc: svc.folderSvc, GetJob: svc.runtime.GetJob, SetJobFields: svc.runtime.SetJobFields}.Rename(),
+		APITrashJob:     httptransport.JobMutationHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, FolderSvc: svc.folderSvc, GetJob: svc.runtime.GetJob, MarkJobTrashed: svc.lifecycle.MarkTrashed, Errf: procErrf}.Trash(),
 	}
 }

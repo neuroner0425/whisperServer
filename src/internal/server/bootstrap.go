@@ -39,6 +39,10 @@ func NewBootstrap() (*Bootstrap, error) {
 
 	procLogf("[BOOT] config source=%s", configPath)
 	store.ConfigureLogging(procLogf, procErrf)
+	if err := initStorageRuntime(); err != nil {
+		closeProcessingLogger()
+		return nil, fmt.Errorf("storage init failed: %w", err)
+	}
 	if err := store.InitWithFilename(projectRoot, dbFilenameForRunMode()); err != nil {
 		closeProcessingLogger()
 		return nil, fmt.Errorf("db init failed: %w", err)
@@ -47,18 +51,23 @@ func NewBootstrap() (*Bootstrap, error) {
 	initAuthRuntime()
 	procLogf("[BOOT] application start")
 
-	// Build the process-local runtime around the persisted job snapshot.
+	// Build the process-local runtime around the active job cache.
 	appRuntime = intruntime.New(intruntime.Config{
-		TmpFolder:             tmpFolder,
-		Now:                   time.Now,
-		LoadJobs:              store.LoadJobs,
-		SaveJobs:              store.SaveJobs,
-		DeleteJobBlobs:        store.DeleteJobBlobs,
-		SaveJobBlob:           store.SaveJobBlob,
-		ListAllFoldersByOwner: store.ListAllFoldersByOwner,
-		GetFolderByID:         store.GetFolderByID,
-		SetFolderTrashed:      store.SetFolderTrashed,
-		Errf:                  procErrf,
+		TmpFolder:                  tmpFolder,
+		Now:                        time.Now,
+		LoadJobs:                   store.LoadActiveJobs,
+		GetJobByID:                 store.GetJobByID,
+		GetOwnerIDsByJobIDs:        store.GetOwnerIDsByJobIDs,
+		SaveJob:                    store.SaveJob,
+		DeleteJobs:                 store.DeleteJobs,
+		SaveJobs:                   store.SaveJobs,
+		DeleteJobBlobs:             store.DeleteJobBlobs,
+		SaveJobBlob:                store.SaveJobBlob,
+		MarkJobsTrashedByFolderIDs: store.MarkJobsTrashedByFolderIDs,
+		ListAllFoldersByOwner:      store.ListAllFoldersByOwner,
+		GetFolderByID:              store.GetFolderByID,
+		SetFolderTrashed:           store.SetFolderTrashed,
+		Errf:                       procErrf,
 	})
 	appRuntime.LoadJobs()
 	appRuntime.CleanupInactiveTempWavs()

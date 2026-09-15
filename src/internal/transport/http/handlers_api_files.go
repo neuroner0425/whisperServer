@@ -15,6 +15,7 @@ type FilesHandlers struct {
 	FolderSvc                 *service.FolderService
 	TagSvc                    *service.TagService
 
+	BuildPagedJobRows  func(params PagedJobQueryParams) (PagedJobRowsResult, error)
 	BuildRecentJobRows func(userID, q, tag string) []JobRow
 	BuildJobRows       func(userID, q, tag, folderID string, trashed bool) []JobRow
 	BuildFolderRows    func(userID, folderID, q string) []FolderRow
@@ -38,14 +39,12 @@ func (h FilesHandlers) Handler() echo.HandlerFunc {
 			h.CurrentUserName == nil ||
 			h.FolderSvc == nil ||
 			h.TagSvc == nil ||
-			h.BuildRecentJobRows == nil ||
-			h.BuildJobRows == nil ||
 			h.BuildFolderRows == nil ||
 			h.RecentFolderRows == nil ||
-			h.SortJobRows == nil ||
-			h.SortFolderRows == nil ||
-			h.PaginateRows == nil ||
 			h.SnapshotVersion == nil {
+			return c.NoContent(http.StatusServiceUnavailable)
+		}
+		if h.BuildPagedJobRows == nil && (h.BuildRecentJobRows == nil || h.BuildJobRows == nil || h.SortJobRows == nil || h.PaginateRows == nil) {
 			return c.NoContent(http.StatusServiceUnavailable)
 		}
 
@@ -83,24 +82,55 @@ func (h FilesHandlers) Handler() echo.HandlerFunc {
 			}
 		}
 
-		// Build the requested row set for the active view.
-		rows := h.BuildRecentJobRows(u.ID, q, tag)
 		folderItems := []FolderRow{}
 		if view == "explore" {
-			rows = h.BuildJobRows(u.ID, q, tag, folderID, false)
 			folderItems = h.BuildFolderRows(u.ID, folderID, q)
 			h.SortFolderRows(folderItems, sortBy, sortOrder)
 		} else if view == "home" {
 			folderItems = h.RecentFolderRows(u.ID)
 		}
-		// Apply ordering and page slicing before producing a versioned response.
-		h.SortJobRows(rows, sortBy, sortOrder)
-		pagedRows, page, totalPages := h.PaginateRows(rows, page, pageSize)
-		totalItems := len(rows)
-		if view == "home" {
-			page = 1
-			totalPages = 1
-			totalItems = len(pagedRows)
+
+		var pagedRows []JobRow
+		var totalItems, totalPages int
+
+		if h.BuildPagedJobRows != nil {
+			pagedRes, err := h.BuildPagedJobRows(PagedJobQueryParams{
+				UserID:       u.ID,
+				FolderID:     folderID,
+				FilterFolder: (view == "explore"),
+				IsTrashed:    false,
+				SearchQuery:  q,
+				Tag:          tag,
+				SortBy:       sortBy,
+				SortOrder:    sortOrder,
+				Page:         page,
+				PageSize:     pageSize,
+			})
+			if err != nil {
+				return toEchoHTTPError(err, http.StatusInternalServerError, "파일 목록을 불러오지 못했습니다.")
+			}
+			pagedRows = pagedRes.Rows
+			totalItems = pagedRes.TotalItems
+			totalPages = pagedRes.TotalPages
+			page = pagedRes.Page
+			if view == "home" {
+				page = 1
+				totalPages = 1
+				totalItems = len(pagedRows)
+			}
+		} else {
+			rows := h.BuildRecentJobRows(u.ID, q, tag)
+			if view == "explore" {
+				rows = h.BuildJobRows(u.ID, q, tag, folderID, false)
+			}
+			h.SortJobRows(rows, sortBy, sortOrder)
+			pagedRows, page, totalPages = h.PaginateRows(rows, page, pageSize)
+			totalItems = len(rows)
+			if view == "home" {
+				page = 1
+				totalPages = 1
+				totalItems = len(pagedRows)
+			}
 		}
 		snapshotVersion := h.SnapshotVersion(pagedRows, folderItems, page, pageSize, totalPages, totalItems)
 		clientVersion := strings.TrimSpace(c.QueryParam("v"))

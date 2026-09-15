@@ -19,6 +19,7 @@ type FolderMutationHandlers struct {
 	CollectFolderSubtree   func(userID string, folderIDs []string, trashFolders bool) map[string]struct{}
 	MarkSubtreeJobsTrashed func(userID string, subtree map[string]struct{})
 	JobsSnapshot           func() map[string]*model.Job
+	ListJobIDsByFolderIDs  func(ownerID string, folderIDs []string) ([]string, error)
 	DeleteJobsFn           func([]string)
 
 	Errf func(scope string, err error, format string, args ...any)
@@ -102,7 +103,7 @@ func (h FolderMutationHandlers) Rename() echo.HandlerFunc {
 // Trash permanently deletes a folder subtree and all jobs inside it.
 func (h FolderMutationHandlers) Trash() echo.HandlerFunc {
 	return func(c echo.Context) error {
-		if h.CurrentUserOrUnauthorized == nil || h.NotifyFilesChanged == nil || h.CollectFolderSubtree == nil || h.JobsSnapshot == nil || h.DeleteJobsFn == nil || h.FolderSvc == nil {
+		if h.CurrentUserOrUnauthorized == nil || h.NotifyFilesChanged == nil || h.CollectFolderSubtree == nil || (h.JobsSnapshot == nil && h.ListJobIDsByFolderIDs == nil) || h.DeleteJobsFn == nil || h.FolderSvc == nil {
 			return c.NoContent(http.StatusServiceUnavailable)
 		}
 		u, ok := h.CurrentUserOrUnauthorized(c)
@@ -112,13 +113,25 @@ func (h FolderMutationHandlers) Trash() echo.HandlerFunc {
 		folderID := c.Param("folder_id")
 		f, _ := h.FolderSvc.Require(u.ID, folderID, true, http.StatusBadRequest, "폴더 삭제 실패")
 		subtree := h.CollectFolderSubtree(u.ID, []string{folderID}, false)
-		jobIDs := make([]string, 0)
-		for id, job := range h.JobsSnapshot() {
-			if job == nil || job.OwnerID != u.ID {
-				continue
+
+		var jobIDs []string
+		if h.ListJobIDsByFolderIDs != nil {
+			fIDs := make([]string, 0, len(subtree))
+			for fid := range subtree {
+				fIDs = append(fIDs, fid)
 			}
-			if _, ok := subtree[strings.TrimSpace(job.FolderID)]; ok {
-				jobIDs = append(jobIDs, id)
+			ids, err := h.ListJobIDsByFolderIDs(u.ID, fIDs)
+			if err == nil {
+				jobIDs = ids
+			}
+		} else if h.JobsSnapshot != nil {
+			for id, job := range h.JobsSnapshot() {
+				if job == nil || job.OwnerID != u.ID {
+					continue
+				}
+				if _, ok := subtree[strings.TrimSpace(job.FolderID)]; ok {
+					jobIDs = append(jobIDs, id)
+				}
 			}
 		}
 		h.DeleteJobsFn(jobIDs)

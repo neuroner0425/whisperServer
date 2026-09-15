@@ -40,6 +40,14 @@ type Config struct {
 	PDFContextMaxChars  int
 	PDFToolPDFInfo      string
 	PDFToolPDFToPPM     string
+
+	StorageType       string
+	S3Endpoint        string
+	S3Region          string
+	S3Bucket          string
+	S3AccessKeyID     string
+	S3SecretAccessKey string
+	S3UseSSL          bool
 }
 
 // rawValues is the multi-value representation used while loading config sources.
@@ -109,6 +117,32 @@ func Load(projectRoot string) (Config, error) {
 
 	if err := c.validatePDFValues(); err != nil {
 		return Config{}, fmt.Errorf("%w (source: %s)", err, srcPath)
+	}
+
+	c.StorageType = strings.ToLower(strings.TrimSpace(values.string("STORAGE_TYPE")))
+	if c.StorageType == "" {
+		c.StorageType = "local"
+	}
+	if c.StorageType != "s3" && c.StorageType != "local" {
+		return Config{}, fmt.Errorf("STORAGE_TYPE must be 's3' or 'local' (source: %s)", srcPath)
+	}
+	c.S3Endpoint = strings.TrimSpace(values.string("S3_ENDPOINT"))
+	c.S3Region = strings.TrimSpace(values.string("S3_REGION"))
+	c.S3Bucket = strings.TrimSpace(values.string("S3_BUCKET"))
+	c.S3AccessKeyID = strings.TrimSpace(values.string("S3_ACCESS_KEY_ID"))
+	c.S3SecretAccessKey = strings.TrimSpace(values.string("S3_SECRET_ACCESS_KEY"))
+	c.S3UseSSL = values.bool("S3_USE_SSL")
+
+	if c.StorageType == "s3" {
+		if c.S3Bucket == "" {
+			return Config{}, fmt.Errorf("S3_BUCKET must not be empty when STORAGE_TYPE=s3 (source: %s)", srcPath)
+		}
+		if c.S3AccessKeyID == "" {
+			return Config{}, fmt.Errorf("S3_ACCESS_KEY_ID must not be empty when STORAGE_TYPE=s3 (source: %s)", srcPath)
+		}
+		if c.S3SecretAccessKey == "" {
+			return Config{}, fmt.Errorf("S3_SECRET_ACCESS_KEY must not be empty when STORAGE_TYPE=s3 (source: %s)", srcPath)
+		}
 	}
 
 	return c, nil

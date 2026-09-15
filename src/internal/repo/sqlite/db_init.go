@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	_ "modernc.org/sqlite"
@@ -34,7 +35,16 @@ func InitWithFilename(projectRoot, dbFilename string) error {
 	if err != nil {
 		return err
 	}
+	maxConns := max(4, runtime.NumCPU())
+	db.SetMaxOpenConns(maxConns)
+	db.SetMaxIdleConns(maxConns)
+	db.SetConnMaxLifetime(0)
+
 	if _, err := db.Exec(`PRAGMA journal_mode = WAL;`); err != nil {
+		_ = db.Close()
+		return err
+	}
+	if _, err := db.Exec(`PRAGMA synchronous = NORMAL;`); err != nil {
 		_ = db.Close()
 		return err
 	}
@@ -82,7 +92,16 @@ func initSteps() []func(*sql.DB) error {
 		migrateRuntimeArtifactsToFilesystem,
 		migrateLegacyJobJSONArtifacts,
 		applyOneTimeMaintenance,
+		migrateLegacyJobBlobsToStorageStep,
 	}
+}
+
+func migrateLegacyJobBlobsToStorageStep(db *sql.DB) error {
+	if blobStorage == nil {
+		return nil
+	}
+	_, err := MigrateJobBlobsToStorage(nil, db, blobStorage, blobStorageName, false, nil)
+	return err
 }
 
 func ensureBaseIndexes(db *sql.DB) error {
@@ -129,6 +148,20 @@ func ensureArtifactTables(db *sql.DB) error {
 			PRIMARY KEY (job_id, kind),
 			FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
 		)`,
+		`CREATE TABLE IF NOT EXISTS job_media (
+			job_id TEXT NOT NULL,
+			kind TEXT NOT NULL,
+			storage_backend TEXT NOT NULL DEFAULT 's3',
+			storage_key TEXT NOT NULL,
+			size_bytes INTEGER NOT NULL DEFAULT 0,
+			content_type TEXT NOT NULL DEFAULT '',
+			etag TEXT NOT NULL DEFAULT '',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (job_id, kind),
+			FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_job_media_job_id ON job_media(job_id)`,
 	}
 	for _, stmt := range statements {
 		if _, err := db.Exec(stmt); err != nil {
