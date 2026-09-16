@@ -299,6 +299,7 @@ func (w *Worker) taskExtractPDF(jobID string) error {
 		return err
 	}
 	w.deps.BlobSvc.DeletePreview(jobID)
+	w.clearPDFChunkBlobs(jobID)
 
 	completed := time.Now()
 	w.deps.IncJobsTotal("success")

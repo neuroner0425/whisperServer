@@ -105,7 +105,10 @@ func (s *UploadService) Create(req UploadCreateRequest) (jobID string, filename 
 	}
 
 	// Validate the declared file type and the optional target folder/tag set.
-	originalFilename := req.FileHeader.Filename
+	originalFilename := filepath.Base(filepath.Clean(req.FileHeader.Filename))
+	if originalFilename == "." || originalFilename == "/" || originalFilename == "" {
+		return "", "", NewHTTPError(http.StatusBadRequest, "유효하지 않은 파일명입니다.")
+	}
 	if d.AllowedFile == nil || !d.AllowedFile(originalFilename) {
 		exts := []string{}
 		if d.SortedExts != nil {

@@ -72,3 +72,45 @@ func TestFolderService_EnsureRestored_MissingFolderCreatesNew(t *testing.T) {
 		t.Fatalf("id=%q", id)
 	}
 }
+
+func TestFolderService_Restore_ParentTrashedResetsToRoot(t *testing.T) {
+	childFolder := &model.Folder{ID: "child", OwnerID: "u1", ParentID: "parent", IsTrashed: true}
+	parentFolder := &model.Folder{ID: "parent", OwnerID: "u1", ParentID: "", IsTrashed: true}
+
+	moved := false
+	s := NewFolderService(FolderServiceDeps{
+		GetFolderByID: func(ownerID, folderID string) (*model.Folder, error) {
+			if folderID == "child" {
+				return childFolder, nil
+			}
+			if folderID == "parent" {
+				return parentFolder, nil
+			}
+			return nil, sql.ErrNoRows
+		},
+		SetFolderTrashed: func(ownerID, folderID string, trashed bool) error {
+			if folderID == "child" {
+				childFolder.IsTrashed = trashed
+			}
+			return nil
+		},
+		MoveFolder: func(ownerID, folderID, parentID string) error {
+			if folderID == "child" && parentID == "" {
+				moved = true
+				childFolder.ParentID = ""
+			}
+			return nil
+		},
+	})
+
+	f, err := s.Restore("u1", "child")
+	if err != nil {
+		t.Fatalf("Restore failed: %v", err)
+	}
+	if !moved || f.ParentID != "" {
+		t.Fatalf("expected child folder to be moved to root, parent_id=%q moved=%v", f.ParentID, moved)
+	}
+	if f.IsTrashed {
+		t.Fatalf("expected child folder to not be trashed")
+	}
+}

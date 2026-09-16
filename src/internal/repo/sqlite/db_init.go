@@ -31,7 +31,13 @@ func InitWithFilename(projectRoot, dbFilename string) error {
 	if err := os.MkdirAll(runtimeArtifactsDir, 0o755); err != nil {
 		return err
 	}
-	db, err := sql.Open("sqlite", dbPath)
+	dsn := dbPath
+	if !strings.Contains(dsn, "?") {
+		dsn += "?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
+	} else {
+		dsn += "&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
+	}
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return err
 	}
@@ -88,11 +94,15 @@ func initSteps() []func(*sql.DB) error {
 		ensureTagsRelationalSchema,
 		ensureBaseIndexes,
 		ensureArtifactTables,
+		ensureSearchFTS,
+		cleanupOrphanAndTemporaryArtifacts,
 		repairLegacyJobForeignKeys,
 		migrateRuntimeArtifactsToFilesystem,
 		migrateLegacyJobJSONArtifacts,
 		applyOneTimeMaintenance,
 		migrateLegacyJobBlobsToStorageStep,
+		SyncExistingJobsToFTS,
+		ensureOptimizedIndexes,
 	}
 }
 
@@ -140,6 +150,7 @@ func ensureArtifactTables(db *sql.DB) error {
 			PRIMARY KEY (job_id, kind),
 			FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
 		)`,
+		`CREATE INDEX IF NOT EXISTS idx_job_json_job_id ON job_json(job_id)`,
 		`CREATE TABLE IF NOT EXISTS job_blobs (
 			job_id TEXT NOT NULL,
 			kind TEXT NOT NULL,
@@ -167,6 +178,39 @@ func ensureArtifactTables(db *sql.DB) error {
 		if _, err := db.Exec(stmt); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func cleanupOrphanAndTemporaryArtifacts(db *sql.DB) error {
+	queries := []string{
+		// 1. 고아 job_json 레코드 정리
+		`DELETE FROM job_json WHERE job_id NOT IN (SELECT id FROM jobs)`,
+		// 2. 완료(50) 또는 실패(60)된 작업의 불필요한 중간 캐시 refined_timeline 정리
+		`DELETE FROM job_json WHERE kind = 'refined_timeline' AND job_id IN (SELECT id FROM jobs WHERE status_code IN (50, 60))`,
+		// 3. 누적된 디버깅 산출물 및 임시 후보 텍스트 정리
+		`DELETE FROM job_json WHERE kind LIKE 'refine_diagnostics%' OR kind LIKE 'refine_%_candidate' OR kind = 'refine_invalid_cached_timeline'`,
+		// 4. 고아 FTS 색인 정리
+		`DELETE FROM job_search_fts WHERE job_id NOT IN (SELECT id FROM jobs)`,
+	}
+	for _, q := range queries {
+		_, _ = db.Exec(q)
+	}
+	return nil
+}
+
+func ensureOptimizedIndexes(db *sql.DB) error {
+	queries := []string{
+		`CREATE INDEX IF NOT EXISTS idx_jobs_status_active ON jobs(status_code) WHERE status_code IN (10, 20, 30, 40)`,
+	}
+	for _, q := range queries {
+		if _, err := db.Exec(q); err != nil {
+			return err
+		}
+	}
+	hasTagID, _ := columnExists(db, "job_tags", "tag_id")
+	if hasTagID {
+		_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_job_tags_tag_id ON job_tags(tag_id)`)
 	}
 	return nil
 }
