@@ -240,7 +240,7 @@ func (h LegacyJobsHandlers) downloadVariant(c echo.Context, variant string) erro
 	if mimeType == "text/markdown; charset=utf-8" {
 		b = []byte(service.RenderDownloadMarkdownTitle(base, string(b)))
 	}
-	c.Response().Header().Set(echo.HeaderContentDisposition, fmt.Sprintf(`attachment; filename="%s"`, base+suffix))
+	setContentDisposition(c, base+suffix)
 	return c.Blob(http.StatusOK, mimeType, b)
 }
 
@@ -272,6 +272,7 @@ func (h LegacyJobsHandlers) BatchDownload() echo.HandlerFunc {
 		buf := bytes.NewBuffer(nil)
 		zw := zip.NewWriter(buf)
 		added := 0
+		seenNames := make(map[string]int)
 		for _, id := range ids {
 			id = strings.TrimSpace(id)
 			job := h.GetJob(id)
@@ -303,7 +304,16 @@ func (h LegacyJobsHandlers) BatchDownload() echo.HandlerFunc {
 
 			base := strings.TrimSuffix(job.Filename, filepath.Ext(job.Filename))
 			b = []byte(service.RenderDownloadMarkdownTitle(base, string(b)))
-			w, err := zw.Create(base + suffix)
+
+			entryName := base + suffix
+			if count, exists := seenNames[entryName]; exists {
+				seenNames[entryName] = count + 1
+				entryName = fmt.Sprintf("%s (%d)%s", base, count, suffix)
+			} else {
+				seenNames[entryName] = 1
+			}
+
+			w, err := zw.Create(entryName)
 			if err != nil {
 				continue
 			}
@@ -324,7 +334,7 @@ func (h LegacyJobsHandlers) BatchDownload() echo.HandlerFunc {
 			h.Logf("[BATCH_DOWNLOAD] success selected=%d added=%d", len(ids), added)
 		}
 		zipName := time.Now().Format("20060102_150405") + ".zip"
-		c.Response().Header().Set(echo.HeaderContentDisposition, fmt.Sprintf(`attachment; filename="%s"`, zipName))
+		setContentDisposition(c, zipName)
 		return c.Blob(http.StatusOK, "application/zip", buf.Bytes())
 	}
 }

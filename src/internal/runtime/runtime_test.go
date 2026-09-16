@@ -11,6 +11,7 @@ import (
 )
 
 func TestCollectFolderSubtree(t *testing.T) {
+	trashedMap := map[string]bool{}
 	rt := New(Config{
 		TmpFolder: t.TempDir(),
 		ListAllFoldersByOwner: func(userID string, trashed bool) ([]model.Folder, error) {
@@ -23,12 +24,18 @@ func TestCollectFolderSubtree(t *testing.T) {
 		GetFolderByID: func(userID, folderID string) (*model.Folder, error) {
 			return &model.Folder{ID: folderID, ParentID: map[string]string{"root": "", "child": "root", "grand": "child"}[folderID]}, nil
 		},
-		SetFolderTrashed: func(userID, folderID string, trashed bool) error { return nil },
+		SetFolderTrashed: func(userID, folderID string, trashed bool) error {
+			trashedMap[folderID] = trashed
+			return nil
+		},
 	})
-	subtree := rt.CollectFolderSubtree("u1", []string{"root"}, false)
+	subtree := rt.CollectFolderSubtree("u1", []string{"root"}, true)
 	for _, id := range []string{"root", "child", "grand"} {
 		if _, ok := subtree[id]; !ok {
 			t.Fatalf("missing subtree id %s", id)
+		}
+		if !trashedMap[id] {
+			t.Fatalf("expected folder %s to be marked trashed", id)
 		}
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"net/textproto"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -180,5 +181,47 @@ func TestUploadService_Create_PDFHappyPath(t *testing.T) {
 	}
 	if enqueuedID != "job-pdf" {
 		t.Fatalf("enqueuedID=%q", enqueuedID)
+	}
+}
+
+func TestUploadService_Create_PathTraversalSanitization(t *testing.T) {
+	tmp := t.TempDir()
+	s := NewUploadService(UploadServiceDeps{
+		AllowedFile: func(name string) bool {
+			return strings.HasSuffix(name, ".pdf")
+		},
+		DetectFileType: func(string) string { return "pdf" },
+		ListTagNamesByOwner: func(string) (map[string]struct{}, error) { return map[string]struct{}{}, nil },
+		SaveJobBlob:    func(string, string, []byte) error { return nil },
+		SaveUploadWithLimit: func(_ *multipart.FileHeader, dst string, _ int64, _ int64) (int64, error) {
+			b := []byte("%PDF")
+			_ = os.WriteFile(dst, b, 0o644)
+			return int64(len(b)), nil
+		},
+		BlobKindPDFOriginal: "pdf",
+		AddJob:              func(string, *model.Job) {},
+		SetJobFields:        func(string, map[string]any) {},
+		EnqueuePDFExtract:   func(string) {},
+		TmpFolder:           tmp,
+		MaxUploadSizeMB:     10,
+		UploadRateLimitKBPS: 1000,
+		StatusPending:       "pending",
+		NewJobID:            func() string { return "job-traversal" },
+		Spawn:               func(fn func()) { fn() },
+	})
+
+	fh := &multipart.FileHeader{
+		Filename: "../../../etc/evil.pdf",
+		Header:   textproto.MIMEHeader{"Content-Type": []string{"application/pdf"}},
+	}
+	_, filename, err := s.Create(UploadCreateRequest{
+		OwnerID:    "u1",
+		FileHeader: fh,
+	})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if filename != "evil.pdf" {
+		t.Fatalf("expected sanitized filename 'evil.pdf', got %q", filename)
 	}
 }

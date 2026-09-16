@@ -162,6 +162,9 @@ func SaveJob(id string, job *model.Job) (err error) {
 		return execErr
 	}
 
+	// Synchronize full-text search owner_id
+	_, _ = tx.Exec(`UPDATE job_search_fts SET owner_id = ? WHERE job_id = ?`, job.OwnerID, id)
+
 	// Synchronize tags only for this specific job.
 	if _, err := tx.Exec(`DELETE FROM job_tags WHERE job_id = ?`, id); err != nil {
 		return err
@@ -211,6 +214,20 @@ func DeleteJobs(ids []string) (err error) {
 		}
 	}()
 
+	// 1. Explicitly delete dependent tables to guarantee integrity even if FK cascade is off
+	childTables := []string{"job_json", "job_tags", "job_media", "job_blobs", "job_search_fts"}
+	for _, tbl := range childTables {
+		delStmt, prepErr := tx.Prepare(fmt.Sprintf(`DELETE FROM %s WHERE job_id = ?`, tbl))
+		if prepErr != nil {
+			continue
+		}
+		for _, id := range ids {
+			_, _ = delStmt.Exec(id)
+		}
+		_ = delStmt.Close()
+	}
+
+	// 2. Delete parent jobs
 	stmt, err := tx.Prepare(`DELETE FROM jobs WHERE id = ?`)
 	if err != nil {
 		return err
@@ -473,8 +490,19 @@ func QueryJobsPaged(filter JobQueryFilter) (*PagedJobsResult, error) {
 
 	searchQuery := strings.TrimSpace(filter.SearchQuery)
 	if searchQuery != "" {
-		whereClauses = append(whereClauses, "LOWER(filename) LIKE ?")
-		whereArgs = append(whereArgs, "%"+strings.ToLower(searchQuery)+"%")
+		ftsMatch := sanitizeFTS5Query(searchQuery)
+		if ftsMatch != "" {
+			if filter.OwnerID != "" {
+				whereClauses = append(whereClauses, "(LOWER(filename) LIKE ? OR id IN (SELECT job_id FROM job_search_fts WHERE owner_id = ? AND job_search_fts MATCH ?))")
+				whereArgs = append(whereArgs, "%"+strings.ToLower(searchQuery)+"%", filter.OwnerID, ftsMatch)
+			} else {
+				whereClauses = append(whereClauses, "(LOWER(filename) LIKE ? OR id IN (SELECT job_id FROM job_search_fts WHERE job_search_fts MATCH ?))")
+				whereArgs = append(whereArgs, "%"+strings.ToLower(searchQuery)+"%", ftsMatch)
+			}
+		} else {
+			whereClauses = append(whereClauses, "LOWER(filename) LIKE ?")
+			whereArgs = append(whereArgs, "%"+strings.ToLower(searchQuery)+"%")
+		}
 	}
 
 	tag := strings.TrimSpace(filter.Tag)

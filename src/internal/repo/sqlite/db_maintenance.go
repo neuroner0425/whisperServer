@@ -80,3 +80,17 @@ func currentDBMaintenanceVersion(db *sql.DB) (int, error) {
 	}
 	return version, nil
 }
+
+// CheckpointWAL runs a non-blocking passive WAL checkpoint to flush committed transactions
+// into the main database file without stalling ongoing reads or writes.
+func CheckpointWAL(db *sql.DB) error {
+	targetDB := db
+	if targetDB == nil {
+		targetDB = dbConn
+	}
+	if targetDB == nil {
+		return fmt.Errorf("db is not initialized")
+	}
+	_, err := targetDB.Exec(`PRAGMA wal_checkpoint(PASSIVE)`)
+	return err
+}

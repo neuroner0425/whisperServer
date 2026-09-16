@@ -79,6 +79,7 @@ func (h FolderDownloadHandlers) Handler() echo.HandlerFunc {
 		buf := bytes.NewBuffer(nil)
 		zw := zip.NewWriter(buf)
 		added := 0
+		seenNames := make(map[string]int)
 		for _, rec := range targetJobs {
 			id := rec.ID
 			job := rec.Job
@@ -105,7 +106,16 @@ func (h FolderDownloadHandlers) Handler() echo.HandlerFunc {
 			}
 			base := strings.TrimSuffix(job.Filename, filepath.Ext(job.Filename))
 			b = []byte(service.RenderDownloadMarkdownTitle(base, string(b)))
-			w, err := zw.Create(base + suffix)
+
+			entryName := base + suffix
+			if count, exists := seenNames[entryName]; exists {
+				seenNames[entryName] = count + 1
+				entryName = fmt.Sprintf("%s (%d)%s", base, count, suffix)
+			} else {
+				seenNames[entryName] = 1
+			}
+
+			w, err := zw.Create(entryName)
 			if err != nil {
 				continue
 			}
@@ -119,7 +129,7 @@ func (h FolderDownloadHandlers) Handler() echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusNotFound, "다운로드 가능한 결과가 없습니다.")
 		}
 		zipName := fmt.Sprintf("%s_%s.zip", folder.Name, time.Now().Format("20060102_150405"))
-		c.Response().Header().Set(echo.HeaderContentDisposition, fmt.Sprintf(`attachment; filename="%s"`, zipName))
+		setContentDisposition(c, zipName)
 		return c.Blob(http.StatusOK, "application/zip", buf.Bytes())
 	}
 }

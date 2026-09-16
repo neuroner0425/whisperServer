@@ -507,9 +507,12 @@ func (w *Worker) taskTranscribe(jobID string) error {
 		return err
 	}
 	_ = os.Remove(aacPath)
+	defer func() {
+		_ = os.Remove(wavPath)
+	}()
+
 	wavBytes, err := os.ReadFile(wavPath)
 	if err != nil {
-		_ = os.Remove(wavPath)
 		w.deps.Errf("transcribe.readTempWav", err, "job_id=%s", jobID)
 		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusAudioConvertFailedCode})
 		w.deps.IncJobsTotal("failure")
@@ -526,7 +529,6 @@ func (w *Worker) taskTranscribe(jobID string) error {
 		w.deps.SetJobFields(jobID, fields)
 		w.deps.IncJobsTotal(statusLabel)
 		w.deps.Errf("transcribe.runWhisper", err, "job_id=%s", jobID)
-		_ = os.Remove(wavPath)
 		return err
 	}
 	if updated := w.deps.GetJob(jobID); updated == nil || updated.IsTrashed {
@@ -563,7 +565,6 @@ func (w *Worker) taskTranscribe(jobID string) error {
 		"completed_ts":  float64(completed.Unix()),
 		"duration":      intutil.FormatSeconds(int(completed.Sub(started).Seconds())),
 	})
-	_ = os.Remove(wavPath)
 	w.deps.Logf("[TRANSCRIBE] cleaned input file job_id=%s", jobID)
 	w.deps.Logf("[TRANSCRIBE] done job_id=%s output=db://transcript_json status=%s duration_sec=%d", jobID, nextStatus, int(completed.Sub(started).Seconds()))
 	return nil
@@ -690,11 +691,8 @@ func (w *Worker) saveRefineDiagnostics(jobID, step, originalTimeline, polishedTi
 		}
 		return
 	}
-	nowKind := "refine_diagnostics_" + time.Now().Format("20060102_150405_000000000")
-	for _, kind := range []string{"refine_diagnostics", nowKind} {
-		if err := w.deps.BlobSvc.SaveRefineArtifact(jobID, kind, string(b)); err != nil && w.deps.Errf != nil {
-			w.deps.Errf("refine.saveDiagnostics", err, "job_id=%s kind=%s", jobID, kind)
-		}
+	if err := w.deps.BlobSvc.SaveRefineArtifact(jobID, "refine_diagnostics", string(b)); err != nil && w.deps.Errf != nil {
+		w.deps.Errf("refine.saveDiagnostics", err, "job_id=%s kind=refine_diagnostics", jobID)
 	}
 }
 

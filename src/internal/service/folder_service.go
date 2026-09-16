@@ -131,6 +131,16 @@ func (s *FolderService) Restore(ownerID, folderID string) (*model.Folder, error)
 	if err != nil {
 		return nil, NewHTTPError(http.StatusInternalServerError, "폴더 조회 실패")
 	}
+	if f != nil && strings.TrimSpace(f.ParentID) != "" {
+		// If the parent folder is trashed or missing, reset parent_id to root ("") so the folder doesn't become orphaned
+		parent, pErr := s.d.GetFolderByID(ownerID, f.ParentID)
+		if pErr != nil || parent == nil || parent.IsTrashed {
+			if s.d.MoveFolder != nil {
+				_ = s.d.MoveFolder(ownerID, folderID, "")
+				f.ParentID = ""
+			}
+		}
+	}
 	return f, nil
 }
 

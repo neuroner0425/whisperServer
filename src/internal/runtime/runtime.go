@@ -144,6 +144,11 @@ func (r *Runtime) CollectFolderSubtree(userID string, folderIDs []string, trashF
 			}
 		}
 	}
+	if trashFolders {
+		for id := range subtree {
+			_ = r.setFolderTrashed(userID, id, true)
+		}
+	}
 	return subtree
 }
 
