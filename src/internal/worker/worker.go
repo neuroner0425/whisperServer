@@ -433,18 +433,26 @@ func (w *Worker) finalizeRefine(jobID string) {
 		w.deps.Errf("worker.refine", err, "job_id=%s", jobID)
 		return
 	}
-	if updated := w.deps.GetJob(jobID); updated == nil || updated.IsTrashed {
+	updated := w.deps.GetJob(jobID)
+	if updated == nil || updated.IsTrashed {
 		return
 	}
-	w.deps.SetJobFields(jobID, map[string]any{
+	fields := map[string]any{
 		"status":         w.cfg.StatusCompleted,
 		"status_code":    model.JobStatusCompletedCode,
-		"status_detail":  "",
 		"phase":          "",
 		"progress_label": "",
-		"result":         "db://transcript_json",
-	})
-	w.deps.Logf("[WORKER] completed job_id=%s result=db://transcript_json", jobID)
+	}
+	if updated.Result == "" {
+		fields["result"] = "db://transcript_json"
+	}
+	if updated.StatusDetail != "" {
+		fields["status_detail"] = updated.StatusDetail
+	} else {
+		fields["status_detail"] = ""
+	}
+	w.deps.SetJobFields(jobID, fields)
+	w.deps.Logf("[WORKER] completed job_id=%s result=%v", jobID, fields["result"])
 }
 
 func (w *Worker) taskTranscribe(jobID string) error {
@@ -601,7 +609,19 @@ func (w *Worker) taskRefining(jobID, timelineText string) error {
 	polishedTimeline, err := w.loadOrPolishRefinedTimeline(jobID, timelineText, desc)
 	if err != nil {
 		w.saveRefineDiagnostics(jobID, "polish_failure", timelineText, "", "", err)
-		return err
+		w.deps.Errf("refine.loadOrPolishRefinedTimeline", err, "job_id=%s", jobID)
+		// Fallback to Step 0 (Raw Transcript)
+		w.deps.SetJobFields(jobID, map[string]any{
+			"status":           w.cfg.StatusCompleted,
+			"status_code":      model.JobStatusCompletedCode,
+			"result":           "db://transcript_json",
+			"progress_percent": 100,
+			"phase":            "",
+			"progress_label":   "",
+			"status_detail":    "AI 문장 다듬기에 실패하여 원본 전사본으로 완료되었습니다.",
+		})
+		w.deps.Logf("[REFINE] fallback to raw transcript job_id=%s cause=%v", jobID, err)
+		return nil
 	}
 	w.saveRefineTextArtifact(jobID, "refine_polished_timeline_candidate", polishedTimeline)
 	w.saveRefineDiagnostics(jobID, "polish", timelineText, polishedTimeline, "")
@@ -611,25 +631,44 @@ func (w *Worker) taskRefining(jobID, timelineText string) error {
 		"progress_label":   "정제 중",
 	})
 	refined, err := w.deps.StructureTranscriptParagraphs(polishedTimeline, desc)
-	if err != nil || strings.TrimSpace(refined) == "" {
+	coverageErr := validateRefinedCoverage(timelineText, refined)
+	if err != nil || strings.TrimSpace(refined) == "" || coverageErr != nil {
 		if err != nil {
-			w.deps.SetJobFields(jobID, map[string]any{"status_detail": "전사 정제 중 문단 구성에 실패했습니다."})
 			w.deps.Errf("refine.structureTranscriptParagraphs", err, "job_id=%s", jobID)
-		} else {
-			w.deps.SetJobFields(jobID, map[string]any{"status_detail": "전사 정제 중 문단 구성 결과가 비어 있습니다."})
-			w.deps.Logf("[REFINE] empty result job_id=%s", jobID)
-			err = errors.New("empty refined result")
+		} else if coverageErr != nil {
+			w.saveRefineDiagnostics(jobID, "coverage_failure", timelineText, "", refined, coverageErr)
 		}
-		w.saveRefineDiagnostics(jobID, "structure_failure", polishedTimeline, "", "", err)
-		return err
+		// Fallback to Step 1 (Polished Timeline) - display previous valid polished sentences
+		fallbackRefined, fbErr := makeFallbackRefinedJSONFromTimeline(polishedTimeline)
+		if fbErr == nil && strings.TrimSpace(fallbackRefined) != "" {
+			_ = w.deps.BlobSvc.SaveRefined(jobID, []byte(fallbackRefined))
+			w.deps.SetJobFields(jobID, map[string]any{
+				"status":           w.cfg.StatusCompleted,
+				"status_code":      model.JobStatusCompletedCode,
+				"result_refined":   "db://refined",
+				"progress_percent": 100,
+				"phase":            "",
+				"progress_label":   "",
+				"status_detail":    "문단 구성에 실패하여 다듬어진 전사본으로 완료되었습니다.",
+			})
+			w.deps.Logf("[REFINE] fallback to polished timeline job_id=%s", jobID)
+			return nil
+		}
+		// Fallback to Step 0 (Raw Transcript) - if even Step 1 fallback fails
+		w.deps.SetJobFields(jobID, map[string]any{
+			"status":           w.cfg.StatusCompleted,
+			"status_code":      model.JobStatusCompletedCode,
+			"result":           "db://transcript_json",
+			"progress_percent": 100,
+			"phase":            "",
+			"progress_label":   "",
+			"status_detail":    "AI 문단 구성 및 폴백에 실패하여 원본 전사본으로 완료되었습니다.",
+		})
+		w.deps.Logf("[REFINE] fallback to raw transcript after structure & fallback error job_id=%s cause=%v fbErr=%v", jobID, err, fbErr)
+		return nil
 	}
 	w.saveRefineTextArtifact(jobID, "refine_structured_candidate", refined)
 	w.saveRefineDiagnostics(jobID, "structure", polishedTimeline, "", refined)
-	if coverageErr := validateRefinedCoverage(timelineText, refined); coverageErr != nil {
-		w.saveRefineDiagnostics(jobID, "coverage_failure", timelineText, "", refined, coverageErr)
-		w.deps.SetJobFields(jobID, map[string]any{"status_detail": coverageErr.Error()})
-		return coverageErr
-	}
 	if err := w.deps.BlobSvc.SaveRefined(jobID, []byte(refined)); err != nil {
 		w.deps.SetJobFields(jobID, map[string]any{"status_detail": "최종 정제 결과를 저장하지 못했습니다."})
 		w.deps.Errf("refine.saveRefinedBlob", err, "job_id=%s", jobID)
@@ -864,8 +903,10 @@ type refinedValidationPayload struct {
 
 var (
 	timelineLineTimestampRe    = regexp.MustCompile(`\d{2}:\d{2}:\d{2},\d{3}`)
+	flexibleTimestampRe        = regexp.MustCompile(`(?:\d{1,2}:)?\d{1,2}:\d{2}[,\.]\d{1,3}`)
 	refinedSentenceTimestampRe = regexp.MustCompile(`^\[?\d{2}:\d{2}:\d{2},\d{3}\]?$`)
 )
+
 
 func validateRefinedCoverage(originalTimeline, refinedJSON string) error {
 	originalTimes := extractTimelineTimestamps(originalTimeline)
@@ -981,11 +1022,13 @@ func repairTimelineTimestamps(originalTimeline, polishedTimeline string) (string
 	changed := false
 	repaired := make([]string, 0, len(lines))
 	for i, line := range lines {
-		match := timelineLineTimestampRe.FindStringIndex(line)
+		match := flexibleTimestampRe.FindStringIndex(line)
 		if len(match) != 2 {
 			return polishedTimeline, false, nil
 		}
-		if replacements[i] != polishedTimes[i] {
+		rawTS := line[match[0]:match[1]]
+		normTS := normalizeTimestamp(rawTS)
+		if replacements[i] != rawTS || normTS != rawTS {
 			changed = true
 		}
 		prefix := line[:match[0]]
@@ -1014,7 +1057,7 @@ func timestampDistanceMilliseconds(a, b string) int64 {
 func countTimestampedTimelineLines(timeline string) int {
 	count := 0
 	for _, line := range strings.Split(strings.ReplaceAll(timeline, "\r\n", "\n"), "\n") {
-		if timelineLineTimestampRe.MatchString(line) && strings.TrimSpace(line) != "" {
+		if flexibleTimestampRe.MatchString(line) && strings.TrimSpace(line) != "" {
 			count++
 		}
 	}
@@ -1039,6 +1082,58 @@ func countValidRefinedSentences(refinedJSON string) (int, error) {
 	return count, nil
 }
 
+func makeFallbackRefinedJSONFromTimeline(timeline string) (string, error) {
+	lines := strings.Split(strings.ReplaceAll(strings.TrimSpace(timeline), "\r\n", "\n"), "\n")
+	type sentenceItem struct {
+		StartTime string `json:"start_time"`
+		Content   string `json:"content"`
+	}
+	type paragraphItem struct {
+		ParagraphSummary string         `json:"paragraph_summary"`
+		Sentence         []sentenceItem `json:"sentence"`
+	}
+	type payload struct {
+		Paragraph []paragraphItem `json:"paragraph"`
+	}
+
+	sentences := make([]sentenceItem, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "```") {
+			continue
+		}
+		idxOpen := strings.Index(line, "[")
+		idxClose := strings.Index(line, "]")
+		if idxOpen >= 0 && idxClose > idxOpen {
+			rawTS := line[idxOpen+1 : idxClose]
+			normTS := intutil.NormalizeTimelineTimestamp(rawTS)
+			content := strings.TrimSpace(line[idxClose+1:])
+			if timelineLineTimestampRe.MatchString(normTS) {
+				sentences = append(sentences, sentenceItem{
+					StartTime: "[" + normTS + "]",
+					Content:   content,
+				})
+			}
+		}
+	}
+	if len(sentences) == 0 {
+		return "", errors.New("no valid sentences in timeline")
+	}
+	res := payload{
+		Paragraph: []paragraphItem{
+			{
+				ParagraphSummary: "전사 내용",
+				Sentence:         sentences,
+			},
+		},
+	}
+	b, err := json.MarshalIndent(res, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
 func extractTimelineTimestamps(timeline string) []string {
 	out := []string{}
 	for _, line := range strings.Split(strings.ReplaceAll(timeline, "\r\n", "\n"), "\n") {
@@ -1046,11 +1141,14 @@ func extractTimelineTimestamps(timeline string) []string {
 		if line == "" {
 			continue
 		}
-		m := timelineLineTimestampRe.FindString(line)
+		m := flexibleTimestampRe.FindString(line)
 		if m == "" {
 			continue
 		}
-		out = append(out, normalizeTimestamp(m))
+		norm := normalizeTimestamp(m)
+		if norm != "" {
+			out = append(out, norm)
+		}
 	}
 	return out
 }
@@ -1077,9 +1175,7 @@ func extractRefinedSentenceTimestamps(refinedJSON string) ([]string, error) {
 }
 
 func normalizeTimestamp(value string) string {
-	value = strings.TrimSpace(value)
-	value = strings.TrimPrefix(value, "[")
-	value = strings.TrimSuffix(value, "]")
+	value = intutil.NormalizeTimelineTimestamp(value)
 	if !timelineLineTimestampRe.MatchString(value) {
 		return ""
 	}

@@ -189,3 +189,36 @@ func MustEnsureDirs(dirs ...string) {
 		}
 	}
 }
+
+// NormalizeTimelineTimestamp normalizes various timestamp representations (e.g. "[00:15,860]", "01:2:3.4")
+// into the standard "HH:MM:SS,mmm" format.
+func NormalizeTimelineTimestamp(raw string) string {
+	raw = strings.Trim(raw, "[] \t")
+	raw = strings.ReplaceAll(raw, ".", ",")
+	parts := strings.Split(raw, ",")
+	if len(parts) != 2 {
+		return raw
+	}
+	timePart := parts[0]
+	msPart := parts[1]
+	for len(msPart) < 3 {
+		msPart += "0"
+	}
+	if len(msPart) > 3 {
+		msPart = msPart[:3]
+	}
+	timeSegments := strings.Split(timePart, ":")
+	var h, m, s int
+	if len(timeSegments) == 2 {
+		_, _ = fmt.Sscanf(timeSegments[0], "%d", &m)
+		_, _ = fmt.Sscanf(timeSegments[1], "%d", &s)
+	} else if len(timeSegments) == 3 {
+		_, _ = fmt.Sscanf(timeSegments[0], "%d", &h)
+		_, _ = fmt.Sscanf(timeSegments[1], "%d", &m)
+		_, _ = fmt.Sscanf(timeSegments[2], "%d", &s)
+	} else {
+		return raw
+	}
+	return fmt.Sprintf("%02d:%02d:%02d,%s", h, m, s, msPart)
+}
+
