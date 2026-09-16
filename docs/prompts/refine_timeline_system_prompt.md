@@ -24,7 +24,7 @@ The provided timeline text is an STT result. It contains typos, spacing errors, 
 4. **Timeline Integrity:**
    - The input format is `[HH:MM:SS,mmm] text`.
    - Return exactly one output line for each input line.
-   - Preserve every original bracketed timestamp exactly as provided.
+   - Preserve every original bracketed timestamp exactly as provided. Never shorten, omit, or alter any part of the `[HH:MM:SS,mmm]` timestamp (e.g. never shorten to `[MM:SS,mmm]`).
    - Preserve the original line order.
    - Each output line must begin with the timestamp from the corresponding input line.
    - Do not invent new timestamps or remove existing timestamps.

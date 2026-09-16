@@ -118,14 +118,14 @@ func TestTaskRefiningPreservesRefinedTimelineOnStructureFailure(t *testing.T) {
 		return "", errors.New("structure failed")
 	})
 
-	if err := w.taskRefining("job1", "[00:00:00,000] 원문"); err == nil {
-		t.Fatalf("expected structure failure")
+	if err := w.taskRefining("job1", "[00:00:00,000] 원문"); err != nil {
+		t.Fatalf("expected fallback to succeed, got %v", err)
 	}
 	if store["refined_timeline"] == "" {
 		t.Fatalf("expected refined_timeline to be preserved")
 	}
-	if store["refined"] != "" {
-		t.Fatalf("expected final refined result not to be saved")
+	if store["refined"] == "" {
+		t.Fatalf("expected fallback refined result to be saved")
 	}
 }
 
@@ -217,8 +217,8 @@ func TestTaskRefiningDoesNotSaveRefinedTimelineOnPolishFailure(t *testing.T) {
 		return "", nil
 	})
 
-	if err := w.taskRefining("job1", "[00:00:00,000] 원문"); err == nil {
-		t.Fatalf("expected polish failure")
+	if err := w.taskRefining("job1", "[00:00:00,000] 원문"); err != nil {
+		t.Fatalf("expected fallback to raw transcript to succeed, got %v", err)
 	}
 	if store["refined_timeline"] != "" {
 		t.Fatalf("expected refined_timeline not to be saved")
@@ -254,6 +254,15 @@ func newRefineTestWorker(
 	polish func(string, string) (string, error),
 	structure func(string, string) (string, error),
 ) *Worker {
+	return newRefineTestWorkerWithFields(jsonStore, nil, polish, structure)
+}
+
+func newRefineTestWorkerWithFields(
+	jsonStore map[string]string,
+	fieldsStore map[string]any,
+	polish func(string, string) (string, error),
+	structure func(string, string) (string, error),
+) *Worker {
 	blob := service.NewJobBlobService(service.JobBlobServiceDeps{
 		HasJobJSON: func(_ string, kind string) bool {
 			return jsonStore[kind] != ""
@@ -273,13 +282,20 @@ func newRefineTestWorker(
 	})
 	return &Worker{
 		cfg: Config{
-			StatusRefining: "정제 중",
+			StatusRefining:  "정제 중",
+			StatusCompleted: "완료",
 		},
 		deps: Deps{
 			GetJob: func(string) *model.Job {
 				return &model.Job{FileType: "audio"}
 			},
-			SetJobFields:                  func(string, map[string]any) {},
+			SetJobFields: func(_ string, fields map[string]any) {
+				if fieldsStore != nil {
+					for k, v := range fields {
+						fieldsStore[k] = v
+					}
+				}
+			},
 			BlobSvc:                       blob,
 			HasGeminiConfigured:           func() bool { return true },
 			PolishTranscriptTimeline:      polish,
@@ -290,3 +306,82 @@ func newRefineTestWorker(
 		},
 	}
 }
+
+func TestTaskRefiningFallbackToPolishedTimelineOnStructureError(t *testing.T) {
+	store := map[string]string{}
+	fields := map[string]any{}
+	w := newRefineTestWorkerWithFields(store, fields, func(string, string) (string, error) {
+		return "[00:15,860] 다듬어진 첫 문장\n[00:00:20,000] 다듬어진 두 번째 문장", nil
+	}, func(string, string) (string, error) {
+		return "", errors.New("gemini structure timeout")
+	})
+
+	err := w.taskRefining("job1", "[00:00:15,860] 원본 1\n[00:00:20,000] 원본 2")
+	if err != nil {
+		t.Fatalf("expected taskRefining to succeed via fallback, got %v", err)
+	}
+	if fields["status"] != "완료" {
+		t.Fatalf("expected status to be 완료, got %v", fields["status"])
+	}
+	if fields["result_refined"] != "db://refined" {
+		t.Fatalf("expected result_refined to be db://refined, got %v", fields["result_refined"])
+	}
+	if !strings.Contains(fmt.Sprint(fields["status_detail"]), "다듬어진 전사본으로 완료") {
+		t.Fatalf("unexpected status_detail: %v", fields["status_detail"])
+	}
+	if store["refined"] == "" {
+		t.Fatalf("expected refined blob to be saved")
+	}
+	if !strings.Contains(store["refined"], "[00:00:15,860]") {
+		t.Fatalf("expected normalized timestamp [00:00:15,860] in refined JSON, got: %s", store["refined"])
+	}
+}
+
+func TestTaskRefiningFallbackToRawTranscriptWhenPolishedTimelineInvalid(t *testing.T) {
+	store := map[string]string{}
+	fields := map[string]any{}
+	w := newRefineTestWorkerWithFields(store, fields, func(string, string) (string, error) {
+		return "완전 깨진 텍스트 (타임스탬프 전혀 없음)", nil
+	}, func(string, string) (string, error) {
+		return "", errors.New("structure failed")
+	})
+
+	err := w.taskRefining("job1", "[00:00:15,860] 원본 1")
+	if err != nil {
+		t.Fatalf("expected fallback to raw transcript to succeed, got %v", err)
+	}
+	if fields["status"] != "완료" {
+		t.Fatalf("expected status to be 완료, got %v", fields["status"])
+	}
+	if fields["result"] != "db://transcript_json" {
+		t.Fatalf("expected result to be db://transcript_json, got %v", fields["result"])
+	}
+	if !strings.Contains(fmt.Sprint(fields["status_detail"]), "원본 전사본으로 완료") {
+		t.Fatalf("unexpected status_detail: %v", fields["status_detail"])
+	}
+}
+
+func TestTaskRefiningFallbackToRawTranscriptOnPolishError(t *testing.T) {
+	store := map[string]string{}
+	fields := map[string]any{}
+	w := newRefineTestWorkerWithFields(store, fields, func(string, string) (string, error) {
+		return "", errors.New("polish gemini error")
+	}, func(string, string) (string, error) {
+		return "", nil
+	})
+
+	err := w.taskRefining("job1", "[00:00:15,860] 원본 1")
+	if err != nil {
+		t.Fatalf("expected fallback to raw transcript to succeed, got %v", err)
+	}
+	if fields["status"] != "완료" {
+		t.Fatalf("expected status to be 완료, got %v", fields["status"])
+	}
+	if fields["result"] != "db://transcript_json" {
+		t.Fatalf("expected result to be db://transcript_json, got %v", fields["result"])
+	}
+	if !strings.Contains(fmt.Sprint(fields["status_detail"]), "AI 문장 다듬기에 실패하여 원본 전사본으로 완료") {
+		t.Fatalf("unexpected status_detail: %v", fields["status_detail"])
+	}
+}
+
