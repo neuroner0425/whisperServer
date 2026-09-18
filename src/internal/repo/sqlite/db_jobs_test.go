@@ -901,7 +901,7 @@ func TestPhase32Queries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetJobByID job-done: %v", err)
 	}
-	if gotDone == nil || gotDone.Filename != "completed.mp3" || gotDone.StatusCode != 50 {
+	if gotDone == nil || gotDone.Filename != "completed.mp3" || gotDone.StatusCode != 50 || gotDone.Status != "완료" || gotDone.Phase != "완료" {
 		t.Fatalf("unexpected gotDone: %+v", gotDone)
 	}
 	if len(gotDone.Tags) != 1 || gotDone.Tags[0] != "doneTag" {
