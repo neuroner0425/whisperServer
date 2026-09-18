@@ -64,6 +64,8 @@ func LoadJobs() (map[string]*model.Job, error) {
 		}
 		job := model.Job{
 			StatusCode:      statusCode,
+			Status:          model.JobStatusName(statusCode),
+			Phase:           model.JobPhase(statusCode),
 			Filename:        filename,
 			FileType:        fileType,
 			UploadedTS:      uploadedTS,
@@ -812,6 +814,8 @@ func GetJobByID(id string) (*model.Job, error) {
 
 	job := model.Job{
 		StatusCode:      statusCode,
+		Status:          model.JobStatusName(statusCode),
+		Phase:           model.JobPhase(statusCode),
 		Filename:        filename,
 		FileType:        fileType,
 		UploadedTS:      uploadedTS,
