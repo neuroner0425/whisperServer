@@ -193,10 +193,10 @@ S3_REGION=us-east-1
 S3_BUCKET=whisper-blobs
 
 # S3 Access Key ID (or MinIO root username).
-S3_ACCESS_KEY_ID=test
+S3_ACCESS_KEY_ID=minioadmin
 
 # S3 Secret Access Key (or MinIO root password).
-S3_SECRET_ACCESS_KEY=test1234!
+S3_SECRET_ACCESS_KEY=minioadmin
 
 # Whether to use SSL (HTTPS).
 # - false: For local MinIO over plain HTTP.

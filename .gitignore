@@ -1,20 +1,65 @@
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-*.test
-
-.run/
-.DS_Store
-.venv/
-
-jobs.json
+# Runtime and environment
 app.conf
-coverage.out
+app.conf.local
+.env
+.env.*
+*.local
+jobs.json
 
-/bin
-/log
+# Local workspaces and private directories
+.run/
+.venv/
+/origin/
+/docs/nogit/
+.agents/
+
+# Sample directory
+/sample/*
+!/sample/test_stt.wav
+!/sample/whisper_cli.sh
+
+# Go build artifacts and testing
+/bin/
 /server
+/migrate
+/migrate_blobs
 /whisper
-/static/app
-/frontend/node_modules
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Database and logs
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+/log/
+*.log
+
+# Frontend
+/frontend/node_modules/
+/frontend/dist/
+/static/app/
+
+# Operating system and editors
+.DS_Store
+**/.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
