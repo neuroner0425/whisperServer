@@ -10,7 +10,7 @@ jobs.json
 .run/
 .venv/
 /origin/
-/docs/nogit/
+/docs/
 .agents/
 
 # Sample directory
