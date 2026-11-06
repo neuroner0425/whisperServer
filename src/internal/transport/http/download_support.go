@@ -8,6 +8,14 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+const (
+	// MaxBatchDownloadJobs limits the maximum number of items per batch download request.
+	MaxBatchDownloadJobs = 100
+
+	// MaxBatchDownloadBytes limits cumulative uncompressed payload size to prevent resource exhaustion (500MB).
+	MaxBatchDownloadBytes = 500 * 1024 * 1024
+)
+
 // formatContentDisposition creates an RFC 5987 compliant Content-Disposition header value
 // that ensures proper filename decoding across Safari, Chrome, Edge, and mobile browsers.
 func formatContentDisposition(filename string) string {

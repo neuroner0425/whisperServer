@@ -2,7 +2,6 @@ package httptransport
 
 import (
 	"archive/zip"
-	"bytes"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -268,13 +267,26 @@ func (h LegacyJobsHandlers) BatchDownload() echo.HandlerFunc {
 			return c.Redirect(http.StatusSeeOther, filesHomePath)
 		}
 
-		// Build the archive entirely in memory because the legacy flow is request scoped.
-		buf := bytes.NewBuffer(nil)
-		zw := zip.NewWriter(buf)
-		added := 0
-		seenNames := make(map[string]int)
-		for _, id := range ids {
-			id = strings.TrimSpace(id)
+		// 1단계 — Pre-flight Validation (조기 반환)
+		if len(ids) > MaxBatchDownloadJobs {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("한 번에 최대 %d개의 작업만 다운로드할 수 있습니다.", MaxBatchDownloadJobs))
+		}
+
+		type validJobItem struct {
+			id  string
+			job *model.Job
+		}
+		var validJobs []validJobItem
+		seenJobIDs := make(map[string]struct{})
+		for _, rawID := range ids {
+			id := strings.TrimSpace(rawID)
+			if id == "" {
+				continue
+			}
+			if _, seen := seenJobIDs[id]; seen {
+				continue
+			}
+			seenJobIDs[id] = struct{}{}
 			job := h.GetJob(id)
 			if job == nil || job.OwnerID != u.ID || job.IsTrashed {
 				continue
@@ -282,6 +294,38 @@ func (h LegacyJobsHandlers) BatchDownload() echo.HandlerFunc {
 			if strings.TrimSpace(h.StatusCompleted) != "" && job.Status != h.StatusCompleted {
 				continue
 			}
+			validJobs = append(validJobs, validJobItem{id: id, job: job})
+		}
+
+		if len(validJobs) == 0 {
+			if h.Logf != nil {
+				h.Logf("[BATCH_DOWNLOAD] skipped reason=no downloadable results selected=%d", len(ids))
+			}
+			return c.Redirect(http.StatusSeeOther, filesHomePath)
+		}
+
+		// 2단계 — Streaming & Partial Failure Isolation
+		res := c.Response()
+		zipName := time.Now().Format("20060102_150405") + ".zip"
+		res.Header().Set("Content-Type", "application/zip")
+		setContentDisposition(c, zipName)
+		res.WriteHeader(http.StatusOK)
+
+		zw := zip.NewWriter(res.Writer)
+		added := 0
+		var cumulativeBytes int64
+		seenNames := make(map[string]int)
+
+		for _, item := range validJobs {
+			if c.Request().Context().Err() != nil {
+				if h.Errf != nil {
+					h.Errf("batchDownload.canceled", c.Request().Context().Err(), "client request context canceled")
+				}
+				break
+			}
+
+			id := item.id
+			job := item.job
 
 			var (
 				b      []byte
@@ -298,12 +342,31 @@ func (h LegacyJobsHandlers) BatchDownload() echo.HandlerFunc {
 				suffix = ".md"
 				b, err = h.BlobSvc.LoadTranscriptMarkdown(id)
 			}
+
+			base := strings.TrimSuffix(job.Filename, filepath.Ext(job.Filename))
+			if base == "" {
+				base = id
+			}
+
 			if err != nil {
+				// Partial Failure Isolation: 개별 산출물 로드 실패 시 고유 에러 엔트리 기록 후 계속 진행
+				errEntry := fmt.Sprintf("_ERROR_%s_%s.txt", base, id)
+				if w, createErr := zw.Create(errEntry); createErr == nil {
+					_, _ = w.Write([]byte(fmt.Sprintf("Failed to load artifact for job %s: %v\n", id, err)))
+				}
 				continue
 			}
 
-			base := strings.TrimSuffix(job.Filename, filepath.Ext(job.Filename))
 			b = []byte(service.RenderDownloadMarkdownTitle(base, string(b)))
+
+			// 누적 압축 전 크기 상한 가드
+			if cumulativeBytes+int64(len(b)) > MaxBatchDownloadBytes {
+				if w, createErr := zw.Create("_WARNING_TRUNCATED.txt"); createErr == nil {
+					_, _ = w.Write([]byte(fmt.Sprintf("Cumulative uncompressed size exceeded limit of %d MB. Remaining items truncated.\n", MaxBatchDownloadBytes/(1024*1024))))
+				}
+				break
+			}
+			cumulativeBytes += int64(len(b))
 
 			entryName := base + suffix
 			if count, exists := seenNames[entryName]; exists {
@@ -318,24 +381,19 @@ func (h LegacyJobsHandlers) BatchDownload() echo.HandlerFunc {
 				continue
 			}
 			if _, err := w.Write(b); err != nil {
-				continue
+				if h.Errf != nil {
+					h.Errf("batchDownload.clientDisconnected", err, "client disconnected prematurely")
+				}
+				break
 			}
 			added++
 		}
 		_ = zw.Close()
 
-		if added == 0 {
-			if h.Logf != nil {
-				h.Logf("[BATCH_DOWNLOAD] skipped reason=no downloadable results selected=%d", len(ids))
-			}
-			return c.Redirect(http.StatusSeeOther, filesHomePath)
-		}
 		if h.Logf != nil {
-			h.Logf("[BATCH_DOWNLOAD] success selected=%d added=%d", len(ids), added)
+			h.Logf("[BATCH_DOWNLOAD] success selected=%d added=%d bytes=%d", len(ids), added, cumulativeBytes)
 		}
-		zipName := time.Now().Format("20060102_150405") + ".zip"
-		setContentDisposition(c, zipName)
-		return c.Blob(http.StatusOK, "application/zip", buf.Bytes())
+		return nil
 	}
 }
 

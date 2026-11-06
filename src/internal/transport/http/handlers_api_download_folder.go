@@ -2,7 +2,6 @@ package httptransport
 
 import (
 	"archive/zip"
-	"bytes"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -30,6 +29,7 @@ type FolderDownloadHandlers struct {
 	CollectFolderSubtree         func(userID string, folderIDs []string, trashFolders bool) map[string]struct{}
 
 	StatusCompleted string
+	Errf            func(scope string, err error, format string, args ...any)
 }
 
 // Handler creates and streams the folder result archive on demand.
@@ -76,11 +76,31 @@ func (h FolderDownloadHandlers) Handler() echo.HandlerFunc {
 			}
 		}
 
-		buf := bytes.NewBuffer(nil)
-		zw := zip.NewWriter(buf)
+		if len(targetJobs) == 0 {
+			return echo.NewHTTPError(http.StatusNotFound, "다운로드 가능한 결과가 없습니다.")
+		}
+		if len(targetJobs) > MaxBatchDownloadJobs {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("한 번에 최대 %d개의 작업만 다운로드할 수 있습니다.", MaxBatchDownloadJobs))
+		}
+
+		res := c.Response()
+		zipName := fmt.Sprintf("%s_%s.zip", folder.Name, time.Now().Format("20060102_150405"))
+		res.Header().Set("Content-Type", "application/zip")
+		setContentDisposition(c, zipName)
+		res.WriteHeader(http.StatusOK)
+
+		zw := zip.NewWriter(res.Writer)
 		added := 0
+		var cumulativeBytes int64
 		seenNames := make(map[string]int)
 		for _, rec := range targetJobs {
+			if c.Request().Context().Err() != nil {
+				if h.Errf != nil {
+					h.Errf("downloadFolder.canceled", c.Request().Context().Err(), "client request context canceled")
+				}
+				break
+			}
+
 			id := rec.ID
 			job := rec.Job
 			if job == nil {
@@ -101,11 +121,29 @@ func (h FolderDownloadHandlers) Handler() echo.HandlerFunc {
 				suffix = ".md"
 				b, err = h.BlobSvc.LoadTranscriptMarkdown(id)
 			}
+
+			base := strings.TrimSuffix(job.Filename, filepath.Ext(job.Filename))
+			if base == "" {
+				base = id
+			}
+
 			if err != nil {
+				errEntry := fmt.Sprintf("_ERROR_%s_%s.txt", base, id)
+				if w, createErr := zw.Create(errEntry); createErr == nil {
+					_, _ = w.Write([]byte(fmt.Sprintf("Failed to load artifact for job %s: %v\n", id, err)))
+				}
 				continue
 			}
-			base := strings.TrimSuffix(job.Filename, filepath.Ext(job.Filename))
+
 			b = []byte(service.RenderDownloadMarkdownTitle(base, string(b)))
+
+			if cumulativeBytes+int64(len(b)) > MaxBatchDownloadBytes {
+				if w, createErr := zw.Create("_WARNING_TRUNCATED.txt"); createErr == nil {
+					_, _ = w.Write([]byte(fmt.Sprintf("Cumulative uncompressed size exceeded limit of %d MB. Remaining items truncated.\n", MaxBatchDownloadBytes/(1024*1024))))
+				}
+				break
+			}
+			cumulativeBytes += int64(len(b))
 
 			entryName := base + suffix
 			if count, exists := seenNames[entryName]; exists {
@@ -120,16 +158,14 @@ func (h FolderDownloadHandlers) Handler() echo.HandlerFunc {
 				continue
 			}
 			if _, err := w.Write(b); err != nil {
-				continue
+				if h.Errf != nil {
+					h.Errf("downloadFolder.clientDisconnected", err, "client disconnected prematurely")
+				}
+				break
 			}
 			added++
 		}
 		_ = zw.Close()
-		if added == 0 {
-			return echo.NewHTTPError(http.StatusNotFound, "다운로드 가능한 결과가 없습니다.")
-		}
-		zipName := fmt.Sprintf("%s_%s.zip", folder.Name, time.Now().Format("20060102_150405"))
-		setContentDisposition(c, zipName)
-		return c.Blob(http.StatusOK, "application/zip", buf.Bytes())
+		return nil
 	}
 }
