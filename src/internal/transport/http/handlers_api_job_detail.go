@@ -1,10 +1,8 @@
 package httptransport
 
 import (
-	"bytes"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -157,16 +155,21 @@ func (h JobDetailHandlers) Audio() echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusNotFound, "작업을 찾을 수 없습니다.")
 		}
 
-		audio, err := h.BlobSvc.LoadAudioAAC(jobID)
+		stream, info, err := h.BlobSvc.OpenAudioAAC(jobID)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusNotFound, "오디오를 찾을 수 없습니다.")
 		}
+		defer stream.Close()
+
 		res := c.Response()
 		req := c.Request()
 		res.Header().Set("Content-Disposition", `inline; filename="audio.m4a"`)
 		res.Header().Set("Content-Type", "audio/mp4")
 		res.Header().Set("Accept-Ranges", "bytes")
-		http.ServeContent(res, req, "audio.m4a", time.Time{}, bytes.NewReader(audio))
+		if info.ETag != "" {
+			res.Header().Set("ETag", info.ETag)
+		}
+		http.ServeContent(res, req, "audio.m4a", info.LastModified, stream)
 		return nil
 	}
 }
@@ -187,16 +190,21 @@ func (h JobDetailHandlers) PDF() echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusNotFound, "작업을 찾을 수 없습니다.")
 		}
 
-		pdfBytes, err := h.BlobSvc.LoadPDFOriginal(jobID)
+		stream, info, err := h.BlobSvc.OpenPDFOriginal(jobID)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusNotFound, "PDF를 찾을 수 없습니다.")
 		}
+		defer stream.Close()
+
 		res := c.Response()
 		req := c.Request()
 		res.Header().Set("Content-Disposition", `inline; filename="document.pdf"`)
 		res.Header().Set("Content-Type", "application/pdf")
 		res.Header().Set("Accept-Ranges", "bytes")
-		http.ServeContent(res, req, "document.pdf", time.Time{}, bytes.NewReader(pdfBytes))
+		if info.ETag != "" {
+			res.Header().Set("ETag", info.ETag)
+		}
+		http.ServeContent(res, req, "document.pdf", info.LastModified, stream)
 		return nil
 	}
 }

@@ -19,6 +19,26 @@ type ObjectInfo struct {
 	LastModified time.Time
 }
 
+// ReadSeekCloser combines io.Reader, io.Seeker, and io.Closer for streaming and range serving.
+type ReadSeekCloser interface {
+	io.Reader
+	io.Seeker
+	io.Closer
+}
+
+type nopReadSeekCloser struct {
+	io.ReadSeeker
+}
+
+func (n nopReadSeekCloser) Close() error {
+	return nil
+}
+
+// NopReadSeekCloser wraps an io.ReadSeeker with a no-op Close method.
+func NopReadSeekCloser(r io.ReadSeeker) ReadSeekCloser {
+	return nopReadSeekCloser{ReadSeeker: r}
+}
+
 // Storage is the unified contract for blob and object persistence.
 type Storage interface {
 	// Put stores binary data under the given key.
@@ -32,6 +52,10 @@ type Storage interface {
 
 	// GetStream opens a stream to the object. Callers must close the returned ReadCloser.
 	GetStream(ctx context.Context, key string) (io.ReadCloser, ObjectInfo, error)
+
+	// GetReadSeeker opens an object for random-access streaming (HTTP Range requests).
+	// Callers must close the returned ReadSeekCloser.
+	GetReadSeeker(ctx context.Context, key string) (ReadSeekCloser, ObjectInfo, error)
 
 	// Delete removes a single object by key.
 	Delete(ctx context.Context, key string) error

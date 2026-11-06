@@ -92,6 +92,25 @@ func (s *MemoryStorage) GetStream(ctx context.Context, key string) (io.ReadClose
 	return io.NopCloser(bytes.NewReader(obj.data)), info, nil
 }
 
+// GetReadSeeker returns an in-memory ReadSeekCloser.
+func (s *MemoryStorage) GetReadSeeker(ctx context.Context, key string) (ReadSeekCloser, ObjectInfo, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	obj, ok := s.objects[key]
+	if !ok {
+		return nil, ObjectInfo{}, ErrNotFound
+	}
+
+	info := ObjectInfo{
+		Key:          key,
+		Size:         int64(len(obj.data)),
+		ContentType:  obj.contentType,
+		LastModified: obj.updatedAt,
+	}
+	return NopReadSeekCloser(bytes.NewReader(obj.data)), info, nil
+}
+
 // Delete removes object by key.
 func (s *MemoryStorage) Delete(ctx context.Context, key string) error {
 	s.mu.Lock()

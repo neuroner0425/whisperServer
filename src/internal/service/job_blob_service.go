@@ -4,12 +4,15 @@ package service
 import (
 	"net/http"
 	"sort"
+
+	"whisperserver/src/internal/integrations/storage"
 )
 
 // JobBlobServiceDeps provides blob/json repository operations and artifact kind constants.
 type JobBlobServiceDeps struct {
 	HasJobBlob       func(jobID, kind string) bool
 	LoadJobBlob      func(jobID, kind string) ([]byte, error)
+	OpenJobBlob      func(jobID, kind string) (storage.ReadSeekCloser, storage.ObjectInfo, error)
 	SaveJobBlob      func(jobID, kind string, b []byte) error
 	DeleteJobBlob    func(jobID, kind string)
 	ListJobBlobKinds func(jobID string) ([]string, error)
@@ -54,6 +57,15 @@ func (s *JobBlobService) LoadBlob(jobID, kind string) ([]byte, error) {
 		return nil, NewHTTPError(http.StatusServiceUnavailable, "서비스를 사용할 수 없습니다.")
 	}
 	return s.d.LoadJobBlob(jobID, kind)
+}
+
+// OpenBlob opens a blob for random-access streaming (HTTP Range requests).
+// Callers must close the returned ReadSeekCloser.
+func (s *JobBlobService) OpenBlob(jobID, kind string) (storage.ReadSeekCloser, storage.ObjectInfo, error) {
+	if s == nil || s.d.OpenJobBlob == nil {
+		return nil, storage.ObjectInfo{}, NewHTTPError(http.StatusServiceUnavailable, "서비스를 사용할 수 없습니다.")
+	}
+	return s.d.OpenJobBlob(jobID, kind)
 }
 
 // SaveBlob persists a blob by job id and kind.
@@ -143,6 +155,11 @@ func (s *JobBlobService) LoadAudioAAC(jobID string) ([]byte, error) {
 	return s.LoadBlob(jobID, s.d.BlobKindAudioAAC)
 }
 
+// OpenAudioAAC opens the normalized audio blob for random-access streaming.
+func (s *JobBlobService) OpenAudioAAC(jobID string) (storage.ReadSeekCloser, storage.ObjectInfo, error) {
+	return s.OpenBlob(jobID, s.d.BlobKindAudioAAC)
+}
+
 // DeletePreview removes the persisted preview blob.
 func (s *JobBlobService) DeletePreview(jobID string) {
 	s.DeleteBlob(jobID, s.d.BlobKindPreview)
@@ -156,6 +173,11 @@ func (s *JobBlobService) HasPDFOriginal(jobID string) bool {
 // LoadPDFOriginal loads the original uploaded PDF blob.
 func (s *JobBlobService) LoadPDFOriginal(jobID string) ([]byte, error) {
 	return s.LoadBlob(jobID, s.d.BlobKindPDFOriginal)
+}
+
+// OpenPDFOriginal opens the original uploaded PDF blob for random-access streaming.
+func (s *JobBlobService) OpenPDFOriginal(jobID string) (storage.ReadSeekCloser, storage.ObjectInfo, error) {
+	return s.OpenBlob(jobID, s.d.BlobKindPDFOriginal)
 }
 
 // HasDocumentJSON reports whether the structured document JSON exists.

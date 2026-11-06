@@ -169,6 +169,36 @@ func (s *S3Storage) GetStream(ctx context.Context, key string) (io.ReadCloser, O
 	return obj, info, nil
 }
 
+// GetReadSeeker opens an object stream for random-access reading and Range requests.
+func (s *S3Storage) GetReadSeeker(ctx context.Context, key string) (ReadSeekCloser, ObjectInfo, error) {
+	if s == nil || s.client == nil {
+		return nil, ObjectInfo{}, errors.New("s3_storage: storage is not initialized")
+	}
+
+	obj, err := s.client.GetObject(ctx, s.bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, ObjectInfo{}, fmt.Errorf("s3_storage: get %q failed: %w", key, err)
+	}
+
+	stat, err := obj.Stat()
+	if err != nil {
+		_ = obj.Close()
+		if isS3NotFound(err) {
+			return nil, ObjectInfo{}, ErrNotFound
+		}
+		return nil, ObjectInfo{}, fmt.Errorf("s3_storage: stat %q failed: %w", key, err)
+	}
+
+	info := ObjectInfo{
+		Key:          key,
+		Size:         stat.Size,
+		ContentType:  stat.ContentType,
+		ETag:         stat.ETag,
+		LastModified: stat.LastModified,
+	}
+	return obj, info, nil
+}
+
 // Delete removes an object by key.
 func (s *S3Storage) Delete(ctx context.Context, key string) error {
 	if s == nil || s.client == nil {

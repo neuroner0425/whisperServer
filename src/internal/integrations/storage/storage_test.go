@@ -70,6 +70,26 @@ func runCommonStorageTests(t *testing.T, s storage.Storage) {
 		t.Fatalf("stream info size mismatch")
 	}
 
+	// 5-1. ReadSeeker Get
+	rsc, rsinfo, err := s.GetReadSeeker(ctx, "jobs/123/audio.m4a")
+	if err != nil {
+		t.Fatalf("get read seeker failed: %v", err)
+	}
+	defer rsc.Close()
+	if rsinfo.Size != int64(len(data)) {
+		t.Fatalf("read seeker info size mismatch")
+	}
+	// Test Seek offset
+	offset, err := rsc.Seek(5, 0)
+	if err != nil || offset != 5 {
+		t.Fatalf("seek failed: offset=%d err=%v", offset, err)
+	}
+	buf := make([]byte, 4)
+	n, err := rsc.Read(buf)
+	if err != nil || n != 4 || string(buf) != "audi" {
+		t.Fatalf("read after seek failed: n=%d buf=%q err=%v", n, string(buf), err)
+	}
+
 	// 6. Delete
 	if err := s.Delete(ctx, "jobs/123/audio.m4a"); err != nil {
 		t.Fatalf("delete failed: %v", err)

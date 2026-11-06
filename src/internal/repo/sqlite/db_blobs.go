@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
@@ -88,6 +89,48 @@ func LoadJobBlob(jobID, kind string) ([]byte, error) {
 
 	// 2. Fallback to legacy job_blobs table if present
 	return LoadJobBinaryBlob(jobID, kind)
+}
+
+// OpenJobBlob opens one named blob for random-access streaming (e.g. HTTP Range).
+// Callers must close the returned ReadSeekCloser.
+func OpenJobBlob(jobID, kind string) (storage.ReadSeekCloser, storage.ObjectInfo, error) {
+	if dbConn == nil {
+		return nil, storage.ObjectInfo{}, fmt.Errorf("db is not initialized")
+	}
+	if isRuntimeArtifactKind(kind) {
+		data, err := LoadJobRuntimeArtifact(jobID, kind)
+		if err != nil {
+			return nil, storage.ObjectInfo{}, err
+		}
+		info := storage.ObjectInfo{
+			Key:  fmt.Sprintf("jobs/%s/%s", jobID, kind),
+			Size: int64(len(data)),
+		}
+		return storage.NopReadSeekCloser(bytes.NewReader(data)), info, nil
+	}
+
+	// 1. Try to open from job_media + blobStorage
+	media, err := GetJobMediaMetadata(jobID, kind)
+	if err == nil && media != nil && blobStorage != nil {
+		r, info, err := blobStorage.GetReadSeeker(context.Background(), media.StorageKey)
+		if err == nil {
+			if info.ContentType == "" {
+				info.ContentType = media.ContentType
+			}
+			return r, info, nil
+		}
+	}
+
+	// 2. Fallback to legacy job_blobs table if present
+	data, err := LoadJobBinaryBlob(jobID, kind)
+	if err != nil {
+		return nil, storage.ObjectInfo{}, err
+	}
+	info := storage.ObjectInfo{
+		Key:  fmt.Sprintf("jobs/%s/%s", jobID, kind),
+		Size: int64(len(data)),
+	}
+	return storage.NopReadSeekCloser(bytes.NewReader(data)), info, nil
 }
 
 // HasJobBlob reports whether a named blob exists for a job.

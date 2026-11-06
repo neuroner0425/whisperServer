@@ -106,6 +106,30 @@ func (s *LocalStorage) GetStream(ctx context.Context, key string) (io.ReadCloser
 	}, nil
 }
 
+// GetReadSeeker opens the local file for random-access reading.
+func (s *LocalStorage) GetReadSeeker(ctx context.Context, key string) (ReadSeekCloser, ObjectInfo, error) {
+	targetPath := s.pathFor(key)
+	f, err := os.Open(targetPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, ObjectInfo{}, ErrNotFound
+		}
+		return nil, ObjectInfo{}, err
+	}
+
+	stat, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, ObjectInfo{}, err
+	}
+
+	return f, ObjectInfo{
+		Key:          key,
+		Size:         stat.Size(),
+		LastModified: stat.ModTime(),
+	}, nil
+}
+
 // Delete removes the local file.
 func (s *LocalStorage) Delete(ctx context.Context, key string) error {
 	targetPath := s.pathFor(key)

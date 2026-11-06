@@ -37,6 +37,7 @@ func newAppServices() appServices {
 	blobSvc := service.NewJobBlobService(service.JobBlobServiceDeps{
 		HasJobBlob:                 store.HasJobBlob,
 		LoadJobBlob:                store.LoadJobBlob,
+		OpenJobBlob:                store.OpenJobBlob,
 		SaveJobBlob:                store.SaveJobBlob,
 		DeleteJobBlob:              store.DeleteJobBlob,
 		ListJobBlobKinds:           store.ListJobBlobKinds,
