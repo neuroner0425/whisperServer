@@ -53,8 +53,32 @@ func New(cfg Config) *Runtime {
 	return &Runtime{cfg: cfg}
 }
 
+// RunOptions configures optional parameters such as transcription language.
+type RunOptions struct {
+	Language string // "ko", "en", "ja", "auto" (default: "ko")
+}
+
+// NormalizeLanguage validates and normalizes the language string.
+func NormalizeLanguage(lang string) string {
+	switch strings.ToLower(strings.TrimSpace(lang)) {
+	case "en", "english":
+		return "en"
+	case "ja", "japanese":
+		return "ja"
+	case "auto":
+		return "auto"
+	default:
+		return "ko"
+	}
+}
+
 // RunFromBlob materializes a temporary WAV file before invoking the Whisper CLI.
 func (r *Runtime) RunFromBlob(ctx context.Context, jobID string, wavBytes []byte, totalSec *int) (RunResult, error) {
+	return r.RunFromBlobWithOptions(ctx, jobID, wavBytes, totalSec, RunOptions{Language: "ko"})
+}
+
+// RunFromBlobWithOptions materializes a temporary WAV file and invokes Whisper with specific options.
+func (r *Runtime) RunFromBlobWithOptions(ctx context.Context, jobID string, wavBytes []byte, totalSec *int, opts RunOptions) (RunResult, error) {
 	tmpDir, err := os.MkdirTemp("", "whisper-job-*")
 	if err != nil {
 		return RunResult{}, err
@@ -65,12 +89,18 @@ func (r *Runtime) RunFromBlob(ctx context.Context, jobID string, wavBytes []byte
 	if err := os.WriteFile(wavPath, wavBytes, 0o644); err != nil {
 		return RunResult{}, err
 	}
-	return r.Run(ctx, jobID, wavPath, totalSec)
+	return r.RunWithOptions(ctx, jobID, wavPath, totalSec, opts)
 }
 
 // Run executes Whisper on a WAV file and collects text plus structured transcript output.
 func (r *Runtime) Run(ctx context.Context, jobID, wavPath string, totalSec *int) (RunResult, error) {
-	r.logf("[WHISPER] start job_id=%s wav=%s total_sec=%s", jobID, wavPath, formatTotalSec(totalSec))
+	return r.RunWithOptions(ctx, jobID, wavPath, totalSec, RunOptions{Language: "ko"})
+}
+
+// RunWithOptions executes Whisper on a WAV file with specific options (e.g. language).
+func (r *Runtime) RunWithOptions(ctx context.Context, jobID, wavPath string, totalSec *int, opts RunOptions) (RunResult, error) {
+	lang := NormalizeLanguage(opts.Language)
+	r.logf("[WHISPER] start job_id=%s wav=%s lang=%s total_sec=%s", jobID, wavPath, lang, formatTotalSec(totalSec))
 
 	outputPath := wavPath + ".txt"
 	outputJSONPath := wavPath + ".json"
@@ -85,14 +115,14 @@ func (r *Runtime) Run(ctx context.Context, jobID, wavPath string, totalSec *int)
 		return RunResult{}, err
 	}
 
-	result, segments, err := r.runAttempt(ctx, jobID, wavPath, outputPath, outputJSONPath, modelBin, vadModel, totalSec, true)
+	result, segments, err := r.runAttempt(ctx, jobID, wavPath, outputPath, outputJSONPath, modelBin, vadModel, totalSec, true, lang)
 	if err != nil {
 		return RunResult{}, err
 	}
 	if reason := vadFallbackReason(segments); reason != "" {
-		r.logf("[WHISPER] retry without VAD job_id=%s reason=%s", jobID, reason)
+		r.logf("[WHISPER] retry without VAD job_id=%s reason=%s lang=%s", jobID, reason, lang)
 		r.phase(jobID, "전사 재시도 중", 0, "전사 재시도 중...")
-		result, _, err = r.runAttempt(ctx, jobID, wavPath, outputPath, outputJSONPath, modelBin, vadModel, totalSec, false)
+		result, _, err = r.runAttempt(ctx, jobID, wavPath, outputPath, outputJSONPath, modelBin, vadModel, totalSec, false, lang)
 		if err != nil {
 			return RunResult{}, err
 		}
@@ -100,14 +130,17 @@ func (r *Runtime) Run(ctx context.Context, jobID, wavPath string, totalSec *int)
 
 	_ = os.Remove(outputPath)
 	_ = os.Remove(outputJSONPath)
-	r.logf("[WHISPER] done job_id=%s", jobID)
+	r.logf("[WHISPER] done job_id=%s lang=%s", jobID, lang)
 	return result, nil
 }
 
-func (r *Runtime) runAttempt(ctx context.Context, jobID, wavPath, outputPath, outputJSONPath, modelBin, vadModel string, totalSec *int, useVAD bool) (RunResult, []transcriptSegment, error) {
+func (r *Runtime) runAttempt(ctx context.Context, jobID, wavPath, outputPath, outputJSONPath, modelBin, vadModel string, totalSec *int, useVAD bool, lang string) (RunResult, []transcriptSegment, error) {
+	if lang == "" {
+		lang = "ko"
+	}
 	args := []string{
 		"-m", modelBin,
-		"-l", "ko",
+		"-l", lang,
 		"--max-context", "0",
 		"--no-speech-thold", "0.01",
 		"--suppress-nst",

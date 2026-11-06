@@ -34,8 +34,20 @@ func CountPDFPages(toolPath, pdfPath string) (int, error) {
 
 // RenderPDFToJPEGs renders each PDF page into a JPEG file for OCR-style processing.
 func RenderPDFToJPEGs(toolPath, pdfPath, outDir string, dpi int) ([]string, error) {
+	return RenderPDFToJPEGsRange(toolPath, pdfPath, outDir, dpi, 0, 0)
+}
+
+// RenderPDFToJPEGsRange renders only the specified page range [startPage, endPage] into JPEGs (1-based index).
+// If startPage <= 0 or endPage <= 0, all pages are rendered.
+func RenderPDFToJPEGsRange(toolPath, pdfPath, outDir string, dpi, startPage, endPage int) ([]string, error) {
 	prefix := filepath.Join(outDir, "page")
-	cmd := exec.Command(toolPath, "-jpeg", "-r", strconv.Itoa(dpi), pdfPath, prefix)
+	args := []string{"-jpeg", "-r", strconv.Itoa(dpi)}
+	if startPage > 0 && endPage >= startPage {
+		args = append(args, "-f", strconv.Itoa(startPage), "-l", strconv.Itoa(endPage))
+	}
+	args = append(args, pdfPath, prefix)
+
+	cmd := exec.Command(toolPath, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, wrapPDFToolErr("pdftoppm", err, out)

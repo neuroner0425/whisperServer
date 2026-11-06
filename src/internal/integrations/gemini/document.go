@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"strings"
 
+	"whisperserver/src/internal/domain"
 	"whisperserver/src/internal/structured"
-	"whisperserver/src/internal/worker"
 )
 
 // buildDocumentChunkPrompt describes the current PDF chunk and prior consistency hints.
-func buildDocumentChunkPrompt(chunk worker.DocumentChunk, consistencyContext string) string {
+func buildDocumentChunkPrompt(chunk domain.DocumentChunk, consistencyContext string) string {
 	lines := []string{
 		"[Document Batch Info]",
 		fmt.Sprintf("- Total pages: %d", chunk.TotalPages),
@@ -39,7 +39,7 @@ func normalizeDocumentResponseJSON(raw string) ([]byte, error) {
 }
 
 // alignDocumentPageIndexes rewrites page indexes to match the source chunk metadata.
-func alignDocumentPageIndexes(raw []byte, chunk worker.DocumentChunk) ([]byte, error) {
+func alignDocumentPageIndexes(raw []byte, chunk domain.DocumentChunk) ([]byte, error) {
 	var parsed structured.DocumentResponse
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return nil, err

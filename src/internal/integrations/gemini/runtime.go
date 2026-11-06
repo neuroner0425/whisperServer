@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"whisperserver/src/internal/domain"
 	"whisperserver/src/internal/obs"
-	"whisperserver/src/internal/worker"
 
 	"google.golang.org/genai"
 )
@@ -375,7 +375,12 @@ func summarizeSafetyRatings(ratings []*genai.SafetyRating) string {
 	return strings.Join(out, "|")
 }
 
-func (r *Runtime) ExtractDocumentChunk(ctx context.Context, chunk worker.DocumentChunk, consistencyContext string) ([]byte, error) {
+func (r *Runtime) ExtractDocumentChunk(ctx context.Context, chunk domain.DocumentChunk, consistencyContext string) ([]byte, error) {
+	return r.ExtractDocumentChunkWithOptions(ctx, chunk, consistencyContext, DefaultPreferences().PDFExtract)
+}
+
+// ExtractDocumentChunkWithOptions extracts structured JSON from rendered PDF images with explicit stage configuration.
+func (r *Runtime) ExtractDocumentChunkWithOptions(ctx context.Context, chunk domain.DocumentChunk, consistencyContext string, stageCfg LLMStageConfig) ([]byte, error) {
 	r.loadKeys()
 	r.mu.Lock()
 	clientCount := len(r.clients)
@@ -402,7 +407,7 @@ func (r *Runtime) ExtractDocumentChunk(ctx context.Context, chunk worker.Documen
 			return nil, waitErr
 		}
 		attempt++
-		result, genErr := r.generateDocument(ctx, idx, systemPrompt, schema, instructionText, chunk)
+		result, genErr := r.generateDocument(ctx, idx, systemPrompt, schema, instructionText, chunk, stageCfg)
 		if genErr == nil && len(result) > 0 {
 			return result, nil
 		}
@@ -411,7 +416,7 @@ func (r *Runtime) ExtractDocumentChunk(ctx context.Context, chunk worker.Documen
 	return nil, lastErr
 }
 
-func (r *Runtime) generateDocument(ctx context.Context, idx int, systemPrompt string, schema *genai.Schema, instruction string, chunk worker.DocumentChunk) ([]byte, error) {
+func (r *Runtime) generateDocument(ctx context.Context, idx int, systemPrompt string, schema *genai.Schema, instruction string, chunk domain.DocumentChunk, stageCfg LLMStageConfig) ([]byte, error) {
 	r.mu.Lock()
 	if idx < 0 || idx >= len(r.clients) {
 		r.mu.Unlock()
@@ -430,9 +435,15 @@ func (r *Runtime) generateDocument(ctx context.Context, idx int, systemPrompt st
 		parts = append(parts, genai.NewPartFromBytes(image.Data, image.MIMEType))
 	}
 
+	modelName := r.cfg.Model
+	if stageCfg.Model != "" {
+		modelName = stageCfg.Model
+	}
+	thinkingCfg := BuildThinkingConfig(stageCfg.ThinkingLevel)
+
 	result, err := c.Models.GenerateContent(
 		callCtx,
-		r.cfg.Model,
+		modelName,
 		[]*genai.Content{{
 			Role:  "user",
 			Parts: parts,
@@ -442,9 +453,7 @@ func (r *Runtime) generateDocument(ctx context.Context, idx int, systemPrompt st
 			SystemInstruction: &genai.Content{
 				Parts: []*genai.Part{{Text: systemPrompt}},
 			},
-			ThinkingConfig: &genai.ThinkingConfig{
-				ThinkingLevel: genai.ThinkingLevelHigh,
-			},
+			ThinkingConfig:   thinkingCfg,
 			ResponseMIMEType: "application/json",
 			ResponseSchema:   schema,
 		},

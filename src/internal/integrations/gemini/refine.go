@@ -80,8 +80,13 @@ func normalizeTimelineTimestamp(raw string) string {
 
 const refineRequestTimeout = 180 * time.Second
 
-// PolishTranscriptTimeline preserves timestamped lines while correcting STT text.
+// PolishTranscriptTimeline preserves timestamped lines while correcting STT text using default settings.
 func (r *Runtime) PolishTranscriptTimeline(rawText, description string) (string, error) {
+	return r.PolishTranscriptTimelineWithOptions(context.Background(), rawText, description, DefaultPreferences().Polish)
+}
+
+// PolishTranscriptTimelineWithOptions preserves timestamped lines with explicit stage configuration.
+func (r *Runtime) PolishTranscriptTimelineWithOptions(ctx context.Context, rawText, description string, stageCfg LLMStageConfig) (string, error) {
 	systemPrompt, err := r.refineTimelineSystemPrompt()
 	if err != nil {
 		return "", err
@@ -99,15 +104,20 @@ func (r *Runtime) PolishTranscriptTimeline(rawText, description string) (string,
 	prompt += "Do not summarize, merge unrelated lines, or omit speech content.\n\n"
 	prompt += "[Original Timeline]\n\"\"\"\n" + normalizeRefineInputText(rawText) + "\n\"\"\"\n"
 
-	text, err := r.requestRefine(prompt, systemPrompt, "", nil)
+	text, err := r.requestRefineWithOptions(ctx, prompt, systemPrompt, "", nil, stageCfg)
 	if err != nil {
 		return "", err
 	}
 	return normalizePolishedTimeline(text)
 }
 
-// StructureTranscriptParagraphs converts a polished timestamped timeline to the UI's refined JSON schema.
+// StructureTranscriptParagraphs converts a polished timestamped timeline using default settings.
 func (r *Runtime) StructureTranscriptParagraphs(polishedTimeline, description string) (string, error) {
+	return r.StructureTranscriptParagraphsWithOptions(context.Background(), polishedTimeline, description, DefaultPreferences().Structure)
+}
+
+// StructureTranscriptParagraphsWithOptions converts a polished timeline with explicit stage configuration.
+func (r *Runtime) StructureTranscriptParagraphsWithOptions(ctx context.Context, polishedTimeline, description string, stageCfg LLMStageConfig) (string, error) {
 	systemPrompt, err := r.transcriptSystemPrompt()
 	if err != nil {
 		return "", err
@@ -138,7 +148,7 @@ func (r *Runtime) StructureTranscriptParagraphs(polishedTimeline, description st
 	prompt += "Example output:\n[1] 회의 시작 및 안건 소개\n[6] 세부 논의\n[12] 마무리\n\n"
 	prompt += "[Numbered Sentences]\n\"\"\"\n" + normalizeRefineInputText(numberedTimeline) + "\n\"\"\"\n"
 
-	plan, err := r.requestRefine(prompt, systemPrompt, "", nil)
+	plan, err := r.requestRefineWithOptions(ctx, prompt, systemPrompt, "", nil, stageCfg)
 	if err != nil {
 		// Fallback to single paragraph containing all polished sentences
 		return BuildSingleParagraphRefinedJSON(sentences)
@@ -161,6 +171,10 @@ func (r *Runtime) RefineTranscript(rawText, description string) (string, error) 
 }
 
 func (r *Runtime) requestRefine(prompt, systemPrompt, responseMIMEType string, responseSchema *genai.Schema) (string, error) {
+	return r.requestRefineWithOptions(context.Background(), prompt, systemPrompt, responseMIMEType, responseSchema, DefaultPreferences().Polish)
+}
+
+func (r *Runtime) requestRefineWithOptions(ctx context.Context, prompt, systemPrompt, responseMIMEType string, responseSchema *genai.Schema, stageCfg LLMStageConfig) (string, error) {
 	r.loadKeys()
 	r.mu.Lock()
 	clientCount := len(r.clients)
@@ -172,13 +186,13 @@ func (r *Runtime) requestRefine(prompt, systemPrompt, responseMIMEType string, r
 	var lastErr error = errors.New("gemini request failed")
 	maxAttempts := clientCount * 3
 	for attempt := 0; attempt < maxAttempts; {
-		idx, waitErr := r.waitForReadyClient(context.Background())
+		idx, waitErr := r.waitForReadyClient(ctx)
 		if waitErr != nil {
 			return "", waitErr
 		}
 		attempt++
 
-		text, genErr := r.generateRefine(idx, systemPrompt, responseMIMEType, responseSchema, prompt)
+		text, genErr := r.generateRefine(ctx, idx, systemPrompt, responseMIMEType, responseSchema, prompt, stageCfg)
 		if genErr == nil && strings.TrimSpace(text) != "" {
 			return strings.TrimSpace(text), nil
 		}
@@ -187,8 +201,8 @@ func (r *Runtime) requestRefine(prompt, systemPrompt, responseMIMEType string, r
 	return "", lastErr
 }
 
-// generateRefine performs one refine request using the selected Gemini client.
-func (r *Runtime) generateRefine(idx int, systemPrompt, responseMIMEType string, responseSchema *genai.Schema, prompt string) (string, error) {
+// generateRefine performs one refine request using the selected Gemini client and dynamic stage config.
+func (r *Runtime) generateRefine(ctx context.Context, idx int, systemPrompt, responseMIMEType string, responseSchema *genai.Schema, prompt string, stageCfg LLMStageConfig) (string, error) {
 	r.mu.Lock()
 	if idx < 0 || idx >= len(r.clients) {
 		r.mu.Unlock()
@@ -198,17 +212,21 @@ func (r *Runtime) generateRefine(idx int, systemPrompt, responseMIMEType string,
 	keySuffix := maskedKeySuffix(r.clients[idx].key)
 	r.mu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), refineRequestTimeout)
+	callCtx, cancel := context.WithTimeout(ctx, refineRequestTimeout)
 	defer cancel()
+
+	modelName := r.cfg.Model
+	if stageCfg.Model != "" {
+		modelName = stageCfg.Model
+	}
+	thinkingCfg := BuildThinkingConfig(stageCfg.ThinkingLevel)
 
 	cfg := &genai.GenerateContentConfig{
 		Temperature: genai.Ptr[float32](0.7),
 		SystemInstruction: &genai.Content{
 			Parts: []*genai.Part{{Text: systemPrompt}},
 		},
-		ThinkingConfig: &genai.ThinkingConfig{
-			ThinkingLevel: genai.ThinkingLevelMedium,
-		},
+		ThinkingConfig: thinkingCfg,
 	}
 	if strings.TrimSpace(responseMIMEType) != "" {
 		cfg.ResponseMIMEType = responseMIMEType
@@ -218,8 +236,8 @@ func (r *Runtime) generateRefine(idx int, systemPrompt, responseMIMEType string,
 	}
 
 	result, err := c.Models.GenerateContent(
-		ctx,
-		r.cfg.Model,
+		callCtx,
+		modelName,
 		[]*genai.Content{{
 			Role:  "user",
 			Parts: []*genai.Part{{Text: prompt}},
@@ -227,24 +245,24 @@ func (r *Runtime) generateRefine(idx int, systemPrompt, responseMIMEType string,
 		cfg,
 	)
 	if err != nil {
-		recordGeminiMetrics(r.cfg.Model, nil, err)
+		recordGeminiMetrics(modelName, nil, err)
 		r.onFailure(idx, err)
 		return "", err
 	}
 	if result == nil {
 		err = errors.New("empty response")
-		recordGeminiMetrics(r.cfg.Model, nil, err)
+		recordGeminiMetrics(modelName, nil, err)
 		r.onFailure(idx, err)
 		return "", err
 	}
 	text := strings.TrimSpace(result.Text())
 	if text == "" {
 		err = emptyResponseError(result)
-		recordGeminiMetrics(r.cfg.Model, result, err)
+		recordGeminiMetrics(modelName, result, err)
 		r.onFailure(idx, err)
 		return "", err
 	}
-	recordGeminiMetrics(r.cfg.Model, result, nil)
+	recordGeminiMetrics(modelName, result, nil)
 	if responseSchema != nil {
 		text, err = normalizeRefineResponseJSON(text)
 		if err != nil {
