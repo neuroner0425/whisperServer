@@ -112,10 +112,18 @@ func (b *Broker) Notify(userID, eventType string, payload map[string]any) {
 }
 
 func (b *Broker) broadcast(userID, eventType string, payload map[string]any) {
+	b.BroadcastWithSeq(userID, 0, eventType, payload)
+}
+
+// BroadcastWithSeq emits an SSE message with standard id: <seq> metadata for replay support.
+func (b *Broker) BroadcastWithSeq(userID string, seq int64, eventType string, payload map[string]any) {
 	obs.IncSSEReload()
 	body := map[string]any{
 		"type": eventType,
 		"at":   time.Now().Format(time.RFC3339Nano),
+	}
+	if seq > 0 {
+		body["seq"] = seq
 	}
 	for k, v := range payload {
 		body[k] = v
@@ -124,8 +132,13 @@ func (b *Broker) broadcast(userID, eventType string, payload map[string]any) {
 	if err != nil {
 		return
 	}
-	// Keep SSE event name stable ("update") so the frontend can bind once.
-	message := []byte(fmt.Sprintf("event: update\ndata: %s\n\n", data))
+
+	var message []byte
+	if seq > 0 {
+		message = []byte(fmt.Sprintf("id: %d\nevent: update\ndata: %s\n\n", seq, data))
+	} else {
+		message = []byte(fmt.Sprintf("event: update\ndata: %s\n\n", data))
+	}
 
 	b.mu.RLock()
 	defer b.mu.RUnlock()

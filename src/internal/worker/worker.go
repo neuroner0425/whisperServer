@@ -44,22 +44,11 @@ type Config struct {
 	StatusFailed                string
 }
 
-// DocumentPageImage is one rendered PDF page passed to Gemini extraction.
-type DocumentPageImage struct {
-	PageIndex int
-	MIMEType  string
-	Data      []byte
-}
+// DocumentPageImage is an alias for domain.DocumentPageImage.
+type DocumentPageImage = model.DocumentPageImage
 
-// DocumentChunk is one batch of rendered PDF pages sent to Gemini.
-type DocumentChunk struct {
-	ChunkIndex  int
-	TotalChunks int
-	StartPage   int
-	EndPage     int
-	TotalPages  int
-	Images      []DocumentPageImage
-}
+// DocumentChunk is an alias for domain.DocumentChunk.
+type DocumentChunk = model.DocumentChunk
 
 // Deps provides runtime, blob, integration, and metric hooks used by the worker.
 type Deps struct {
