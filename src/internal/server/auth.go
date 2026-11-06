@@ -2,6 +2,8 @@
 package server
 
 import (
+	"strings"
+
 	"github.com/labstack/echo/v4"
 	intauth "whisperserver/src/internal/auth"
 )
@@ -20,11 +22,13 @@ var (
 
 // initAuthRuntime builds the shared auth runtime after config has been loaded.
 func initAuthRuntime() {
+	isProd := strings.EqualFold(runMode, "prod") || strings.EqualFold(runMode, "production")
 	authRuntime = intauth.New(intauth.Config{
 		JWTSecret:        jwtSecret,
 		JWTIssuer:        jwtIssuer,
 		JWTExpiryHours:   jwtExpiryHours,
-		AuthCookieSecure: authCookieSecure,
+		AuthCookieSecure: authCookieSecure || isProd,
+		IsProduction:     isProd,
 	}, procLogf, procErrf)
 }
 

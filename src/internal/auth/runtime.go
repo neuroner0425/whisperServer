@@ -3,6 +3,9 @@ package auth
 
 import (
 	"crypto/rand"
+	"log"
+	"os"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 )
@@ -13,6 +16,7 @@ type Config struct {
 	JWTIssuer        string
 	JWTExpiryHours   int
 	AuthCookieSecure bool
+	IsProduction     bool
 }
 
 // Runtime exposes auth handlers in a bootstrap-friendly wrapper.
@@ -22,8 +26,18 @@ type Runtime struct {
 
 // New builds the auth runtime and creates an ephemeral secret when none was configured.
 func New(cfg Config, logf func(string, ...any), errf func(string, error, string, ...any)) *Runtime {
+	isProd := cfg.IsProduction ||
+		strings.EqualFold(os.Getenv("ENV"), "production") ||
+		strings.EqualFold(os.Getenv("APP_ENV"), "production") ||
+		strings.EqualFold(os.Getenv("GO_ENV"), "production")
+
 	secret := cfg.JWTSecret
-	if len(secret) == 0 {
+	if isProd {
+		if len(secret) < 32 {
+			log.Fatalf("[FATAL] production environment requires JWT_SECRET to be at least 32 bytes (got %d bytes)", len(secret))
+		}
+		cfg.AuthCookieSecure = true
+	} else if len(secret) == 0 {
 		secret = make([]byte, 32)
 		if _, err := rand.Read(secret); err != nil {
 			panic("failed to initialize jwt secret")

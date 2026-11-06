@@ -1,6 +1,13 @@
 package httptransport
 
-import "github.com/labstack/echo/v4"
+import (
+	"net/http"
+	"time"
+
+	"github.com/labstack/echo/v4"
+	"golang.org/x/time/rate"
+	"whisperserver/src/internal/auth"
+)
 
 // Config defines transport-level HTTP settings needed to register routes.
 type Config struct {
@@ -98,11 +105,29 @@ type Handlers struct {
 func RegisterRoutes(e *echo.Echo, cfg Config, h Handlers) {
 	e.Static("/static", cfg.StaticDir)
 
+	// Robots.txt
+	e.GET("/robots.txt", func(c echo.Context) error {
+		return c.String(http.StatusOK, "User-agent: *\nDisallow: /api/\nDisallow: /download/\n")
+	})
+
+	// Rate limiters (Phase 0.5)
+	// /api/auth/*: IP당 10 req/min
+	authLimiter := RateLimitByIP(rate.Every(6*time.Second), 10)
+	// /api/upload: User당 30 req/min (fallback to IP)
+	uploadLimiter := RateLimitByUserOrIP(rate.Every(2*time.Second), 30, func(c echo.Context) string {
+		if v := c.Get("auth_user"); v != nil {
+			if u, ok := v.(*auth.User); ok && u != nil && u.ID != "" {
+				return "user:" + u.ID
+			}
+		}
+		return ""
+	})
+
 	// Auth (legacy HTML endpoints)
 	e.GET("/login", h.SPALoginPage)
-	e.POST("/login", h.LoginPost)
+	e.POST("/login", h.LoginPost, authLimiter)
 	e.GET("/signup", h.SPASignupPage)
-	e.POST("/signup", h.SignupPost)
+	e.POST("/signup", h.SignupPost, authLimiter)
 	e.POST("/logout", h.LogoutPost)
 
 	// Legacy pages
@@ -114,7 +139,7 @@ func RegisterRoutes(e *echo.Echo, cfg Config, h Handlers) {
 	e.GET("/tags", h.SPATagsPage)
 	e.GET("/trash", h.SPATrashPage)
 	e.GET("/upload", h.SPAUploadPage)
-	e.POST("/upload", h.UploadPostHTML)
+	e.POST("/upload", h.UploadPostHTML, uploadLimiter)
 	e.GET("/jobs", h.RedirectJobsToRoot)
 	e.GET("/jobs/updates", h.JobsUpdates)
 	e.GET("/status/:job_id", h.Status)
@@ -157,8 +182,8 @@ func RegisterRoutes(e *echo.Echo, cfg Config, h Handlers) {
 	// API
 	e.GET("/api/me", h.APIMe)
 	e.GET("/api/events", h.APIEvents)
-	e.POST("/api/auth/signup", h.APIAuthSignup)
-	e.POST("/api/auth/login", h.APIAuthLogin)
+	e.POST("/api/auth/signup", h.APIAuthSignup, authLimiter)
+	e.POST("/api/auth/login", h.APIAuthLogin, authLimiter)
 	e.POST("/api/auth/logout", h.APIAuthLogout)
 	e.GET("/api/files", h.APIFiles)
 	e.GET("/api/storage", h.APIStorage)
@@ -181,7 +206,7 @@ func RegisterRoutes(e *echo.Echo, cfg Config, h Handlers) {
 	e.POST("/api/folders/:folder_id/restore", h.APIRestoreFolder)
 	e.POST("/api/move", h.APIBatchMove)
 	e.GET("/api/folders/:folder_id/download", h.APIDownloadFolder)
-	e.POST("/api/upload", h.APIUpload)
+	e.POST("/api/upload", h.APIUpload, uploadLimiter)
 	e.POST("/api/folders", h.APICreateFolder)
 	e.PATCH("/api/folders/:folder_id", h.APIRenameFolder)
 	e.DELETE("/api/folders/:folder_id", h.APITrashFolder)

@@ -34,7 +34,7 @@ func TestUploadService_Create_AudioHappyPath(t *testing.T) {
 		TouchFolderAndAncestors: func(string, string) error { return nil },
 
 		SaveUploadWithLimit: func(_ *multipart.FileHeader, dst string, _ int64, _ int64) (int64, error) {
-			b := []byte("src-audio")
+			b := []byte("ID3\x03\x00\x00\x00\x00\x00\x00mp3-bytes")
 			if err := os.WriteFile(dst, b, 0o644); err != nil {
 				return 0, err
 			}
@@ -130,7 +130,7 @@ func TestUploadService_Create_PDFHappyPath(t *testing.T) {
 		ListTagNamesByOwner: func(string) (map[string]struct{}, error) { return map[string]struct{}{}, nil },
 
 		SaveUploadWithLimit: func(_ *multipart.FileHeader, dst string, _ int64, _ int64) (int64, error) {
-			b := []byte("%PDF")
+			b := []byte("%PDF-1.4 mock content")
 			if err := os.WriteFile(dst, b, 0o644); err != nil {
 				return 0, err
 			}
@@ -194,7 +194,7 @@ func TestUploadService_Create_PathTraversalSanitization(t *testing.T) {
 		ListTagNamesByOwner: func(string) (map[string]struct{}, error) { return map[string]struct{}{}, nil },
 		SaveJobBlob:    func(string, string, []byte) error { return nil },
 		SaveUploadWithLimit: func(_ *multipart.FileHeader, dst string, _ int64, _ int64) (int64, error) {
-			b := []byte("%PDF")
+			b := []byte("%PDF-1.4 mock evil")
 			_ = os.WriteFile(dst, b, 0o644)
 			return int64(len(b)), nil
 		},
@@ -223,5 +223,72 @@ func TestUploadService_Create_PathTraversalSanitization(t *testing.T) {
 	}
 	if filename != "evil.pdf" {
 		t.Fatalf("expected sanitized filename 'evil.pdf', got %q", filename)
+	}
+}
+
+func TestUploadService_Create_InvalidMagicBytes(t *testing.T) {
+	tmp := t.TempDir()
+	s := NewUploadService(UploadServiceDeps{
+		AllowedFile:         func(name string) bool { return true },
+		DetectFileType:      func(string) string { return "pdf" },
+		ListTagNamesByOwner: func(string) (map[string]struct{}, error) { return map[string]struct{}{}, nil },
+		NewJobID:            func() string { return "job-invalid" },
+		SaveUploadWithLimit: func(_ *multipart.FileHeader, dst string, _ int64, _ int64) (int64, error) {
+			b := []byte("plain text disguised as pdf")
+			_ = os.WriteFile(dst, b, 0o644)
+			return int64(len(b)), nil
+		},
+		TmpFolder: tmp,
+	})
+
+	fh := &multipart.FileHeader{
+		Filename: "fake.pdf",
+		Header:   textproto.MIMEHeader{"Content-Type": []string{"application/pdf"}},
+	}
+	_, _, err := s.Create(UploadCreateRequest{
+		OwnerID:    "u1",
+		FileHeader: fh,
+	})
+	if err == nil {
+		t.Fatal("expected error due to invalid magic bytes, got nil")
+	}
+	if !strings.Contains(err.Error(), "PDF") {
+		t.Fatalf("expected PDF magic byte error message, got %v", err)
+	}
+}
+
+func TestUploadService_FinalizeUploadedAudio_PanicRecovery(t *testing.T) {
+	tmp := t.TempDir()
+	tempPath := filepath.Join(tmp, "job-panic_temp.mp3")
+	aacPath := filepath.Join(tmp, "job-panic.m4a")
+	_ = os.WriteFile(tempPath, []byte("temp"), 0o644)
+	_ = os.WriteFile(aacPath, []byte("aac"), 0o644)
+
+	var failedFields map[string]any
+	s := NewUploadService(UploadServiceDeps{
+		StatusFailed: "failed",
+		ConvertToAac: func(string, string) error {
+			panic("simulated ffmpeg driver panic")
+		},
+		SaveJobBlob: func(string, string, []byte) error { return nil },
+		SetJobFields: func(id string, fields map[string]any) {
+			failedFields = fields
+		},
+	})
+
+	s.finalizeUploadedAudio("job-panic", tempPath, aacPath)
+
+	if failedFields == nil {
+		t.Fatal("expected SetJobFields to be called on panic")
+	}
+	if failedFields["status_code"] != model.JobStatusAudioConvertFailedCode {
+		t.Fatalf("expected status_code %d, got %v", model.JobStatusAudioConvertFailedCode, failedFields["status_code"])
+	}
+
+	if _, err := os.Stat(tempPath); !os.IsNotExist(err) {
+		t.Fatalf("expected tempPath to be removed on panic, got err=%v", err)
+	}
+	if _, err := os.Stat(aacPath); !os.IsNotExist(err) {
+		t.Fatalf("expected aacPath to be removed on panic, got err=%v", err)
 	}
 }

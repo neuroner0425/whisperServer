@@ -2,7 +2,9 @@
 package service
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -78,7 +80,8 @@ type UploadServiceDeps struct {
 
 // UploadService validates uploads, creates jobs, and schedules follow-up work.
 type UploadService struct {
-	d UploadServiceDeps
+	d            UploadServiceDeps
+	transcodeSem chan struct{}
 }
 
 // NewUploadService builds the upload service and applies default helpers for time/spawn.
@@ -89,7 +92,10 @@ func NewUploadService(d UploadServiceDeps) *UploadService {
 	if d.Spawn == nil {
 		d.Spawn = func(fn func()) { go fn() }
 	}
-	return &UploadService{d: d}
+	return &UploadService{
+		d:            d,
+		transcodeSem: make(chan struct{}, 4), // 최대 4개 동시 트랜스코딩 허용
+	}
 }
 
 // Create validates the upload, creates the initial job, and kicks off async finalization.
@@ -197,6 +203,16 @@ func (s *UploadService) Create(req UploadCreateRequest) (jobID string, filename 
 		}
 		return "", "", NewHTTPError(http.StatusInternalServerError, "파일 저장 실패")
 	}
+
+	// 매직 바이트 및 미디어 스트림 유효성 검증
+	if err := validateUploadedFile(tempPath, fileType, d.GetMediaDuration); err != nil {
+		_ = os.Remove(tempPath)
+		if d.Errf != nil {
+			d.Errf("upload.validateFile", err, "file=%s validation failed", originalFilename)
+		}
+		return "", "", err
+	}
+
 	if d.UploadBytesAdd != nil {
 		d.UploadBytesAdd(float64(totalBytes))
 	}
@@ -279,10 +295,29 @@ func (s *UploadService) formatSecondsPtr(v *int) string {
 }
 
 func (s *UploadService) finalizeUploadedAudio(jobID, tempPath, aacPath string) {
+	if s.transcodeSem != nil {
+		s.transcodeSem <- struct{}{}
+		defer func() { <-s.transcodeSem }()
+	}
+
 	d := s.d
 	defer func() {
 		_ = os.Remove(tempPath)
 		_ = os.Remove(aacPath)
+		if r := recover(); r != nil {
+			if d.Errf != nil {
+				d.Errf("upload.finalizeAudio.panic", fmt.Errorf("%v", r), "job_id=%s panic recovered", jobID)
+			}
+			if d.SetJobFields != nil {
+				d.SetJobFields(jobID, map[string]any{
+					"status":         d.StatusFailed,
+					"status_code":    model.JobStatusAudioConvertFailedCode,
+					"phase":          "업로드 처리 실패",
+					"progress_label": "",
+					"status_detail":  fmt.Sprintf("변환 처리 중 예기치 못한 오류: %v", r),
+				})
+			}
+		}
 	}()
 
 	if d.ConvertToAac == nil || d.SetJobFields == nil || d.SaveJobBlob == nil {
@@ -352,7 +387,23 @@ func (s *UploadService) finalizeUploadedAudio(jobID, tempPath, aacPath string) {
 
 func (s *UploadService) finalizeUploadedPDF(jobID, tempPath string) {
 	d := s.d
-	defer func() { _ = os.Remove(tempPath) }()
+	defer func() {
+		_ = os.Remove(tempPath)
+		if r := recover(); r != nil {
+			if d.Errf != nil {
+				d.Errf("upload.finalizePDF.panic", fmt.Errorf("%v", r), "job_id=%s panic recovered", jobID)
+			}
+			if d.SetJobFields != nil {
+				d.SetJobFields(jobID, map[string]any{
+					"status":         d.StatusFailed,
+					"status_code":    model.JobStatusPDFConvertFailedCode,
+					"phase":          "업로드 처리 실패",
+					"progress_label": "",
+					"status_detail":  fmt.Sprintf("PDF 처리 중 예기치 못한 오류: %v", r),
+				})
+			}
+		}
+	}()
 
 	if d.SetJobFields == nil || d.SaveJobBlob == nil {
 		return
@@ -398,4 +449,82 @@ func (s *UploadService) finalizeUploadedPDF(jobID, tempPath string) {
 	if d.Logf != nil {
 		d.Logf("[UPLOAD] queued pdf job_id=%s", jobID)
 	}
+}
+
+func validateUploadedFile(tempPath, fileType string, getDuration func(string) *int) error {
+	f, err := os.Open(tempPath)
+	if err != nil {
+		return NewHTTPError(http.StatusBadRequest, "업로드된 파일을 읽을 수 없습니다.")
+	}
+	defer f.Close()
+
+	header := make([]byte, 512)
+	n, _ := io.ReadFull(f, header)
+	header = header[:n]
+
+	detectedMIME := http.DetectContentType(header)
+
+	switch fileType {
+	case "pdf":
+		// PDF: http.DetectContentType("application/pdf") 및 %PDF- 매직 바이트 교차 검증
+		if detectedMIME != "application/pdf" && !bytes.HasPrefix(header, []byte("%PDF-")) {
+			return NewHTTPError(http.StatusBadRequest, "파일의 실제 내용(MIME/매직 바이트)이 PDF 형식이 아닙니다.")
+		}
+	case "audio":
+		// 1단계: Go 표준 라이브러리 net/http.DetectContentType 스니핑 검증
+		isMIMEAudio := strings.HasPrefix(detectedMIME, "audio/") ||
+			detectedMIME == "application/ogg" ||
+			detectedMIME == "video/mp4"
+
+		// 2단계: 표준 스니퍼가 감지하지 못하는 포맷(Raw MP3, AAC ADTS, FLAC, 순수 M4A)에 대한
+		//        커스텀 매직 바이트(isAudioMagicBytes) 폴백 검증
+		if !isMIMEAudio && !isAudioMagicBytes(header) {
+			return NewHTTPError(http.StatusBadRequest, "파일의 실제 내용(MIME/매직 바이트)이 허용된 오디오 형식이 아닙니다.")
+		}
+
+		// 3단계: 심층 스트림 무결성 검증 (ffprobe)
+		if getDuration != nil {
+			duration := getDuration(tempPath)
+			if duration == nil || *duration <= 0 {
+				return NewHTTPError(http.StatusBadRequest, "손상되었거나 재생할 수 없는 오디오 파일입니다.")
+			}
+		}
+	default:
+		return NewHTTPError(http.StatusBadRequest, "지원되지 않는 파일 형식입니다.")
+	}
+	return nil
+}
+
+func isAudioMagicBytes(header []byte) bool {
+	if len(header) < 4 {
+		return false
+	}
+	// 1. WAV: RIFF....WAVE
+	if len(header) >= 12 && bytes.Equal(header[0:4], []byte("RIFF")) && bytes.Equal(header[8:12], []byte("WAVE")) {
+		return true
+	}
+	// 2. MP3: ID3 tag or sync word 0xFF 0xFB/F3/F2/E3
+	if bytes.HasPrefix(header, []byte("ID3")) {
+		return true
+	}
+	if len(header) >= 2 && header[0] == 0xFF && (header[1]&0xE0) == 0xE0 {
+		return true
+	}
+	// 3. M4A / MP4: ....ftyp
+	if len(header) >= 8 && bytes.Equal(header[4:8], []byte("ftyp")) {
+		return true
+	}
+	// 4. AAC ADTS: 0xFF 0xF1 or 0xFF 0xF9
+	if len(header) >= 2 && header[0] == 0xFF && (header[1]&0xF6) == 0xF0 {
+		return true
+	}
+	// 5. OGG: OggS
+	if bytes.HasPrefix(header, []byte("OggS")) {
+		return true
+	}
+	// 6. FLAC: fLaC
+	if bytes.HasPrefix(header, []byte("fLaC")) {
+		return true
+	}
+	return false
 }
