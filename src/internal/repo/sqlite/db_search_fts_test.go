@@ -28,10 +28,16 @@ func TestFTS5AndGzipCompression(t *testing.T) {
 		t.Fatalf("insert job: %v", err)
 	}
 
-	// 2. Test SaveJobJSON with Gzip transparent compression and auto FTS indexing
+	// 2. Test SaveJobJSON with Gzip transparent compression
 	rawTranscript := `{"segments":[{"from":"00:00:01,000","to":"00:00:05,000","text":"안녕하세요 오늘 자료구조 수업을 시작합니다."}]}`
 	if err := SaveJobJSON("job-1", BlobKindTranscriptJSON, rawTranscript); err != nil {
 		t.Fatalf("SaveJobJSON failed: %v", err)
+	}
+
+	// Index content via IndexJobSearchContent (as OutboxRelay would do)
+	text := ExtractSearchableText(BlobKindTranscriptJSON, rawTranscript)
+	if err := IndexJobSearchContent("job-1", "user-1", text); err != nil {
+		t.Fatalf("IndexJobSearchContent failed: %v", err)
 	}
 
 	// Verify that data stored on disk is indeed gzip-compressed (magic bytes 0x1f, 0x8b)

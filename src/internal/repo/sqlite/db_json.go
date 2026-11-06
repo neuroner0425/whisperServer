@@ -48,21 +48,7 @@ func SaveJobJSON(jobID, kind, data string) error {
 		INSERT INTO job_json(job_id, kind, data, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(job_id, kind) DO UPDATE SET data=excluded.data, updated_at=CURRENT_TIMESTAMP
 	`, jobID, kind, compressed)
-	if err != nil {
-		return err
-	}
-
-	// Update full text search index if this kind contains user-facing content
-	if kind == BlobKindRefined || kind == BlobKindTranscriptJSON || kind == BlobKindDocumentJSON {
-		var ownerID string
-		_ = dbConn.QueryRow(`SELECT owner_id FROM jobs WHERE id = ?`, jobID).Scan(&ownerID)
-		text := ExtractSearchableText(kind, data)
-		if text != "" {
-			_ = IndexJobSearchContent(jobID, ownerID, text)
-		}
-	}
-
-	return nil
+	return err
 }
 
 // LoadJobJSON returns one named JSON payload for a job, decompressing gzip if needed.

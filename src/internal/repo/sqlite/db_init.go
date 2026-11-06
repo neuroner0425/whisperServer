@@ -103,6 +103,7 @@ func initSteps() []func(*sql.DB) error {
 		migrateLegacyJobBlobsToStorageStep,
 		SyncExistingJobsToFTS,
 		ensureOptimizedIndexes,
+		ensureWorkflowSchema,
 	}
 }
 
