@@ -14,6 +14,7 @@ const (
 	JobStatusRefineFailedCode       = 64
 	JobStatusPDFExtractFailedCode   = 65
 	JobStatusCopyrightBlockedCode   = 66
+	JobStatusQuarantinedInfectedCode = 67
 )
 
 // JobStatusName converts a numeric code into the localized status label.
@@ -43,6 +44,8 @@ func JobStatusName(code int) string {
 		return "PDF 추출 실패"
 	case JobStatusCopyrightBlockedCode:
 		return "저작권 문제로 추출 불가"
+	case JobStatusQuarantinedInfectedCode:
+		return "악성코드 검출로 차단됨"
 	default:
 		return ""
 	}
@@ -75,6 +78,8 @@ func JobStatusCode(name string) int {
 		return JobStatusPDFExtractFailedCode
 	case "저작권 문제로 추출 불가":
 		return JobStatusCopyrightBlockedCode
+	case "악성코드 검출로 차단됨":
+		return JobStatusQuarantinedInfectedCode
 	default:
 		return 0
 	}
@@ -107,7 +112,8 @@ func JobPhase(statusCode int) string {
 		JobStatusTranscribeFailedCode,
 		JobStatusRefineFailedCode,
 		JobStatusPDFExtractFailedCode,
-		JobStatusCopyrightBlockedCode:
+		JobStatusCopyrightBlockedCode,
+		JobStatusQuarantinedInfectedCode:
 		return JobStatusName(statusCode)
 	default:
 		return "대기 중"
