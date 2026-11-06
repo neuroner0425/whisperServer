@@ -146,5 +146,15 @@ func buildRouteHandlers(svc appServices, spaIndex echo.HandlerFunc) httptranspor
 		APITrashFolder:  httptransport.FolderMutationHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, FolderSvc: svc.folderSvc, NotifyFilesChanged: svc.lifecycle.NotifyFilesChanged, CollectFolderSubtree: collectFolderSubtree, MarkSubtreeJobsTrashed: markSubtreeJobsTrashed, Errf: procErrf}.Trash(),
 		APIRenameJob:    httptransport.JobMutationHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, FolderSvc: svc.folderSvc, GetJob: svc.runtime.GetJob, SetJobFields: svc.runtime.SetJobFields}.Rename(),
 		APITrashJob:     httptransport.JobMutationHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, FolderSvc: svc.folderSvc, GetJob: svc.runtime.GetJob, MarkJobTrashed: svc.lifecycle.MarkTrashed, Errf: procErrf}.Trash(),
+		APIGetSettingsLLM: httptransport.SettingsLLMHandlers{
+			CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized,
+			GetSettings:               store.GetUserSettings,
+			SaveSettings:              store.SaveUserSettings,
+		}.GetHandler(),
+		APIPutSettingsLLM: httptransport.SettingsLLMHandlers{
+			CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized,
+			GetSettings:               store.GetUserSettings,
+			SaveSettings:              store.SaveUserSettings,
+		}.PutHandler(),
 	}
 }

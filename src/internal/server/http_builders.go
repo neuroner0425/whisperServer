@@ -110,10 +110,11 @@ func newSPAHandlers() httptransport.SPAHandlers {
 	}
 }
 
-// newEventsHandler builds the authenticated SSE handler.
+// newEventsHandler builds the authenticated SSE handler with outbox replay support.
 func newEventsHandler() echo.HandlerFunc {
 	return httptransport.SSEHandlers{
-		Broker: eventBroker(),
+		Broker:            eventBroker(),
+		FetchReplayEvents: store.FetchOutboxSince,
 		CurrentUserOrUnauthorized: func(c echo.Context) (string, bool) {
 			u, err := currentUserOrUnauthorized(c)
 			if err != nil || u == nil || strings.TrimSpace(u.ID) == "" {

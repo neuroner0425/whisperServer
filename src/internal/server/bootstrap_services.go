@@ -3,13 +3,17 @@ package server
 import (
 	"errors"
 	"mime/multipart"
+	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/google/uuid"
 
+	"whisperserver/src/internal/domain"
+	"whisperserver/src/internal/integrations/antivirus"
 	intgemini "whisperserver/src/internal/integrations/gemini"
 	intwhisper "whisperserver/src/internal/integrations/whisper"
+	"whisperserver/src/internal/queue"
 	store "whisperserver/src/internal/repo/sqlite"
 	intruntime "whisperserver/src/internal/runtime"
 	"whisperserver/src/internal/service"
@@ -19,16 +23,18 @@ import (
 
 // appServices bundles long-lived services and integrations for bootstrap wiring.
 type appServices struct {
-	blobSvc    *service.JobBlobService
-	folderSvc  *service.FolderService
-	lifecycle  *service.JobLifecycle
-	runtime    *intruntime.Runtime
-	tagSvc     *service.TagService
-	storageSvc *service.StorageService
-	uploadSvc  *service.UploadService
-	geminiRt   *intgemini.Runtime
-	whisperRt  *intwhisper.Runtime
-	canGemini  func() bool
+	blobSvc     *service.JobBlobService
+	folderSvc   *service.FolderService
+	lifecycle   *service.JobLifecycle
+	runtime     *intruntime.Runtime
+	tagSvc      *service.TagService
+	storageSvc  *service.StorageService
+	uploadSvc   *service.UploadService
+	geminiRt    *intgemini.Runtime
+	whisperRt   *intwhisper.Runtime
+	dispatcher  *worker.WorkflowDispatcher
+	outboxRelay *intruntime.OutboxRelay
+	canGemini   func() bool
 }
 
 // newAppServices constructs the service graph used by HTTP handlers and workers.
@@ -55,6 +61,17 @@ func newAppServices() appServices {
 		BlobKindRefinedTimeline:    store.BlobKindRefinedTimeline,
 		BlobKindRefined:            store.BlobKindRefined,
 	})
+	txMgr := store.NewTxManager(nil)
+	taskQueue := queue.NewSqliteQueue()
+
+	var malwareScanner domain.MalwareScanner
+	clamdAddr := os.Getenv("CLAMD_ADDRESS")
+	if clamdAddr != "" {
+		malwareScanner = antivirus.NewClamDScanner("tcp", clamdAddr)
+	} else {
+		malwareScanner = antivirus.NewNoopScanner()
+	}
+
 	folderSvc := service.NewFolderService(service.FolderServiceDeps{
 		GetFolderByID:               store.GetFolderByID,
 		CreateFolder:                store.CreateFolder,
@@ -67,6 +84,9 @@ func newAppServices() appServices {
 		ListFolderPath:              store.ListFolderPath,
 		DeleteTrashedFoldersByOwner: store.DeleteTrashedFoldersByOwner,
 		DeleteFolderSubtreeByOwner:  store.DeleteFolderSubtreeByOwner,
+		TrashSubtreeTx:              store.TrashFolderSubtreeTx,
+		RestoreSubtreeTx:            store.RestoreFolderSubtreeTx,
+		TxManager:                   txMgr,
 	})
 	tagSvc := service.NewTagService(service.TagServiceDeps{
 		ListTagsByOwner:     store.ListTagsByOwner,
@@ -154,6 +174,7 @@ func newAppServices() appServices {
 		StatusFailed:        statusFailed,
 		Now:                 time.Now,
 		NewJobID:            uuid.NewString,
+		TaskQueue:           taskQueue,
 		Spawn:               func(fn func()) { go fn() },
 	})
 	geminiRt := intgemini.New(intgemini.Config{
@@ -185,7 +206,113 @@ func newAppServices() appServices {
 	canGemini := func() bool {
 		return isDevMode() || geminiRt.HasConfigured()
 	}
-	return appServices{blobSvc: blobSvc, folderSvc: folderSvc, lifecycle: lifecycle, runtime: runtime, tagSvc: tagSvc, storageSvc: storageSvc, uploadSvc: uploadSvc, geminiRt: geminiRt, whisperRt: whisperRt, canGemini: canGemini}
+
+	dispatcher := worker.NewWorkflowDispatcher(
+		"",
+		taskQueue,
+		txMgr,
+		nil,
+		procLogf,
+		procErrf,
+	)
+	dispatcher.RegisterStepHandler(domain.StepAVScan, &worker.AVScanStepHandler{
+		Scanner: malwareScanner,
+		Logf:    procLogf,
+		Errf:    procErrf,
+	})
+	dispatcher.RegisterStepHandler(domain.StepNormalize, &worker.NormalizeStepHandler{
+		BlobSvc:          blobSvc,
+		ConvertToAac:     intutil.ConvertToAac,
+		ConvertToWav:     intutil.ConvertToWav,
+		GetMediaDuration: intutil.GetMediaDuration,
+		Logf:             procLogf,
+		Errf:             procErrf,
+	})
+	dispatcher.RegisterStepHandler(domain.StepTranscribe, &worker.TranscribeStepHandler{
+		BlobSvc:       blobSvc,
+		WhisperRunner: whisperRt,
+		GetJob:        func(id string) *domain.Job { return runtime.GetJob(id) },
+		Logf:          procLogf,
+		Errf:          procErrf,
+	})
+	dispatcher.RegisterStepHandler(domain.StepPolish, &worker.PolishStepHandler{
+		BlobSvc:                  blobSvc,
+		PolishTranscriptTimeline: geminiRt.PolishTranscriptTimelineWithOptions,
+		GetUserSettings:          store.GetUserSettings,
+		Logf:                     procLogf,
+		Errf:                     procErrf,
+	})
+	dispatcher.RegisterStepHandler(domain.StepStructure, &worker.StructureStepHandler{
+		BlobSvc:                       blobSvc,
+		StructureTranscriptParagraphs: geminiRt.StructureTranscriptParagraphsWithOptions,
+		GetUserSettings:               store.GetUserSettings,
+		Logf:                          procLogf,
+		Errf:                          procErrf,
+	})
+	dispatcher.RegisterStepHandler(domain.StepPDFRender, &worker.PDFRenderStepHandler{
+		BlobSvc:            blobSvc,
+		CountPDFPages:      func(p string) (int, error) { return intutil.CountPDFPages(pdfToolPDFInfo, p) },
+		PDFMaxPages:        pdfMaxPages,
+		MaxPagesPerRequest: pdfMaxPagesPerRequest,
+		Logf:               procLogf,
+		Errf:               procErrf,
+	})
+	dispatcher.RegisterStepHandler(domain.StepPDFChunk, &worker.PDFChunkStepHandler{
+		BlobSvc: blobSvc,
+		RenderPDFToJPEGsRange: func(pdfPath string, startPage, endPage int, outDir string) ([]string, error) {
+			return intutil.RenderPDFToJPEGsRange(pdfToolPDFToPPM, pdfPath, outDir, pdfRenderDPI, startPage, endPage)
+		},
+		ExtractDocumentChunk: geminiRt.ExtractDocumentChunkWithOptions,
+		GetUserSettings:      store.GetUserSettings,
+		MaxPagesPerRequest:   pdfMaxPagesPerRequest,
+		Logf:                 procLogf,
+		Errf:                 procErrf,
+	})
+	dispatcher.RegisterStepHandler(domain.StepPDFMerge, &worker.PDFMergeStepHandler{
+		BlobSvc:           blobSvc,
+		MergeDocumentJSON: geminiRt.MergeDocumentJSON,
+		Logf:              procLogf,
+		Errf:              procErrf,
+	})
+
+	indexJobFn := func(jobID, ownerID string) error {
+		for _, kind := range []string{store.BlobKindRefined, store.BlobKindDocumentJSON, store.BlobKindTranscriptJSON} {
+			raw, err := store.LoadJobJSON(jobID, kind)
+			if err == nil && raw != "" {
+				text := store.ExtractSearchableText(kind, raw)
+				if text != "" {
+					return store.IndexJobSearchContent(jobID, ownerID, text)
+				}
+			}
+		}
+		return nil
+	}
+
+	var appBroker *intruntime.Broker
+	if runtime != nil {
+		appBroker = runtime.Broker()
+	}
+	outboxRelay := intruntime.NewOutboxRelay(
+		appBroker,
+		indexJobFn,
+		procLogf,
+		procErrf,
+	)
+
+	return appServices{
+		blobSvc:     blobSvc,
+		folderSvc:   folderSvc,
+		lifecycle:   lifecycle,
+		runtime:     runtime,
+		tagSvc:      tagSvc,
+		storageSvc:  storageSvc,
+		uploadSvc:   uploadSvc,
+		geminiRt:    geminiRt,
+		whisperRt:   whisperRt,
+		dispatcher:  dispatcher,
+		outboxRelay: outboxRelay,
+		canGemini:   canGemini,
+	}
 }
 
 // newAppWorker constructs the background worker with runtime and integration hooks.

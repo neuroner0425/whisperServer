@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"mime/multipart"
 	"net/textproto"
 	"os"
@@ -290,5 +291,77 @@ func TestUploadService_FinalizeUploadedAudio_PanicRecovery(t *testing.T) {
 	}
 	if _, err := os.Stat(aacPath); !os.IsNotExist(err) {
 		t.Fatalf("expected aacPath to be removed on panic, got err=%v", err)
+	}
+}
+
+
+type mockTaskQueue struct {
+	enqueued []model.Task
+}
+
+func (m *mockTaskQueue) Enqueue(ctx context.Context, tx model.Tx, task model.Task) error {
+	m.enqueued = append(m.enqueued, task)
+	return nil
+}
+
+func (m *mockTaskQueue) Claim(ctx context.Context, workerID string, classes []model.ResourceClass, leaseDur time.Duration) (*model.Task, error) {
+	return nil, nil
+}
+
+func (m *mockTaskQueue) Heartbeat(ctx context.Context, taskID, workerID string, leaseDur time.Duration) error {
+	return nil
+}
+
+func (m *mockTaskQueue) Complete(ctx context.Context, tx model.Tx, taskID, workerID string, attempt int) error {
+	return nil
+}
+
+func (m *mockTaskQueue) Fail(ctx context.Context, tx model.Tx, taskID, workerID string, attempt int, retryAfter *time.Duration, errMsg string) error {
+	return nil
+}
+
+func TestUploadService_Create_DurableTaskQueue(t *testing.T) {
+	tmp := t.TempDir()
+	q := &mockTaskQueue{}
+
+	s := NewUploadService(UploadServiceDeps{
+		TmpFolder:           tmp,
+		MaxUploadSizeMB:     10,
+		UploadRateLimitKBPS: 0,
+		DetectFileType:      func(string) string { return "audio" },
+		AllowedFile:         func(string) bool { return true },
+		GetMediaDuration:    func(string) *int { d := 10; return &d },
+		FormatSecondsPtr:    func(*int) string { return "00:10" },
+		ListTagNamesByOwner: func(string) (map[string]struct{}, error) { return map[string]struct{}{}, nil },
+		SaveUploadWithLimit: func(h *multipart.FileHeader, dst string, a, b int64) (int64, error) {
+			// Write valid ID3 MP3 bytes
+			mp3Bytes := []byte{'I', 'D', '3', 3, 0, 0, 0, 0, 0, 0}
+			return int64(len(mp3Bytes)), os.WriteFile(dst, mp3Bytes, 0o644)
+		},
+		Now:           func() time.Time { return time.Date(2026, 11, 7, 0, 0, 0, 0, time.UTC) },
+		NewJobID:      func() string { return "job_durable_1" },
+		StatusPending: "pending",
+		TaskQueue:     q,
+	})
+
+	hdr := &multipart.FileHeader{Filename: "audio.mp3", Size: 10}
+	jobID, name, err := s.Create(UploadCreateRequest{
+		OwnerID:    "user_123",
+		FileHeader: hdr,
+		Language:   "ko",
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	if jobID == "" || name != "audio.mp3" {
+		t.Fatalf("unexpected jobID=%s name=%s", jobID, name)
+	}
+
+	if len(q.enqueued) != 1 {
+		t.Fatalf("expected 1 task enqueued, got %d", len(q.enqueued))
+	}
+	enq := q.enqueued[0]
+	if enq.JobID != jobID || enq.Step != model.StepAVScan || enq.ResourceClass != model.ResourceClassMedia {
+		t.Fatalf("unexpected task: %+v", enq)
 	}
 }

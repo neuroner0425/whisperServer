@@ -99,6 +99,8 @@ type Handlers struct {
 	APITrashFolder     echo.HandlerFunc
 	APIRenameJob       echo.HandlerFunc
 	APITrashJob        echo.HandlerFunc
+	APIGetSettingsLLM  echo.HandlerFunc
+	APIPutSettingsLLM  echo.HandlerFunc
 }
 
 // RegisterRoutes binds every public endpoint exposed by the backend.
@@ -212,6 +214,8 @@ func RegisterRoutes(e *echo.Echo, cfg Config, h Handlers) {
 	e.DELETE("/api/folders/:folder_id", h.APITrashFolder)
 	e.PATCH("/api/jobs/:job_id", h.APIRenameJob)
 	e.DELETE("/api/jobs/:job_id", h.APITrashJob)
+	e.GET("/api/settings/llm", h.APIGetSettingsLLM)
+	e.PUT("/api/settings/llm", h.APIPutSettingsLLM)
 
 	// Frontend app entrypoint
 	e.GET("/app", h.SPAIndex)

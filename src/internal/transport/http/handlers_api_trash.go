@@ -58,7 +58,7 @@ func (h TrashHandlers) List() echo.HandlerFunc {
 	}
 }
 
-// RestoreFolder restores a trashed folder and notifies the file browser.
+// RestoreFolder restores a trashed folder subtree and notifies the file browser.
 func (h TrashHandlers) RestoreFolder() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if h.CurrentUserOrUnauthorized == nil || h.NotifyFilesChanged == nil || h.FolderSvc == nil {
@@ -69,14 +69,8 @@ func (h TrashHandlers) RestoreFolder() echo.HandlerFunc {
 			return nil
 		}
 		folderID := strings.TrimSpace(c.Param("folder_id"))
-		f, err := h.FolderSvc.Restore(u.ID, folderID)
-		if err != nil {
+		if err := h.FolderSvc.RestoreSubtree(c.Request().Context(), u.ID, folderID); err != nil {
 			return toEchoHTTPError(err, http.StatusBadRequest, "폴더 복구 실패")
-		}
-		if f != nil {
-			if err := h.FolderSvc.TouchAncestors(u.ID, f.ParentID); err != nil && h.Errf != nil {
-				h.Errf("api.folder.restoreTouchParent", err, "owner_id=%s folder_id=%s parent_id=%s", u.ID, folderID, f.ParentID)
-			}
 		}
 		h.NotifyFilesChanged(u.ID)
 		return c.JSON(http.StatusOK, map[string]string{"folder_id": folderID, "status": "restored"})

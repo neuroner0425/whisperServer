@@ -3,6 +3,8 @@ package service
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -27,12 +29,14 @@ type UploadCreateRequest struct {
 	RefineRequested bool
 	SelectedTags    []string
 	SingleTag       string
+	Language        string
 
 	FileHeader *multipart.FileHeader
 }
 
 // UploadServiceDeps provides validation, storage, runtime, and side-effect hooks.
 type UploadServiceDeps struct {
+	TaskQueue model.TaskQueue
 	// Validation
 	DetectFileType func(string) string
 	AllowedFile    func(string) bool
@@ -122,6 +126,14 @@ func (s *UploadService) Create(req UploadCreateRequest) (jobID string, filename 
 		}
 		return "", "", NewHTTPError(http.StatusBadRequest, fmt.Sprintf("허용되지 않는 파일 형식입니다. 허용: %s", strings.Join(exts, ", ")))
 	}
+
+	lang := strings.ToLower(strings.TrimSpace(req.Language))
+	if lang == "" {
+		lang = "ko"
+	} else if lang != "ko" && lang != "en" && lang != "ja" && lang != "auto" {
+		return "", "", NewHTTPError(http.StatusBadRequest, "지원되지 않는 언어 코드입니다 (허용: ko, en, ja, auto).")
+	}
+	req.Language = lang
 
 	fileType := ""
 	if d.DetectFileType != nil {
@@ -253,11 +265,35 @@ func (s *UploadService) Create(req UploadCreateRequest) (jobID string, filename 
 		d.Logf("[UPLOAD] accepted job_id=%s filename=%s bytes=%d", jobID, displayName, totalBytes)
 	}
 
-	// Hand the heavy conversion work off to a background goroutine after the job exists.
-	if fileType == "pdf" {
-		d.Spawn(func() { s.finalizeUploadedPDF(jobID, tempPath) })
-	} else {
-		d.Spawn(func() { s.finalizeUploadedAudio(jobID, tempPath, aacPath) })
+	// If durable task queue is configured, enqueue av_scan step in SQLite.
+	// Otherwise, fallback to background goroutine for backwards compatibility.
+	if d.TaskQueue != nil {
+		payload, _ := json.Marshal(map[string]any{
+			"temp_path":      tempPath,
+			"file_type":      fileType,
+			"language":       req.Language,
+			"refine_enabled": refineEnabled,
+		})
+		task := model.Task{
+			ID:            fmt.Sprintf("task_%s_av_scan_%d", jobID, time.Now().UnixNano()),
+			JobID:         jobID,
+			OwnerID:       req.OwnerID,
+			Step:          model.StepAVScan,
+			ResourceClass: model.ResourceClassMedia,
+			Priority:      0,
+			PayloadJSON:   string(payload),
+		}
+		if err := d.TaskQueue.Enqueue(context.Background(), nil, task); err != nil {
+			if d.Errf != nil {
+				d.Errf("upload.enqueueTask", err, "job_id=%s", jobID)
+			}
+		}
+	} else if d.Spawn != nil {
+		if fileType == "pdf" {
+			d.Spawn(func() { s.finalizeUploadedPDF(jobID, tempPath) })
+		} else {
+			d.Spawn(func() { s.finalizeUploadedAudio(jobID, tempPath, aacPath) })
+		}
 	}
 
 	return jobID, displayName, nil

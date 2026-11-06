@@ -2,6 +2,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -73,8 +74,15 @@ func NewBootstrap() (*Bootstrap, error) {
 	obs.RegisterMetrics()
 	queueLength.Set(0)
 
-	// Assemble services and start the background worker before opening HTTP routes.
+	// Assemble services and start background dispatchers before opening HTTP routes.
 	svc := newAppServices()
+	if svc.dispatcher != nil {
+		svc.dispatcher.Start(context.Background())
+	}
+	if svc.outboxRelay != nil {
+		svc.outboxRelay.Start(context.Background())
+	}
+
 	appWorker := newAppWorker(svc.blobSvc, svc.geminiRt, svc.whisperRt)
 	appRuntime.SetWorker(appWorker)
 	appWorker.Start()
@@ -84,6 +92,12 @@ func NewBootstrap() (*Bootstrap, error) {
 	registerHTTPRoutes(e, svc)
 	port, err := appPort()
 	if err != nil {
+		if svc.dispatcher != nil {
+			svc.dispatcher.Stop()
+		}
+		if svc.outboxRelay != nil {
+			svc.outboxRelay.Stop()
+		}
 		if appWorker != nil {
 			appWorker.Close()
 			appRuntime.SetWorker(nil)
@@ -98,6 +112,12 @@ func NewBootstrap() (*Bootstrap, error) {
 		Port: port,
 		Cleanup: func() {
 			procLogf("[BOOT] application stop")
+			if svc.dispatcher != nil {
+				svc.dispatcher.Stop()
+			}
+			if svc.outboxRelay != nil {
+				svc.outboxRelay.Stop()
+			}
 			if appWorker != nil {
 				appWorker.Close()
 				appRuntime.SetWorker(nil)

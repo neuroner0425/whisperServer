@@ -2,7 +2,9 @@
 package service
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -22,6 +24,9 @@ type FolderServiceDeps struct {
 	ListFolderPath              func(ownerID, folderID string) ([]model.Folder, error)
 	DeleteTrashedFoldersByOwner func(ownerID string) error
 	DeleteFolderSubtreeByOwner  func(ownerID, folderID string) error
+	TrashSubtreeTx              func(ctx context.Context, tx model.Tx, ownerID, folderID string) error
+	RestoreSubtreeTx            func(ctx context.Context, tx model.Tx, ownerID, folderID string) error
+	TxManager                   model.TxManager
 }
 
 // FolderService applies folder-specific validation and tree rules.
@@ -32,6 +37,72 @@ type FolderService struct {
 // NewFolderService builds the folder service from repo callbacks.
 func NewFolderService(d FolderServiceDeps) *FolderService {
 	return &FolderService{d: d}
+}
+
+// TrashSubtree atomically trashes a folder, its descendant subfolders, contained jobs, and active tasks.
+func (s *FolderService) TrashSubtree(ctx context.Context, ownerID, folderID string) error {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return NewHTTPError(http.StatusBadRequest, "폴더 ID가 필요합니다.")
+	}
+
+	if s.d.TrashSubtreeTx != nil && s.d.TxManager != nil {
+		tx, err := s.d.TxManager.BeginTx(ctx)
+		if err != nil {
+			return NewHTTPError(http.StatusInternalServerError, "트랜잭션 시작 실패")
+		}
+		defer tx.Rollback()
+
+		if err := s.d.TrashSubtreeTx(ctx, tx, ownerID, folderID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return NewHTTPError(http.StatusNotFound, "폴더를 찾을 수 없습니다.")
+			}
+			return NewHTTPError(http.StatusInternalServerError, "폴더 삭제 처리 실패: "+err.Error())
+		}
+		if err := tx.Commit(); err != nil {
+			return NewHTTPError(http.StatusInternalServerError, "트랜잭션 커밋 실패")
+		}
+		return nil
+	}
+
+	// Fallback to non-transactional legacy path if TxManager is nil
+	if s.d.SetFolderTrashed != nil {
+		return s.d.SetFolderTrashed(ownerID, folderID, true)
+	}
+	return nil
+}
+
+// RestoreSubtree atomically restores a trashed folder subtree and its contained jobs.
+func (s *FolderService) RestoreSubtree(ctx context.Context, ownerID, folderID string) error {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return NewHTTPError(http.StatusBadRequest, "폴더 ID가 필요합니다.")
+	}
+
+	if s.d.RestoreSubtreeTx != nil && s.d.TxManager != nil {
+		tx, err := s.d.TxManager.BeginTx(ctx)
+		if err != nil {
+			return NewHTTPError(http.StatusInternalServerError, "트랜잭션 시작 실패")
+		}
+		defer tx.Rollback()
+
+		if err := s.d.RestoreSubtreeTx(ctx, tx, ownerID, folderID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return NewHTTPError(http.StatusNotFound, "폴더를 찾을 수 없습니다.")
+			}
+			return NewHTTPError(http.StatusInternalServerError, "폴더 복원 처리 실패: "+err.Error())
+		}
+		if err := tx.Commit(); err != nil {
+			return NewHTTPError(http.StatusInternalServerError, "트랜잭션 커밋 실패")
+		}
+		return nil
+	}
+
+	// Fallback to legacy path
+	if s.d.SetFolderTrashed != nil {
+		return s.d.SetFolderTrashed(ownerID, folderID, false)
+	}
+	return nil
 }
 
 // NormalizeID trims folder ids passed from HTTP forms and query strings.

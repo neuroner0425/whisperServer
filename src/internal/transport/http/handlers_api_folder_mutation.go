@@ -100,10 +100,10 @@ func (h FolderMutationHandlers) Rename() echo.HandlerFunc {
 	}
 }
 
-// Trash moves a folder subtree and all jobs inside it to trash.
+// Trash moves a folder subtree and all jobs inside it to trash atomically.
 func (h FolderMutationHandlers) Trash() echo.HandlerFunc {
 	return func(c echo.Context) error {
-		if h.CurrentUserOrUnauthorized == nil || h.NotifyFilesChanged == nil || h.CollectFolderSubtree == nil || h.MarkSubtreeJobsTrashed == nil || h.FolderSvc == nil {
+		if h.CurrentUserOrUnauthorized == nil || h.NotifyFilesChanged == nil || h.FolderSvc == nil {
 			return c.NoContent(http.StatusServiceUnavailable)
 		}
 		u, ok := h.CurrentUserOrUnauthorized(c)
@@ -111,19 +111,12 @@ func (h FolderMutationHandlers) Trash() echo.HandlerFunc {
 			return nil
 		}
 		folderID := c.Param("folder_id")
-		f, err := h.FolderSvc.Require(u.ID, folderID, false, http.StatusBadRequest, "폴더 삭제 실패")
-		if err != nil {
+		if err := h.FolderSvc.TrashSubtree(c.Request().Context(), u.ID, folderID); err != nil {
 			return toEchoHTTPError(err, http.StatusBadRequest, "폴더 삭제 실패")
 		}
-
-		// Collect subtree and mark folders as trashed
-		subtree := h.CollectFolderSubtree(u.ID, []string{folderID}, true)
-		h.MarkSubtreeJobsTrashed(u.ID, subtree)
-
-		if f != nil {
-			if err := h.FolderSvc.TouchAncestors(u.ID, f.ParentID); err != nil && h.Errf != nil {
-				h.Errf("api.folder.trashTouchParent", err, "owner_id=%s folder_id=%s parent_id=%s", u.ID, folderID, f.ParentID)
-			}
+		if h.CollectFolderSubtree != nil && h.MarkSubtreeJobsTrashed != nil {
+			subtree := h.CollectFolderSubtree(u.ID, []string{folderID}, true)
+			h.MarkSubtreeJobsTrashed(u.ID, subtree)
 		}
 		h.NotifyFilesChanged(u.ID)
 		return c.JSON(http.StatusOK, map[string]any{"folder_id": folderID, "status": "trashed"})
