@@ -1,9 +1,11 @@
 import type { FormEvent } from 'react'
-import { useEffect, useState } from 'react'
-import { NavLink, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { useCallback, useEffect, useState } from 'react'
+import { NavLink, Outlet, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { logout } from './features/auth/api'
 import { fetchStorage } from './features/storage/api'
+import { SSEProvider } from './shared/SSEProvider'
+import { useSSE } from './shared/useSSE'
 
 const navItems = [
   { to: '/files/home', label: '홈', end: true },
@@ -13,41 +15,57 @@ const navItems = [
 ]
 
 export function AppShell() {
+  return (
+    <SSEProvider>
+      <AppShellContent />
+    </SSEProvider>
+  )
+}
+
+function AppShellContent() {
   const navigate = useNavigate()
-  const location = useLocation()
   const [searchParams] = useSearchParams()
   const queryInput = searchParams.get('q') ?? ''
   const [storageSummary, setStorageSummary] = useState<{ used: number; capacity: number } | null>(null)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
+  const loadStorageSummary = useCallback(async () => {
+    try {
+      const payload = await fetchStorage()
+      setStorageSummary({ used: payload.used_bytes, capacity: payload.capacity_bytes })
+    } catch {
+      setStorageSummary(null)
+    }
+  }, [])
+
   useEffect(() => {
-    const loadStorageSummary = async () => {
-      try {
-        const payload = await fetchStorage()
-        setStorageSummary({ used: payload.used_bytes, capacity: payload.capacity_bytes })
-      } catch {
-        setStorageSummary(null)
-      }
-    }
-
-    void loadStorageSummary()
-
-    const source = new EventSource('/api/events')
-    source.addEventListener('update', (event) => {
-      try {
-        const payload = JSON.parse((event as MessageEvent<string>).data) as { type?: string }
-        if (payload.type === 'files.changed') {
-          void loadStorageSummary()
+    let ignore = false
+    void fetchStorage()
+      .then((payload) => {
+        if (!ignore) {
+          setStorageSummary({ used: payload.used_bytes, capacity: payload.capacity_bytes })
         }
-      } catch {
-        // ignore malformed events
-      }
-    })
-
+      })
+      .catch(() => {
+        if (!ignore) {
+          setStorageSummary(null)
+        }
+      })
     return () => {
-      source.close()
+      ignore = true
     }
-  }, [location.pathname])
+  }, [])
+
+  useSSE((event) => {
+    try {
+      const payload = JSON.parse(event.data) as { type?: string }
+      if (payload.type === 'files.changed') {
+        void loadStorageSummary()
+      }
+    } catch {
+      // ignore malformed events
+    }
+  })
 
   const handleLogout = async () => {
     await logout()

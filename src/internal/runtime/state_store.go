@@ -397,14 +397,11 @@ func (s *stateStore) UpdateProgress(id string, phase string, percent int, label 
 	if s.d.Notify != nil {
 		s.d.Notify(job.OwnerID, "job.progress", map[string]any{
 			"job_id":           id,
+			"status_code":      job.StatusCode,
+			"status":           job.Status,
 			"phase":            job.Phase,
 			"progress_percent": job.ProgressPercent,
 			"progress_label":   job.ProgressLabel,
-		})
-		s.d.Notify(job.OwnerID, "files.changed", map[string]any{
-			"job_id":           id,
-			"phase":            job.Phase,
-			"progress_percent": job.ProgressPercent,
 		})
 	}
 }
@@ -435,12 +432,13 @@ func (s *stateStore) TransitionStatus(id string, status string, statusCode int, 
 			"job_id":      id,
 			"status":      job.Status,
 			"status_code": job.StatusCode,
+			"phase":       job.Phase,
 		})
-		s.d.Notify(job.OwnerID, "files.changed", map[string]any{
-			"job_id":      id,
-			"status":      job.Status,
-			"status_code": job.StatusCode,
-		})
+		// 작업이 완전히 종료된 시점(Completed 또는 Failed)에만 전체 정합성을 위해 1회 발행하고,
+		// 진행 중인 중간 전이(Running, Refining)에서는 files.changed를 생략하여 HTTP 재조회 차단
+		if !model.IsActiveStatusCode(job.StatusCode) {
+			s.d.Notify(job.OwnerID, "files.changed", map[string]any{"job_id": id})
+		}
 	}
 	// Evict inactive (completed or failed) jobs from in-memory cache and insert into LRU cache
 	if !model.IsActiveStatusCode(job.StatusCode) {

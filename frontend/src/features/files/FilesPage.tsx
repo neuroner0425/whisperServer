@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import type { ChangeEvent, DragEvent as ReactDragEvent, FormEvent, MouseEvent as ReactMouseEvent } from 'react'
 
 import { batchDownloadJobs, createFolder, downloadFolder, fetchFiles, moveEntries, renameFolder, renameJob, trashFolder, trashJob } from './api'
+import { useSSE } from '../../shared/useSSE'
 import type { FilesResponse, FolderNode, JobItem } from './types'
 import {
   DATE_OPTIONS,
@@ -258,28 +259,68 @@ export function FilesPage({ viewMode }: FilesPageProps) {
     }
   }, [moveBrowserFolderId, moveState])
 
-  useEffect(() => {
-    const source = new EventSource('/api/events')
-    let timer = 0
+  const refreshTimerRef = useRef(0)
 
+  useEffect(() => {
+    return () => {
+      window.clearTimeout(refreshTimerRef.current)
+    }
+  }, [])
+
+  useSSE((event) => {
     const scheduleRefresh = () => {
-      window.clearTimeout(timer)
-      timer = window.setTimeout(() => {
+      window.clearTimeout(refreshTimerRef.current)
+      refreshTimerRef.current = window.setTimeout(() => {
         setReloadToken((value) => value + 1)
       }, 120)
     }
 
-    source.addEventListener('update', scheduleRefresh)
-    source.onerror = () => {
-      // EventSource reconnects automatically.
-    }
+    try {
+      const payload = JSON.parse(event.data) as {
+        type?: string
+        job_id?: string
+        status_code?: number
+        status?: string
+        phase?: string
+        progress_percent?: number
+      }
 
-    return () => {
-      window.clearTimeout(timer)
-      source.removeEventListener('update', scheduleRefresh)
-      source.close()
+      if (payload.type === 'job.progress' || payload.type === 'job.status') {
+        if (payload.job_id) {
+          setData((prev) => {
+            if (!prev || !prev.job_items) {
+              return prev
+            }
+            const idx = prev.job_items.findIndex((item) => item.ID === payload.job_id)
+            if (idx === -1) {
+              return prev
+            }
+
+            const current = prev.job_items[idx]
+            const nextItem = {
+              ...current,
+              ...(payload.status_code !== undefined ? { StatusCode: payload.status_code } : {}),
+              ...(payload.status !== undefined ? { Status: payload.status } : {}),
+              ...(payload.phase !== undefined ? { Phase: payload.phase } : {}),
+              ...(payload.progress_percent !== undefined ? { ProgressPercent: payload.progress_percent } : {}),
+            }
+
+            const nextItems = [...prev.job_items]
+            nextItems[idx] = nextItem
+            return { ...prev, job_items: nextItems }
+          })
+        }
+        return
+      }
+
+      // Structural changes (create, delete, trash, move) trigger a debounced fetch
+      if (payload.type === 'files.changed' || payload.type === 'folder.changed') {
+        scheduleRefresh()
+      }
+    } catch {
+      scheduleRefresh()
     }
-  }, [])
+  })
 
   useEffect(() => {
     if (!menuState) {

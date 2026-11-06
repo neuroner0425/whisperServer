@@ -6,19 +6,29 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"whisperserver/src/internal/obs"
 )
 
-// Broker is a per-user in-memory pubsub for SSE.
+// Broker is a per-user in-memory pubsub for SSE with progress coalescing.
 // This is intentionally process-local; if we later introduce multiple instances,
 // this can be replaced with Redis/NATS/etc without touching HTTP handlers.
 type Broker struct {
 	mu          sync.RWMutex
 	subscribers map[string]map[chan []byte]struct{}
+
+	progMu      sync.Mutex
+	progTimers  map[string]*time.Timer
+	progPayload map[string]map[string]any
 }
 
 // NewBroker creates an empty per-user broker.
 func NewBroker() *Broker {
-	return &Broker{subscribers: map[string]map[chan []byte]struct{}{}}
+	return &Broker{
+		subscribers: map[string]map[chan []byte]struct{}{},
+		progTimers:  map[string]*time.Timer{},
+		progPayload: map[string]map[string]any{},
+	}
 }
 
 // Subscribe creates a buffered subscriber channel for the given user.
@@ -47,10 +57,62 @@ func (b *Broker) Unsubscribe(userID string, ch chan []byte) {
 }
 
 // Notify fans an update event out to every subscriber for the user.
+// High-frequency job.progress events are coalesced per (user, job) over a 250ms window.
 func (b *Broker) Notify(userID, eventType string, payload map[string]any) {
 	if userID == "" {
 		return
 	}
+
+	jobID, _ := payload["job_id"].(string)
+
+	// Coalesce high-frequency job.progress events
+	if eventType == "job.progress" && jobID != "" {
+		key := userID + ":" + jobID
+		cp := make(map[string]any, len(payload))
+		for k, v := range payload {
+			cp[k] = v
+		}
+
+		b.progMu.Lock()
+		b.progPayload[key] = cp
+		if _, exists := b.progTimers[key]; exists {
+			// Timer is already running; the payload is updated to the latest snapshot
+			b.progMu.Unlock()
+			return
+		}
+
+		b.progTimers[key] = time.AfterFunc(250*time.Millisecond, func() {
+			b.progMu.Lock()
+			latest := b.progPayload[key]
+			delete(b.progTimers, key)
+			delete(b.progPayload, key)
+			b.progMu.Unlock()
+
+			if latest != nil {
+				b.broadcast(userID, "job.progress", latest)
+			}
+		})
+		b.progMu.Unlock()
+		return
+	}
+
+	// For all other durable/lifecycle events, cancel any pending progress timer and emit immediately
+	if jobID != "" {
+		key := userID + ":" + jobID
+		b.progMu.Lock()
+		if timer, exists := b.progTimers[key]; exists {
+			timer.Stop()
+			delete(b.progTimers, key)
+			delete(b.progPayload, key)
+		}
+		b.progMu.Unlock()
+	}
+
+	b.broadcast(userID, eventType, payload)
+}
+
+func (b *Broker) broadcast(userID, eventType string, payload map[string]any) {
+	obs.IncSSEReload()
 	body := map[string]any{
 		"type": eventType,
 		"at":   time.Now().Format(time.RFC3339Nano),
