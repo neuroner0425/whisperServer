@@ -385,3 +385,26 @@ func TestTaskRefiningFallbackToRawTranscriptOnPolishError(t *testing.T) {
 	}
 }
 
+func TestFinalizeRefineReturnsErrorOnMissingBlobService(t *testing.T) {
+	w := New(Config{
+		StatusFailed: "failed",
+	}, Deps{
+		GetJob: func(id string) *model.Job {
+			return &model.Job{
+				Status:   "refining_pending",
+				Filename: "test.mp3",
+			}
+		},
+		SetJobFields: func(string, map[string]any) {},
+		BlobSvc:      nil, // missing
+	})
+
+	err := w.finalizeRefine("job-no-blob")
+	if err == nil {
+		t.Fatal("expected finalizeRefine to return error when BlobSvc is nil")
+	}
+	if !strings.Contains(err.Error(), "missing blob service") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+

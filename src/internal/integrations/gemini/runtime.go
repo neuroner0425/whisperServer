@@ -10,10 +10,44 @@ import (
 	"sync"
 	"time"
 
+	"whisperserver/src/internal/obs"
 	"whisperserver/src/internal/worker"
 
 	"google.golang.org/genai"
 )
+
+func extractGeminiStatusCode(err error) string {
+	if err == nil {
+		return "200"
+	}
+
+	var (
+		apiErr    genai.APIError
+		apiErrPtr *genai.APIError
+	)
+	switch {
+	case errors.As(err, &apiErr) && apiErr.Code > 0:
+		return strconv.Itoa(apiErr.Code)
+	case errors.As(err, &apiErrPtr) && apiErrPtr != nil && apiErrPtr.Code > 0:
+		return strconv.Itoa(apiErrPtr.Code)
+	case errors.Is(err, context.DeadlineExceeded):
+		return "504"
+	case errors.Is(err, context.Canceled):
+		return "499"
+	case strings.Contains(strings.ToLower(err.Error()), "empty response"):
+		return "502"
+	default:
+		return "500"
+	}
+}
+
+func recordGeminiMetrics(model string, result *genai.GenerateContentResponse, err error) {
+	statusCode := extractGeminiStatusCode(err)
+	obs.RecordGeminiRequest(model, statusCode)
+	if result != nil && result.UsageMetadata != nil {
+		obs.RecordGeminiTokens(int(result.UsageMetadata.PromptTokenCount), int(result.UsageMetadata.CandidatesTokenCount))
+	}
+}
 
 // Config defines Gemini-specific runtime settings and callbacks.
 type Config struct {
@@ -416,14 +450,17 @@ func (r *Runtime) generateDocument(ctx context.Context, idx int, systemPrompt st
 		},
 	)
 	if err != nil {
+		recordGeminiMetrics(r.cfg.Model, nil, err)
 		r.onFailure(idx, err)
 		return nil, err
 	}
 	if result == nil || strings.TrimSpace(result.Text()) == "" {
 		err = emptyResponseError(result)
+		recordGeminiMetrics(r.cfg.Model, result, err)
 		r.onFailure(idx, err)
 		return nil, err
 	}
+	recordGeminiMetrics(r.cfg.Model, result, nil)
 	normalized, err := normalizeDocumentResponseJSON(result.Text())
 	if err != nil {
 		r.onFailure(idx, err)

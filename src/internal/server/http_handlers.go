@@ -138,6 +138,7 @@ func buildRouteHandlers(svc appServices, spaIndex echo.HandlerFunc) httptranspor
 			StatusCompleted:      statusCompleted,
 			FolderSvc:            svc.folderSvc,
 			BlobSvc:              svc.blobSvc,
+			Errf:                 procErrf,
 		}.Handler(),
 		APIUpload:       uploadH.PostJSON(),
 		APICreateFolder: httptransport.FolderMutationHandlers{CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized, FolderSvc: svc.folderSvc, NotifyFilesChanged: svc.lifecycle.NotifyFilesChanged, Errf: procErrf}.Create(),

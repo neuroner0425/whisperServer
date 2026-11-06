@@ -2,16 +2,19 @@ package obs
 
 import (
 	"fmt"
+	"io"
 	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 )
 
 // ProcessingLog writes the long-lived processing log used for operational tracing.
 type ProcessingLog struct {
-	path string
-	file *os.File
-	log  *log.Logger
+	path   string
+	file   *os.File
+	log    *log.Logger
+	slog   *slog.Logger
 }
 
 // NewProcessingLog opens the shared processing log file under the project root.
@@ -28,7 +31,12 @@ func NewProcessingLog(projectRoot string) (*ProcessingLog, error) {
 		return nil, err
 	}
 	p.file = f
-	p.log = log.New(f, "", log.LstdFlags|log.Lmicroseconds)
+	mw := io.MultiWriter(os.Stdout, f)
+	p.log = log.New(mw, "", log.LstdFlags|log.Lmicroseconds)
+
+	// Configure root structured slog with MultiWriter so JSON logs are captured in file & stdout
+	p.slog = InitLogger(mw, slog.LevelInfo)
+
 	return p, nil
 }
 
@@ -41,19 +49,36 @@ func (p *ProcessingLog) Close() {
 	p.file = nil
 }
 
+// Slog returns the structured slog.Logger instance.
+func (p *ProcessingLog) Slog() *slog.Logger {
+	if p == nil || p.slog == nil {
+		return GetLogger()
+	}
+	return p.slog
+}
+
 // Logf writes one formatted log line.
 func (p *ProcessingLog) Logf(format string, args ...any) {
-	if p == nil || p.log == nil {
-		return
+	msg := fmt.Sprintf(format, args...)
+	if p != nil && p.log != nil {
+		p.log.Print(msg)
 	}
-	p.log.Printf(format, args...)
+	GetLogger().Info(msg)
 }
 
 // Errf writes one formatted error log line with an optional cause.
 func (p *ProcessingLog) Errf(scope string, err error, format string, args ...any) {
-	if err == nil {
-		p.Logf("[ERROR] %s: %s", scope, fmt.Sprintf(format, args...))
-		return
+	msg := fmt.Sprintf(format, args...)
+	if p != nil && p.log != nil {
+		if err == nil {
+			p.log.Printf("[ERROR] %s: %s", scope, msg)
+		} else {
+			p.log.Printf("[ERROR] %s: %s | cause=%v", scope, msg, err)
+		}
 	}
-	p.Logf("[ERROR] %s: %s | cause=%v", scope, fmt.Sprintf(format, args...), err)
+	if err != nil {
+		GetLogger().Error(msg, slog.String("scope", scope), slog.Any("error", err))
+	} else {
+		GetLogger().Error(msg, slog.String("scope", scope))
+	}
 }

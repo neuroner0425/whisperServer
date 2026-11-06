@@ -115,3 +115,47 @@ func TestRequeuePendingSkipsVADFallbackWhenStartupFlagDisabled(t *testing.T) {
 		t.Fatalf("expected completed job to remain unchanged without startup flag, got fields=%v", fields)
 	}
 }
+
+func TestRequeuePendingMarksFailedWhenMediaMissing(t *testing.T) {
+	// Blob service has NO blobs
+	blob := service.NewJobBlobService(service.JobBlobServiceDeps{
+		HasJobBlob: func(_ string, _ string) bool { return false },
+	})
+
+	failedFields := map[string]map[string]any{}
+	worker := New(Config{
+		StatusPending: "작업 대기 중",
+		StatusFailed:  "실패",
+	}, Deps{
+		SetJobFields: func(jobID string, got map[string]any) {
+			failedFields[jobID] = got
+		},
+		BlobSvc: blob,
+		Logf:    func(string, ...any) {},
+		Errf:    func(string, error, string, ...any) {},
+	})
+
+	worker.RequeuePending(map[string]*model.Job{
+		"audio-orphan": {
+			Status:     "작업 대기 중",
+			StatusCode: model.JobStatusPendingCode,
+			FileType:   "audio",
+		},
+		"pdf-orphan": {
+			Status:     "작업 대기 중",
+			StatusCode: model.JobStatusPendingCode,
+			FileType:   "pdf",
+		},
+	})
+
+	// Both orphan jobs must be marked as failed instead of stuck in pending
+	audioFail, ok := failedFields["audio-orphan"]
+	if !ok || audioFail["status_code"] != model.JobStatusAudioConvertFailedCode {
+		t.Fatalf("expected audio-orphan to fail with AudioConvertFailedCode, got: %v", audioFail)
+	}
+
+	pdfFail, ok := failedFields["pdf-orphan"]
+	if !ok || pdfFail["status_code"] != model.JobStatusPDFConvertFailedCode {
+		t.Fatalf("expected pdf-orphan to fail with PDFConvertFailedCode, got: %v", pdfFail)
+	}
+}

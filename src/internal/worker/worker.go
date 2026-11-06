@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -15,6 +16,7 @@ import (
 
 	model "whisperserver/src/internal/domain"
 	intwhisper "whisperserver/src/internal/integrations/whisper"
+	"whisperserver/src/internal/obs"
 	"whisperserver/src/internal/queue"
 	"whisperserver/src/internal/service"
 	intutil "whisperserver/src/internal/util"
@@ -147,7 +149,7 @@ func (w *Worker) Close() {
 
 // EnqueueTranscribe queues an audio transcription task.
 func (w *Worker) EnqueueTranscribe(jobID string) {
-	t := queue.Task{JobID: jobID, Kind: queue.TaskAudioTranscribe}
+	t := queue.Task{JobID: jobID, Kind: queue.TaskAudioTranscribe, EnqueuedAt: time.Now()}
 	if w.cfg.SplitTaskQueues {
 		_ = w.transcribeQueue.Enqueue(t)
 		w.setQueueLen()
@@ -159,7 +161,7 @@ func (w *Worker) EnqueueTranscribe(jobID string) {
 
 // EnqueueRefine queues a transcript refine task.
 func (w *Worker) EnqueueRefine(jobID string) {
-	t := queue.Task{JobID: jobID, Kind: queue.TaskAudioRefine}
+	t := queue.Task{JobID: jobID, Kind: queue.TaskAudioRefine, EnqueuedAt: time.Now()}
 	if w.cfg.SplitTaskQueues {
 		_ = w.refineQueue.Enqueue(t)
 		w.setQueueLen()
@@ -171,7 +173,7 @@ func (w *Worker) EnqueueRefine(jobID string) {
 
 // EnqueuePDFExtract queues a PDF extraction task.
 func (w *Worker) EnqueuePDFExtract(jobID string) {
-	t := queue.Task{JobID: jobID, Kind: queue.TaskPDFExtract}
+	t := queue.Task{JobID: jobID, Kind: queue.TaskPDFExtract, EnqueuedAt: time.Now()}
 	if w.cfg.SplitTaskQueues {
 		_ = w.refineQueue.Enqueue(t)
 		w.setQueueLen()
@@ -194,14 +196,42 @@ func (w *Worker) RequeuePending(jobs map[string]*model.Job) {
 		}
 		switch job.Status {
 		case w.cfg.StatusPending, w.cfg.StatusRunning:
-			if job.FileType == "pdf" && w.deps.BlobSvc != nil && w.deps.BlobSvc.HasPDFOriginal(id) {
-				w.EnqueuePDFExtract(id)
-			} else if w.deps.BlobSvc != nil && w.deps.BlobSvc.HasAudioAAC(id) {
-				w.EnqueueTranscribe(id)
+			if job.FileType == "pdf" {
+				if w.deps.BlobSvc != nil && w.deps.BlobSvc.HasPDFOriginal(id) {
+					w.EnqueuePDFExtract(id)
+				} else if w.deps.SetJobFields != nil {
+					w.deps.SetJobFields(id, map[string]any{
+						"status":         w.cfg.StatusFailed,
+						"status_code":    model.JobStatusPDFConvertFailedCode,
+						"phase":          "업로드 처리 실패",
+						"progress_label": "",
+						"status_detail":  "업로드 변환 중 서버가 재시작되었습니다.",
+					})
+				}
+			} else {
+				if w.deps.BlobSvc != nil && w.deps.BlobSvc.HasAudioAAC(id) {
+					w.EnqueueTranscribe(id)
+				} else if w.deps.SetJobFields != nil {
+					w.deps.SetJobFields(id, map[string]any{
+						"status":         w.cfg.StatusFailed,
+						"status_code":    model.JobStatusAudioConvertFailedCode,
+						"phase":          "업로드 처리 실패",
+						"progress_label": "",
+						"status_detail":  "업로드 변환 중 서버가 재시작되었습니다.",
+					})
+				}
 			}
 		case w.cfg.StatusRefiningPending, w.cfg.StatusRefining:
 			if w.deps.BlobSvc != nil && w.deps.BlobSvc.HasTranscriptJSON(id) {
 				w.EnqueueRefine(id)
+			} else if w.deps.SetJobFields != nil {
+				w.deps.SetJobFields(id, map[string]any{
+					"status":         w.cfg.StatusFailed,
+					"status_code":    model.JobStatusRefineFailedCode,
+					"phase":          "정제 처리 실패",
+					"progress_label": "",
+					"status_detail":  "전사본 산출물이 없어 정제를 재개할 수 없습니다.",
+				})
 			}
 		}
 	}
@@ -362,21 +392,66 @@ func (w *Worker) processTask(t queue.Task, splitMode bool) {
 		return
 	}
 
+	// 1. Measure queue waiting latency
+	resourceClass := "whisper"
+	if t.Kind == queue.TaskAudioRefine || t.Kind == queue.TaskPDFExtract {
+		resourceClass = "gemini"
+	}
+	waitDuration := time.Duration(0)
+	if !t.EnqueuedAt.IsZero() {
+		waitDuration = time.Since(t.EnqueuedAt)
+	} else if job.UploadedTS > 0 {
+		waitDuration = time.Since(time.Unix(int64(job.UploadedTS), 0))
+	}
+	obs.ObserveQueueWait(resourceClass, waitDuration)
+
+	// 2. Structured JSON logging with job_id, owner_id, step, and attempt
+	logger := obs.JobLogger(t.JobID, job.OwnerID, string(t.Kind), 1)
+	taskCtx := obs.ContextWithJob(w.ctx, obs.JobContext{
+		JobID:   t.JobID,
+		OwnerID: job.OwnerID,
+		Step:    string(t.Kind),
+		Attempt: 1,
+	})
+	_ = taskCtx // retained for sub-routine tracing and future workflow steps
+
+	logger.Info("task execution started",
+		slog.String("kind", string(t.Kind)),
+		slog.Duration("queue_wait", waitDuration),
+	)
+
 	switch t.Kind {
 	case queue.TaskAudioTranscribe:
 		if job.Status != w.cfg.StatusPending && job.Status != w.cfg.StatusRunning {
 			return
 		}
 		if job.FileType == "pdf" {
-			if err := w.taskExtractPDF(t.JobID); err != nil {
+			start := time.Now()
+			err := w.taskExtractPDF(t.JobID)
+			status := "success"
+			if err != nil {
+				status = "failed"
 				w.deps.Errf("worker.extractPDF", err, "job_id=%s", t.JobID)
+				logger.Error("taskExtractPDF failed", slog.Any("error", err), slog.Duration("duration", time.Since(start)))
+			} else {
+				logger.Info("taskExtractPDF succeeded", slog.Duration("duration", time.Since(start)))
 			}
+			obs.ObserveJobStep("pdf_extract", status, time.Since(start))
 			return
 		}
-		if err := w.taskTranscribe(t.JobID); err != nil {
+		start := time.Now()
+		err := w.taskTranscribe(t.JobID)
+		status := "success"
+		if err != nil {
+			status = "failed"
 			w.deps.Errf("worker.transcribe", err, "job_id=%s", t.JobID)
+			logger.Error("taskTranscribe failed", slog.Any("error", err), slog.Duration("duration", time.Since(start)))
+			obs.ObserveJobStep("transcribe", status, time.Since(start))
 			return
 		}
+		logger.Info("taskTranscribe succeeded", slog.Duration("duration", time.Since(start)))
+		obs.ObserveJobStep("transcribe", status, time.Since(start))
+
 		updated := w.deps.GetJob(t.JobID)
 		if updated == nil || updated.Status != w.cfg.StatusRefiningPending {
 			return
@@ -386,26 +461,52 @@ func (w *Worker) processTask(t queue.Task, splitMode bool) {
 			w.deps.Logf("[WORKER] queued refine job_id=%s", t.JobID)
 			return
 		}
-		w.finalizeRefine(t.JobID)
+		refineStart := time.Now()
+		err = w.finalizeRefine(t.JobID)
+		refineStatus := "success"
+		if err != nil {
+			refineStatus = "failed"
+			logger.Error("finalizeRefine failed", slog.Any("error", err), slog.Duration("duration", time.Since(refineStart)))
+		} else {
+			logger.Info("finalizeRefine succeeded", slog.Duration("duration", time.Since(refineStart)))
+		}
+		obs.ObserveJobStep("refine", refineStatus, time.Since(refineStart))
 	case queue.TaskAudioRefine:
 		if job.Status != w.cfg.StatusRefiningPending && job.Status != w.cfg.StatusRefining {
 			return
 		}
-		w.finalizeRefine(t.JobID)
+		refineStart := time.Now()
+		err := w.finalizeRefine(t.JobID)
+		refineStatus := "success"
+		if err != nil {
+			refineStatus = "failed"
+			logger.Error("finalizeRefine failed", slog.Any("error", err), slog.Duration("duration", time.Since(refineStart)))
+		} else {
+			logger.Info("finalizeRefine succeeded", slog.Duration("duration", time.Since(refineStart)))
+		}
+		obs.ObserveJobStep("refine", refineStatus, time.Since(refineStart))
 	case queue.TaskPDFExtract:
 		if job.Status != w.cfg.StatusPending && job.Status != w.cfg.StatusRunning {
 			return
 		}
-		if err := w.taskExtractPDF(t.JobID); err != nil {
+		start := time.Now()
+		err := w.taskExtractPDF(t.JobID)
+		status := "success"
+		if err != nil {
+			status = "failed"
 			w.deps.Errf("worker.extractPDF", err, "job_id=%s", t.JobID)
+			logger.Error("taskExtractPDF failed", slog.Any("error", err), slog.Duration("duration", time.Since(start)))
+		} else {
+			logger.Info("taskExtractPDF succeeded", slog.Duration("duration", time.Since(start)))
 		}
+		obs.ObserveJobStep("pdf_extract", status, time.Since(start))
 	}
 }
 
-func (w *Worker) finalizeRefine(jobID string) {
+func (w *Worker) finalizeRefine(jobID string) error {
 	job := w.deps.GetJob(jobID)
 	if job == nil || job.IsTrashed {
-		return
+		return nil
 	}
 	if w.deps.BlobSvc == nil {
 		w.deps.SetJobFields(jobID, map[string]any{
@@ -416,7 +517,7 @@ func (w *Worker) finalizeRefine(jobID string) {
 		if w.deps.Errf != nil {
 			w.deps.Errf("worker.blobSvc", errors.New("missing blob service"), "job_id=%s", jobID)
 		}
-		return
+		return errors.New("missing blob service")
 	}
 	timelineText, err := w.deps.BlobSvc.LoadTranscriptTimelineText(jobID)
 	if err != nil {
@@ -426,16 +527,16 @@ func (w *Worker) finalizeRefine(jobID string) {
 			"status_code":   model.JobStatusRefineFailedCode,
 			"status_detail": "원본 전사 결과를 불러오지 못했습니다.",
 		})
-		return
+		return err
 	}
 	if err := w.taskRefining(jobID, timelineText); err != nil {
 		w.deps.SetJobFields(jobID, map[string]any{"status": w.cfg.StatusFailed, "status_code": model.JobStatusRefineFailedCode})
 		w.deps.Errf("worker.refine", err, "job_id=%s", jobID)
-		return
+		return err
 	}
 	updated := w.deps.GetJob(jobID)
 	if updated == nil || updated.IsTrashed {
-		return
+		return nil
 	}
 	fields := map[string]any{
 		"status":         w.cfg.StatusCompleted,
@@ -453,6 +554,7 @@ func (w *Worker) finalizeRefine(jobID string) {
 	}
 	w.deps.SetJobFields(jobID, fields)
 	w.deps.Logf("[WORKER] completed job_id=%s result=%v", jobID, fields["result"])
+	return nil
 }
 
 func (w *Worker) taskTranscribe(jobID string) error {

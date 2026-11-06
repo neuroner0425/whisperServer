@@ -227,20 +227,24 @@ func (r *Runtime) generateRefine(idx int, systemPrompt, responseMIMEType string,
 		cfg,
 	)
 	if err != nil {
+		recordGeminiMetrics(r.cfg.Model, nil, err)
 		r.onFailure(idx, err)
 		return "", err
 	}
 	if result == nil {
 		err = errors.New("empty response")
+		recordGeminiMetrics(r.cfg.Model, nil, err)
 		r.onFailure(idx, err)
 		return "", err
 	}
 	text := strings.TrimSpace(result.Text())
 	if text == "" {
 		err = emptyResponseError(result)
+		recordGeminiMetrics(r.cfg.Model, result, err)
 		r.onFailure(idx, err)
 		return "", err
 	}
+	recordGeminiMetrics(r.cfg.Model, result, nil)
 	if responseSchema != nil {
 		text, err = normalizeRefineResponseJSON(text)
 		if err != nil {

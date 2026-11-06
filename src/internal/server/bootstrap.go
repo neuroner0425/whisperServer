@@ -3,18 +3,15 @@ package server
 
 import (
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/labstack/echo/v4"
-	"github.com/prometheus/client_golang/prometheus"
 
+	"whisperserver/src/internal/obs"
 	store "whisperserver/src/internal/repo/sqlite"
 	intruntime "whisperserver/src/internal/runtime"
 	intutil "whisperserver/src/internal/util"
 )
-
-var metricsOnce sync.Once
 
 // Bootstrap is the fully initialized server surface returned to `main`.
 type Bootstrap struct {
@@ -73,9 +70,7 @@ func NewBootstrap() (*Bootstrap, error) {
 	appRuntime.CleanupInactiveTempWavs()
 
 	// Register metrics only once even if tests create multiple bootstraps.
-	metricsOnce.Do(func() {
-		prometheus.MustRegister(jobsTotal, jobsInProgress, jobDurationSec, uploadBytes, queueLength)
-	})
+	obs.RegisterMetrics()
 	queueLength.Set(0)
 
 	// Assemble services and start the background worker before opening HTTP routes.

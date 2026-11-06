@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 // TaskKind identifies the type of work the worker should perform.
@@ -16,8 +17,9 @@ const (
 
 // Task is the minimal unit stored in the queue.
 type Task struct {
-	JobID string
-	Kind  TaskKind
+	JobID      string
+	Kind       TaskKind
+	EnqueuedAt time.Time
 }
 
 // ErrClosed reports queue operations attempted after shutdown.

@@ -1,15 +1,14 @@
-// metrics.go defines the Prometheus metrics registered during bootstrap.
+// metrics.go forwards to the unified metrics registry in obs.
 package server
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"whisperserver/src/internal/obs"
+)
 
 var (
-	jobsTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{Name: "whisper_jobs_total", Help: "Total jobs finished by status"},
-		[]string{"status"},
-	)
-	jobsInProgress = prometheus.NewGauge(prometheus.GaugeOpts{Name: "whisper_jobs_in_progress", Help: "Jobs currently being processed"})
-	jobDurationSec = prometheus.NewHistogram(prometheus.HistogramOpts{Name: "whisper_job_duration_seconds", Help: "Duration of jobs in seconds"})
-	uploadBytes    = prometheus.NewCounter(prometheus.CounterOpts{Name: "whisper_upload_bytes_total", Help: "Total bytes uploaded"})
-	queueLength    = prometheus.NewGauge(prometheus.GaugeOpts{Name: "whisper_task_queue_size", Help: "Task queue size"})
+	jobsTotal      = obs.JobsTotal
+	jobsInProgress = obs.JobsInProgress
+	jobDurationSec = obs.JobDurationSec
+	uploadBytes    = obs.UploadBytes
+	queueLength    = obs.QueueLength
 )
