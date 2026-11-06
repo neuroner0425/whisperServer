@@ -45,6 +45,7 @@ __pycache__/
 *.db-wal
 *.sqlite
 /log/
+/logs/
 *.log
 
 # Frontend

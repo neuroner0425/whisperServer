@@ -387,6 +387,22 @@ func (r *Runtime) generateDocument(ctx context.Context, idx int, systemPrompt st
 	keySuffix := maskedKeySuffix(r.clients[idx].key)
 	r.mu.Unlock()
 
+	startTime := time.Now()
+	reqLog := APIRequestLog{
+		SystemPrompt:     systemPrompt,
+		UserPrompt:       instruction,
+		ResponseMIMEType: "application/json",
+		HasSchema:        schema != nil,
+		ImagesMeta:       buildChunkImagesMeta(chunk),
+		Extra: map[string]any{
+			"chunk_index":  chunk.ChunkIndex,
+			"total_chunks": chunk.TotalChunks,
+			"start_page":   chunk.StartPage,
+			"end_page":     chunk.EndPage,
+			"total_pages":  chunk.TotalPages,
+		},
+	}
+
 	callCtx, cancel := context.WithTimeout(ctx, time.Duration(r.cfg.PDFBatchTimeoutSec)*time.Second)
 	defer cancel()
 
@@ -415,26 +431,62 @@ func (r *Runtime) generateDocument(ctx context.Context, idx int, systemPrompt st
 			ResponseSchema:   schema,
 		},
 	)
+
+	durationMs := time.Since(startTime).Milliseconds()
+	respLog := extractResponseLog(result, err)
+
+	recordFailure := func(criterion, reason string, failureErr error) {
+		r.onFailure(idx, failureErr)
+		_ = RecordAPILog(APILogEntry{
+			Timestamp:    startTime.Format(time.RFC3339),
+			CallType:     "document",
+			APIKeySuffix: keySuffix,
+			Model:        r.cfg.Model,
+			DurationMs:   durationMs,
+			Request:      reqLog,
+			Response:     respLog,
+			FailureCriteriaResult: FailureCriteriaResult{
+				Failed:            true,
+				MatchedCriterion:  criterion,
+				ReasonDescription: reason,
+				IsRetryable:       isRetryableGeminiError(failureErr),
+			},
+		})
+	}
+
 	if err != nil {
-		r.onFailure(idx, err)
+		recordFailure("API_CALL_ERROR", err.Error(), err)
 		return nil, err
 	}
 	if result == nil || strings.TrimSpace(result.Text()) == "" {
 		err = emptyResponseError(result)
-		r.onFailure(idx, err)
+		recordFailure("EMPTY_RESPONSE_TEXT", err.Error(), err)
 		return nil, err
 	}
 	normalized, err := normalizeDocumentResponseJSON(result.Text())
 	if err != nil {
-		r.onFailure(idx, err)
+		recordFailure("SCHEMA_NORMALIZATION_ERROR", fmt.Sprintf("Failed to normalize document JSON: %v", err), err)
 		return nil, err
 	}
 	normalized, err = alignDocumentPageIndexes(normalized, chunk)
 	if err != nil {
-		r.onFailure(idx, err)
+		recordFailure("PAGE_ALIGNMENT_ERROR", fmt.Sprintf("Failed to align document page indexes: %v", err), err)
 		return nil, err
 	}
+
 	r.onSuccess(idx)
+	_ = RecordAPILog(APILogEntry{
+		Timestamp:    startTime.Format(time.RFC3339),
+		CallType:     "document",
+		APIKeySuffix: keySuffix,
+		Model:        r.cfg.Model,
+		DurationMs:   durationMs,
+		Request:      reqLog,
+		Response:     respLog,
+		FailureCriteriaResult: FailureCriteriaResult{
+			Failed: false,
+		},
+	})
 	r.logf("[GEMINI] document success api_key_suffix=%s chunk=%d/%d", keySuffix, chunk.ChunkIndex, chunk.TotalChunks)
 	return normalized, nil
 }

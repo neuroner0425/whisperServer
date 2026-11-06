@@ -198,6 +198,14 @@ func (r *Runtime) generateRefine(idx int, systemPrompt, responseMIMEType string,
 	keySuffix := maskedKeySuffix(r.clients[idx].key)
 	r.mu.Unlock()
 
+	startTime := time.Now()
+	reqLog := APIRequestLog{
+		SystemPrompt:     systemPrompt,
+		UserPrompt:       prompt,
+		ResponseMIMEType: responseMIMEType,
+		HasSchema:        responseSchema != nil,
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), refineRequestTimeout)
 	defer cancel()
 
@@ -226,29 +234,65 @@ func (r *Runtime) generateRefine(idx int, systemPrompt, responseMIMEType string,
 		}},
 		cfg,
 	)
+
+	durationMs := time.Since(startTime).Milliseconds()
+	respLog := extractResponseLog(result, err)
+
+	recordFailure := func(criterion, reason string, failureErr error) {
+		r.onFailure(idx, failureErr)
+		_ = RecordAPILog(APILogEntry{
+			Timestamp:    startTime.Format(time.RFC3339),
+			CallType:     "refine",
+			APIKeySuffix: keySuffix,
+			Model:        r.cfg.Model,
+			DurationMs:   durationMs,
+			Request:      reqLog,
+			Response:     respLog,
+			FailureCriteriaResult: FailureCriteriaResult{
+				Failed:            true,
+				MatchedCriterion:  criterion,
+				ReasonDescription: reason,
+				IsRetryable:       isRetryableGeminiError(failureErr),
+			},
+		})
+	}
+
 	if err != nil {
-		r.onFailure(idx, err)
+		recordFailure("API_CALL_ERROR", err.Error(), err)
 		return "", err
 	}
 	if result == nil {
 		err = errors.New("empty response")
-		r.onFailure(idx, err)
+		recordFailure("NIL_RESPONSE", "Gemini returned nil result object", err)
 		return "", err
 	}
 	text := strings.TrimSpace(result.Text())
 	if text == "" {
 		err = emptyResponseError(result)
-		r.onFailure(idx, err)
+		recordFailure("EMPTY_RESPONSE_TEXT", err.Error(), err)
 		return "", err
 	}
 	if responseSchema != nil {
 		text, err = normalizeRefineResponseJSON(text)
 		if err != nil {
-			r.onFailure(idx, err)
+			recordFailure("SCHEMA_NORMALIZATION_ERROR", fmt.Sprintf("Failed to normalize JSON against schema: %v", err), err)
 			return "", err
 		}
 	}
+
 	r.onSuccess(idx)
+	_ = RecordAPILog(APILogEntry{
+		Timestamp:    startTime.Format(time.RFC3339),
+		CallType:     "refine",
+		APIKeySuffix: keySuffix,
+		Model:        r.cfg.Model,
+		DurationMs:   durationMs,
+		Request:      reqLog,
+		Response:     respLog,
+		FailureCriteriaResult: FailureCriteriaResult{
+			Failed: false,
+		},
+	})
 	r.logf("[GEMINI] success api_key_suffix=%s", keySuffix)
 	return text, nil
 }
