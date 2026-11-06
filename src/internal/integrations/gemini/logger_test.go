@@ -27,9 +27,12 @@ func TestRecordAPILog(t *testing.T) {
 			HasSchema:    true,
 		},
 		Response: APIResponseLog{
-			RawText:      `{"status":"ok"}`,
-			FinishReason: "STOP",
-			TotalTokens:  50,
+			RawText:          `{"status":"ok"}`,
+			FinishReason:     "STOP",
+			PromptTokens:     30,
+			CandidatesTokens: 20,
+			ThoughtsTokens:   10,
+			TotalTokens:      60,
 		},
 		FailureCriteriaResult: FailureCriteriaResult{
 			Failed: false,

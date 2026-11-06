@@ -42,11 +42,14 @@ type ImageMetaLog struct {
 }
 
 type APIResponseLog struct {
-	RawText      string `json:"raw_text,omitempty"`
-	FinishReason string `json:"finish_reason,omitempty"`
-	BlockReason  string `json:"block_reason,omitempty"`
-	TotalTokens  int32  `json:"total_tokens,omitempty"`
-	Error        string `json:"error,omitempty"`
+	RawText          string `json:"raw_text,omitempty"`
+	FinishReason     string `json:"finish_reason,omitempty"`
+	BlockReason      string `json:"block_reason,omitempty"`
+	PromptTokens     int32  `json:"prompt_tokens"`
+	CandidatesTokens int32  `json:"candidates_tokens"`
+	ThoughtsTokens   int32  `json:"thoughts_tokens"`
+	TotalTokens      int32  `json:"total_tokens"`
+	Error            string `json:"error,omitempty"`
 }
 
 type FailureCriteriaResult struct {
@@ -115,6 +118,9 @@ func extractResponseLog(result *genai.GenerateContentResponse, err error) APIRes
 	if result != nil {
 		respLog.RawText = strings.TrimSpace(result.Text())
 		if result.UsageMetadata != nil {
+			respLog.PromptTokens = result.UsageMetadata.PromptTokenCount
+			respLog.CandidatesTokens = result.UsageMetadata.CandidatesTokenCount
+			respLog.ThoughtsTokens = result.UsageMetadata.ThoughtsTokenCount
 			respLog.TotalTokens = result.UsageMetadata.TotalTokenCount
 		}
 		if result.PromptFeedback != nil && result.PromptFeedback.BlockReason != "" {
