@@ -123,6 +123,27 @@ func SaveJob(id string, job *model.Job) (err error) {
 		}
 	}()
 
+	if err := saveJobWithTx(tx, id, job); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// SaveJobTx persists or updates a single job record within an existing domain transaction.
+func SaveJobTx(tx model.Tx, id string, job *model.Job) error {
+	rawTx := GetRawTx(tx)
+	if rawTx == nil {
+		return SaveJob(id, job)
+	}
+	return saveJobWithTx(rawTx, id, job)
+}
+
+func saveJobWithTx(tx *sql.Tx, id string, job *model.Job) error {
+	if job == nil {
+		return nil
+	}
+
 	if _, execErr := tx.Exec(`
 		INSERT INTO jobs(
 			id, status_code, filename, file_type, uploaded_ts, media_duration_seconds,
@@ -137,7 +158,6 @@ func SaveJob(id string, job *model.Job) (err error) {
 			media_duration_seconds=excluded.media_duration_seconds,
 			description=excluded.description,
 			refine_enabled=excluded.refine_enabled,
-			owner_id=excluded.owner_id,
 			folder_id=excluded.folder_id,
 			is_trashed=excluded.is_trashed,
 			deleted_ts=excluded.deleted_ts,
@@ -164,8 +184,8 @@ func SaveJob(id string, job *model.Job) (err error) {
 		return execErr
 	}
 
-	// Synchronize full-text search owner_id
-	_, _ = tx.Exec(`UPDATE job_search_fts SET owner_id = ? WHERE job_id = ?`, job.OwnerID, id)
+	// Synchronize full-text search owner_id from authoritative jobs row
+	_, _ = tx.Exec(`UPDATE job_search_fts SET owner_id = (SELECT owner_id FROM jobs WHERE id = ?) WHERE job_id = ?`, id, id)
 
 	// Synchronize tags only for this specific job.
 	if _, err := tx.Exec(`DELETE FROM job_tags WHERE job_id = ?`, id); err != nil {
@@ -194,7 +214,7 @@ func SaveJob(id string, job *model.Job) (err error) {
 		}
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 // DeleteJobs removes multiple job rows and relies on CASCADE foreign keys to clean up related records.

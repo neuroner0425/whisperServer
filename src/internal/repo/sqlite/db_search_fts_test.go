@@ -208,7 +208,7 @@ func TestSyncExistingJobsToFTS_HandlesEmptyContent(t *testing.T) {
 	}
 }
 
-func TestSaveJob_SyncsFTSOwnerID(t *testing.T) {
+func TestSaveJob_OwnershipImmutableOnConflict(t *testing.T) {
 	projectRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(projectRoot, ".run"), 0o755); err != nil {
 		t.Fatalf("mkdir .run: %v", err)
@@ -228,7 +228,7 @@ func TestSaveJob_SyncsFTSOwnerID(t *testing.T) {
 		t.Fatalf("expected searchable by u1, got %v, err=%v", ids, err)
 	}
 
-	// Update job owner to u2 via SaveJob
+	// Attempt to overwrite job owner to u2 via SaveJob (should remain u1 on conflict)
 	job := &model.Job{
 		Filename:   "file.mp3",
 		FileType:   "audio",
@@ -239,14 +239,23 @@ func TestSaveJob_SyncsFTSOwnerID(t *testing.T) {
 		t.Fatalf("SaveJob failed: %v", err)
 	}
 
-	// Now should be searchable by u2 and not by u1
+	// Job ownership must remain u1
+	gotJob, err := GetJobByID("job-sync")
+	if err != nil {
+		t.Fatalf("GetJobByID failed: %v", err)
+	}
+	if gotJob.OwnerID != "u1" {
+		t.Fatalf("expected job owner to remain 'u1', got %q", gotJob.OwnerID)
+	}
+
+	// Still searchable by u1 and NOT searchable by u2
 	idsU1, _ := SearchJobIDsByContent("u1", "비밀")
-	if len(idsU1) != 0 {
-		t.Fatalf("expected u1 not to find job after ownership transfer, got %v", idsU1)
+	if len(idsU1) != 1 || idsU1[0] != "job-sync" {
+		t.Fatalf("expected u1 to still find job, got %v", idsU1)
 	}
 	idsU2, _ := SearchJobIDsByContent("u2", "비밀")
-	if len(idsU2) != 1 || idsU2[0] != "job-sync" {
-		t.Fatalf("expected u2 to find job after ownership transfer, got %v", idsU2)
+	if len(idsU2) != 0 {
+		t.Fatalf("expected u2 not to find stolen job, got %v", idsU2)
 	}
 }
 

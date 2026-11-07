@@ -4,49 +4,108 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"whisperserver/src/internal/domain"
 	"whisperserver/src/internal/integrations/gemini"
+	"whisperserver/src/internal/integrations/storage"
 	intwhisper "whisperserver/src/internal/integrations/whisper"
 	"whisperserver/src/internal/service"
+	intutil "whisperserver/src/internal/util"
 )
 
 // AVScanStepHandler performs initial streaming malware scanning on uploaded files.
 type AVScanStepHandler struct {
 	Scanner domain.MalwareScanner
+	Storage storage.Storage
 	Logf    func(string, ...any)
 	Errf    func(string, error, string, ...any)
 }
 
 func (h *AVScanStepHandler) Execute(ctx context.Context, task *domain.Task) (domain.StepResult, error) {
 	var payload struct {
-		TempPath string `json:"temp_path"`
-		FileType string `json:"file_type"`
-		Language string `json:"language"`
+		StorageKey string `json:"storage_key"`
+		TempPath   string `json:"temp_path"`
+		FileType   string `json:"file_type"`
+		Language   string `json:"language"`
 	}
 	_ = json.Unmarshal([]byte(task.PayloadJSON), &payload)
 
-	f, err := os.Open(payload.TempPath)
-	if err != nil {
-		return domain.StepResult{}, fmt.Errorf("open upload file for av scan failed: %w", err)
-	}
-	defer f.Close()
+	var (
+		res domain.ScanResult
+		err error
+	)
 
-	fi, err := f.Stat()
-	if err != nil {
-		return domain.StepResult{}, fmt.Errorf("stat upload file failed: %w", err)
-	}
+	// Direct storage streaming scan path (Phase 2 Presigned)
+	if payload.StorageKey != "" && h.Storage != nil {
+		rc, info, getErr := h.Storage.GetStream(ctx, payload.StorageKey)
+		if getErr != nil {
+			return domain.StepResult{}, fmt.Errorf("open quarantine stream for av scan failed: %w", getErr)
+		}
 
-	res, err := h.Scanner.ScanStream(ctx, f, fi.Size())
-	if err != nil {
-		return domain.StepResult{}, fmt.Errorf("malware scanner failed: %w", err)
-	}
+		res, err = h.Scanner.ScanStream(ctx, rc, info.Size)
+		_ = rc.Close()
+		if err != nil {
+			return domain.StepResult{}, fmt.Errorf("malware scanner failed: %w", err)
+		}
 
-	if res.Verdict == domain.VerdictInfected {
+		if res.Verdict == domain.VerdictInfected {
+			_ = h.Storage.Delete(ctx, payload.StorageKey)
+			return domain.StepResult{}, fmt.Errorf("%w (signature: %s)", ErrInfectedMalware, res.Signature)
+		}
+
+		// Promote quarantine_raw to source_raw
+		sourceKey := fmt.Sprintf("jobs/%s/source_raw", task.JobID)
+		srcRC, srcInfo, srcErr := h.Storage.GetStream(ctx, payload.StorageKey)
+		if srcErr != nil {
+			return domain.StepResult{}, fmt.Errorf("open quarantine stream for promotion failed: %w", srcErr)
+		}
+		_, putErr := h.Storage.PutStream(ctx, sourceKey, srcRC, srcInfo.Size, srcInfo.ContentType)
+		_ = srcRC.Close()
+		if putErr != nil {
+			return domain.StepResult{}, fmt.Errorf("promote quarantine to source_raw failed: %w", putErr)
+		}
+		_ = h.Storage.Delete(ctx, payload.StorageKey)
+
+		// If PDF, also store under pdf_original for downstream PDF steps
+		if payload.FileType == "pdf" {
+			pdfRC, pdfInfo, pErr := h.Storage.GetStream(ctx, sourceKey)
+			if pErr != nil {
+				return domain.StepResult{}, fmt.Errorf("open source stream for pdf promotion failed: %w", pErr)
+			}
+			pdfKey := fmt.Sprintf("jobs/%s/pdf_original", task.JobID)
+			_, putPdfErr := h.Storage.PutStream(ctx, pdfKey, pdfRC, pdfInfo.Size, pdfInfo.ContentType)
+			_ = pdfRC.Close()
+			if putPdfErr != nil {
+				return domain.StepResult{}, fmt.Errorf("promote source to pdf_original failed: %w", putPdfErr)
+			}
+		}
+	} else if payload.TempPath != "" {
+		// Legacy local file path fallback
+		f, openErr := os.Open(payload.TempPath)
+		if openErr != nil {
+			return domain.StepResult{}, fmt.Errorf("open upload file for av scan failed: %w", openErr)
+		}
+
+		fi, statErr := f.Stat()
+		if statErr != nil {
+			_ = f.Close()
+			return domain.StepResult{}, fmt.Errorf("stat upload file failed: %w", statErr)
+		}
+
+		res, err = h.Scanner.ScanStream(ctx, f, fi.Size())
 		_ = f.Close()
-		_ = os.Remove(payload.TempPath)
-		return domain.StepResult{}, fmt.Errorf("%w (signature: %s)", ErrInfectedMalware, res.Signature)
+		if err != nil {
+			return domain.StepResult{}, fmt.Errorf("malware scanner failed: %w", err)
+		}
+
+		if res.Verdict == domain.VerdictInfected {
+			_ = os.Remove(payload.TempPath)
+			return domain.StepResult{}, fmt.Errorf("%w (signature: %s)", ErrInfectedMalware, res.Signature)
+		}
+	} else {
+		return domain.StepResult{}, fmt.Errorf("no storage_key or temp_path provided for av scan")
 	}
 
 	qualityJSON, _ := json.Marshal(map[string]any{
@@ -65,17 +124,28 @@ func (h *AVScanStepHandler) Execute(ctx context.Context, task *domain.Task) (dom
 		nextClass = domain.ResourceClassMedia
 	}
 
+	nextPayloadMap := map[string]any{}
+	_ = json.Unmarshal([]byte(task.PayloadJSON), &nextPayloadMap)
+	nextPayloadMap["file_type"] = payload.FileType
+	nextPayloadMap["language"] = payload.Language
+	if payload.TempPath != "" {
+		nextPayloadMap["temp_path"] = payload.TempPath
+	}
+	nextPayloadJSON, _ := json.Marshal(nextPayloadMap)
+
 	return domain.StepResult{
 		NextStep:      &nextStep,
 		NextClass:     &nextClass,
-		NextPayload:   task.PayloadJSON,
+		NextPayload:   string(nextPayloadJSON),
 		QualityReport: string(qualityJSON),
 	}, nil
 }
 
-// NormalizeStepHandler converts raw audio into web playback AAC and STT-ready WAV.
+// NormalizeStepHandler converts raw audio into web playback AAC and STT-ready WAV using hardware acceleration.
 type NormalizeStepHandler struct {
 	BlobSvc          *service.JobBlobService
+	Storage          storage.Storage
+	TmpFolder        string
 	ConvertToAac     func(string, string) error
 	ConvertToWav     func(string, string) error
 	GetMediaDuration func(string) *int
@@ -90,43 +160,131 @@ func (h *NormalizeStepHandler) Execute(ctx context.Context, task *domain.Task) (
 	}
 	_ = json.Unmarshal([]byte(task.PayloadJSON), &payload)
 
-	dir := filepath.Dir(payload.TempPath)
-	aacPath := filepath.Join(dir, task.JobID+".m4a")
-	wavPath := filepath.Join(dir, task.JobID+".wav")
-
-	if h.ConvertToAac != nil {
-		if err := h.ConvertToAac(payload.TempPath, aacPath); err != nil {
-			return domain.StepResult{}, fmt.Errorf("convert to aac failed: %w", err)
-		}
-		aacBytes, err := os.ReadFile(aacPath)
-		if err == nil && h.BlobSvc != nil {
-			_ = h.BlobSvc.SaveBlob(task.JobID, "audio_aac", aacBytes)
-		}
-		_ = os.Remove(aacPath)
+	sourceKey := fmt.Sprintf("jobs/%s/source_raw", task.JobID)
+	hasSourceRaw := false
+	if h.Storage != nil {
+		hasSourceRaw, _ = h.Storage.Exists(ctx, sourceKey)
 	}
 
-	if h.ConvertToWav != nil {
-		if err := h.ConvertToWav(payload.TempPath, wavPath); err != nil {
-			return domain.StepResult{}, fmt.Errorf("convert to wav failed: %w", err)
+	var (
+		qualityMap  = map[string]any{}
+		durationSec *int
+	)
+
+	if hasSourceRaw && h.Storage != nil {
+		// Phase 2: Single-pass hardware accelerated conversion from preserved source_raw
+		workDir := h.TmpFolder
+		if workDir == "" {
+			workDir = os.TempDir()
 		}
-		wavBytes, err := os.ReadFile(wavPath)
-		if err == nil && h.BlobSvc != nil {
-			_ = h.BlobSvc.SaveBlob(task.JobID, "wav", wavBytes)
+		rawInputPath := filepath.Join(workDir, task.JobID+"_source_raw")
+		outWavPath := filepath.Join(workDir, task.JobID+"_temp_stt.wav")
+		outAACPath := filepath.Join(workDir, task.JobID+"_playback.m4a")
+
+		defer func() {
+			_ = os.Remove(rawInputPath)
+			_ = os.Remove(outWavPath)
+			_ = os.Remove(outAACPath)
+		}()
+
+		// 1. Stream download source_raw
+		srcRC, _, err := h.Storage.GetStream(ctx, sourceKey)
+		if err != nil {
+			return domain.StepResult{}, fmt.Errorf("download source_raw failed: %w", err)
 		}
-		_ = os.Remove(wavPath)
+		rawF, err := os.Create(rawInputPath)
+		if err != nil {
+			_ = srcRC.Close()
+			return domain.StepResult{}, fmt.Errorf("create raw temp file failed: %w", err)
+		}
+		_, copyErr := io.Copy(rawF, srcRC)
+		_ = srcRC.Close()
+		_ = rawF.Close()
+		if copyErr != nil {
+			return domain.StepResult{}, fmt.Errorf("stream copy source_raw failed: %w", copyErr)
+		}
+
+		if h.GetMediaDuration != nil {
+			durationSec = h.GetMediaDuration(rawInputPath)
+		}
+
+		// 2. Single-pass dual conversion with hardware acceleration & fallback
+		hwReport, err := intutil.ExtractSTTWavAndPlaybackAAC(ctx, rawInputPath, outWavPath, outAACPath)
+		if err != nil {
+			return domain.StepResult{}, fmt.Errorf("dual media conversion failed: %w", err)
+		}
+
+		// 3. Upload playback AAC
+		aacF, err := os.Open(outAACPath)
+		if err == nil {
+			fi, _ := aacF.Stat()
+			aacKey := fmt.Sprintf("jobs/%s/audio_aac", task.JobID)
+			_, _ = h.Storage.PutStream(ctx, aacKey, aacF, fi.Size(), "audio/mp4")
+			_ = aacF.Close()
+		}
+		if h.Storage == nil && h.BlobSvc != nil {
+			if aacBytes, readErr := os.ReadFile(outAACPath); readErr == nil {
+				_ = h.BlobSvc.SaveBlob(task.JobID, "audio_aac", aacBytes)
+			}
+		}
+
+		// 4. Upload temporary STT WAV
+		wavF, err := os.Open(outWavPath)
+		if err == nil {
+			fi, _ := wavF.Stat()
+			wavKey := fmt.Sprintf("jobs/%s/temp_stt.wav", task.JobID)
+			_, _ = h.Storage.PutStream(ctx, wavKey, wavF, fi.Size(), "audio/wav")
+			_ = wavF.Close()
+		}
+		if h.Storage == nil && h.BlobSvc != nil {
+			if wavBytes, readErr := os.ReadFile(outWavPath); readErr == nil {
+				_ = h.BlobSvc.SaveBlob(task.JobID, "wav", wavBytes)
+			}
+		}
+
+		qualityMap["hwaccel"] = hwReport.ProfileUsed
+		qualityMap["fallback_used"] = hwReport.FallbackUsed
+		qualityMap["elapsed_ms"] = hwReport.Elapsed.Milliseconds()
+		qualityMap["media_duration_seconds"] = durationSec
+	} else if payload.TempPath != "" {
+		// Legacy conversion path fallback
+		dir := filepath.Dir(payload.TempPath)
+		aacPath := filepath.Join(dir, task.JobID+".m4a")
+		wavPath := filepath.Join(dir, task.JobID+".wav")
+
+		if h.ConvertToAac != nil {
+			if err := h.ConvertToAac(payload.TempPath, aacPath); err != nil {
+				return domain.StepResult{}, fmt.Errorf("convert to aac failed: %w", err)
+			}
+			aacBytes, err := os.ReadFile(aacPath)
+			if err == nil && h.BlobSvc != nil {
+				_ = h.BlobSvc.SaveBlob(task.JobID, "audio_aac", aacBytes)
+			}
+			_ = os.Remove(aacPath)
+		}
+
+		if h.ConvertToWav != nil {
+			if err := h.ConvertToWav(payload.TempPath, wavPath); err != nil {
+				return domain.StepResult{}, fmt.Errorf("convert to wav failed: %w", err)
+			}
+			wavBytes, err := os.ReadFile(wavPath)
+			if err == nil && h.BlobSvc != nil {
+				_ = h.BlobSvc.SaveBlob(task.JobID, "wav", wavBytes)
+			}
+			_ = os.Remove(wavPath)
+		}
+
+		if h.GetMediaDuration != nil {
+			durationSec = h.GetMediaDuration(payload.TempPath)
+		}
+		_ = os.Remove(payload.TempPath)
+
+		qualityMap["media_duration_seconds"] = durationSec
+	} else {
+		return domain.StepResult{}, fmt.Errorf("no source media available for normalize step")
 	}
 
-	var durationSec *int
-	if h.GetMediaDuration != nil {
-		durationSec = h.GetMediaDuration(payload.TempPath)
-	}
-
-	// Clean up original temp upload file
-	_ = os.Remove(payload.TempPath)
-
-	qualityJSON, _ := json.Marshal(map[string]any{
-		"media_duration_seconds": durationSec,
-	})
+	qualityJSON, _ := json.Marshal(qualityMap)
 
 	nextStep := domain.StepTranscribe
 	nextClass := domain.ResourceClassSTT
@@ -141,6 +299,7 @@ func (h *NormalizeStepHandler) Execute(ctx context.Context, task *domain.Task) (
 // TranscribeStepHandler invokes Whisper speech-to-text with parameterized language support.
 type TranscribeStepHandler struct {
 	BlobSvc       *service.JobBlobService
+	Storage       storage.Storage
 	WhisperRunner interface {
 		RunFromBlobWithOptions(context.Context, string, []byte, *int, intwhisper.RunOptions) (intwhisper.RunResult, error)
 	}
@@ -150,13 +309,23 @@ type TranscribeStepHandler struct {
 }
 
 func (h *TranscribeStepHandler) Execute(ctx context.Context, task *domain.Task) (domain.StepResult, error) {
-	if h.BlobSvc == nil {
-		return domain.StepResult{}, fmt.Errorf("blob service unavailable")
-	}
+	var (
+		wavBytes []byte
+		err      error
+	)
 
-	wavBytes, err := h.BlobSvc.LoadBlob(task.JobID, "wav")
-	if err != nil {
-		return domain.StepResult{}, fmt.Errorf("load wav blob failed: %w", err)
+	// 1. Load temporary STT WAV from object storage or fallback to blob store
+	tempWavKey := fmt.Sprintf("jobs/%s/temp_stt.wav", task.JobID)
+	if h.Storage != nil {
+		if exists, _ := h.Storage.Exists(ctx, tempWavKey); exists {
+			wavBytes, err = h.Storage.Get(ctx, tempWavKey)
+		}
+	}
+	if len(wavBytes) == 0 && h.BlobSvc != nil {
+		wavBytes, err = h.BlobSvc.LoadBlob(task.JobID, "wav")
+	}
+	if len(wavBytes) == 0 {
+		return domain.StepResult{}, fmt.Errorf("load wav artifact failed (requires re-entry from normalize step): %w", err)
 	}
 
 	var payload struct {
@@ -183,9 +352,19 @@ func (h *TranscribeStepHandler) Execute(ctx context.Context, task *domain.Task) 
 		return domain.StepResult{}, fmt.Errorf("whisper transcribe failed: %w", err)
 	}
 
+	// Immediate cleanup of temporary uncompressed WAV after successful STT transcription
+	if h.Storage != nil {
+		_ = h.Storage.Delete(ctx, tempWavKey)
+	}
+	if h.BlobSvc != nil {
+		h.BlobSvc.DeleteBlob(task.JobID, "wav")
+	}
+
 	// Save transcript outputs
-	_ = h.BlobSvc.SaveBlob(task.JobID, "transcript", []byte(runRes.TimelineText))
-	_ = h.BlobSvc.SaveBlob(task.JobID, "transcript_json", runRes.TranscriptJSON)
+	if h.BlobSvc != nil {
+		_ = h.BlobSvc.SaveBlob(task.JobID, "transcript", []byte(runRes.TimelineText))
+		_ = h.BlobSvc.SaveBlob(task.JobID, "transcript_json", runRes.TranscriptJSON)
+	}
 
 	qualityJSON, _ := json.Marshal(map[string]any{
 		"language": lang,
