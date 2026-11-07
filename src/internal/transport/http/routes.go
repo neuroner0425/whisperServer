@@ -101,6 +101,11 @@ type Handlers struct {
 	APITrashJob        echo.HandlerFunc
 	APIGetSettingsLLM  echo.HandlerFunc
 	APIPutSettingsLLM  echo.HandlerFunc
+	LocalBlobPut       echo.HandlerFunc
+	LocalBlobGet       echo.HandlerFunc
+	APIUploadInitiate  echo.HandlerFunc
+	APIUploadComplete  echo.HandlerFunc
+	APIMediaURL        echo.HandlerFunc
 }
 
 // RegisterRoutes binds every public endpoint exposed by the backend.
@@ -209,6 +214,9 @@ func RegisterRoutes(e *echo.Echo, cfg Config, h Handlers) {
 	e.POST("/api/move", h.APIBatchMove)
 	e.GET("/api/folders/:folder_id/download", h.APIDownloadFolder)
 	e.POST("/api/upload", h.APIUpload, uploadLimiter)
+	e.POST("/api/uploads/initiate", h.APIUploadInitiate, uploadLimiter)
+	e.POST("/api/uploads/:job_id/complete", h.APIUploadComplete, uploadLimiter)
+	e.GET("/api/jobs/:job_id/media-url", h.APIMediaURL)
 	e.POST("/api/folders", h.APICreateFolder)
 	e.PATCH("/api/folders/:folder_id", h.APIRenameFolder)
 	e.DELETE("/api/folders/:folder_id", h.APITrashFolder)
@@ -216,6 +224,10 @@ func RegisterRoutes(e *echo.Echo, cfg Config, h Handlers) {
 	e.DELETE("/api/jobs/:job_id", h.APITrashJob)
 	e.GET("/api/settings/llm", h.APIGetSettingsLLM)
 	e.PUT("/api/settings/llm", h.APIPutSettingsLLM)
+
+	// Internal local-blob streaming & upload
+	e.PUT("/internal/local-blob/put", h.LocalBlobPut)
+	e.GET("/internal/local-blob/get", h.LocalBlobGet)
 
 	// Frontend app entrypoint
 	e.GET("/app", h.SPAIndex)

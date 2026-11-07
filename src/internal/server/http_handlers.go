@@ -156,5 +156,24 @@ func buildRouteHandlers(svc appServices, spaIndex echo.HandlerFunc) httptranspor
 			GetSettings:               store.GetUserSettings,
 			SaveSettings:              store.SaveUserSettings,
 		}.PutHandler(),
+		LocalBlobPut: httptransport.LocalBlobHandlers{Storage: store.GetBlobStorage(), Logf: procLogf, Errf: procErrf}.Put(),
+		LocalBlobGet: httptransport.LocalBlobHandlers{Storage: store.GetBlobStorage(), Logf: procLogf, Errf: procErrf}.Get(),
+		APIUploadInitiate: httptransport.PresignedUploadHandlers{
+			CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized,
+			UploadSvc:                 svc.uploadSvc,
+			NormalizeFolderID:         httptransport.NormalizeFolderID,
+		}.Initiate(),
+		APIUploadComplete: httptransport.PresignedUploadHandlers{
+			CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized,
+			UploadSvc:                 svc.uploadSvc,
+			NormalizeFolderID:         httptransport.NormalizeFolderID,
+		}.Complete(),
+		APIMediaURL: httptransport.MediaURLHandlers{
+			CurrentUserOrUnauthorized: transportCurrentUserOrUnauthorized,
+			GetJob:                    svc.runtime.GetJob,
+			Storage:                   store.GetBlobStorage(),
+			Logf:                      procLogf,
+			Errf:                      procErrf,
+		}.Get(),
 	}
 }

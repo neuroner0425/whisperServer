@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -15,7 +16,38 @@ import (
 	"time"
 
 	model "whisperserver/src/internal/domain"
+	"whisperserver/src/internal/integrations/storage"
+	store "whisperserver/src/internal/repo/sqlite"
 )
+
+// UploadInitiateRequest defines metadata required to issue a presigned direct upload URL.
+type UploadInitiateRequest struct {
+	OwnerID     string
+	Filename    string
+	Size        int64
+	ContentType string
+	FolderID    string
+	Language    string
+}
+
+// UploadInitiateResponse returns the presigned upload URL and reservation parameters.
+type UploadInitiateResponse struct {
+	JobID      string `json:"job_id"`
+	UploadURL  string `json:"upload_url"`
+	StorageKey string `json:"storage_key"`
+	ExpiresIn  int    `json:"expires_in"`
+}
+
+// UploadCompleteRequest notifies the backend that a client has finished direct S3/storage upload.
+type UploadCompleteRequest struct {
+	OwnerID     string
+	JobID       string
+	Filename    string
+	FolderID    string
+	Language    string
+	Tags        []string
+	Description string
+}
 
 // UploadCreateRequest is the normalized request passed from transport into the upload service.
 type UploadCreateRequest struct {
@@ -36,7 +68,14 @@ type UploadCreateRequest struct {
 
 // UploadServiceDeps provides validation, storage, runtime, and side-effect hooks.
 type UploadServiceDeps struct {
-	TaskQueue model.TaskQueue
+	TaskQueue         model.TaskQueue
+	Storage           storage.Storage
+	TxManager         model.TxManager
+	SaveJobTx         func(model.Tx, string, *model.Job) error
+	JobFinder         func(string) (*model.Job, error)
+	GetJobByID        func(string) (*model.Job, error)
+	InsertOutboxEvent func(context.Context, model.Tx, model.DomainEvent) (int64, error)
+
 	// Validation
 	DetectFileType func(string) string
 	AllowedFile    func(string) bool
@@ -563,4 +602,276 @@ func isAudioMagicBytes(header []byte) bool {
 		return true
 	}
 	return false
+}
+
+// InitiatePresigned generates a presigned PUT URL for direct client upload into quarantine_raw.
+func (s *UploadService) InitiatePresigned(ctx context.Context, req UploadInitiateRequest) (*UploadInitiateResponse, error) {
+	d := s.d
+	if strings.TrimSpace(req.OwnerID) == "" {
+		return nil, NewHTTPError(http.StatusBadRequest, "잘못된 요청입니다 (소유자 정보 누락).")
+	}
+	originalFilename := filepath.Base(filepath.Clean(req.Filename))
+	if originalFilename == "." || originalFilename == "/" || originalFilename == "" {
+		return nil, NewHTTPError(http.StatusBadRequest, "유효하지 않은 파일명입니다.")
+	}
+	if d.AllowedFile == nil || !d.AllowedFile(originalFilename) {
+		exts := []string{}
+		if d.SortedExts != nil {
+			exts = d.SortedExts()
+		}
+		return nil, NewHTTPError(http.StatusBadRequest, fmt.Sprintf("허용되지 않는 파일 형식입니다. 허용: %s", strings.Join(exts, ", ")))
+	}
+
+	maxUploadBytes := int64(d.MaxUploadSizeMB) * 1024 * 1024
+	if maxUploadBytes > 0 && req.Size > maxUploadBytes {
+		return nil, NewHTTPError(http.StatusBadRequest, fmt.Sprintf("업로드 용량 초과 (%dMB 제한)", d.MaxUploadSizeMB))
+	}
+
+	lang := strings.ToLower(strings.TrimSpace(req.Language))
+	if lang == "" {
+		lang = "ko"
+	} else if lang != "ko" && lang != "en" && lang != "ja" && lang != "auto" {
+		return nil, NewHTTPError(http.StatusBadRequest, "지원되지 않는 언어 코드입니다 (허용: ko, en, ja, auto).")
+	}
+
+	folderID := strings.TrimSpace(req.FolderID)
+	if folderID != "" && d.GetFolderByID != nil {
+		f, err := d.GetFolderByID(req.OwnerID, folderID)
+		if err != nil || f == nil || f.IsTrashed {
+			return nil, NewHTTPError(http.StatusBadRequest, "유효하지 않은 폴더입니다.")
+		}
+	}
+
+	if d.Storage == nil {
+		return nil, NewHTTPError(http.StatusServiceUnavailable, "스토리지 서비스가 구성되지 않았습니다.")
+	}
+
+	jobID := ""
+	if d.NewJobID != nil {
+		jobID = d.NewJobID()
+	} else {
+		jobID = "job-" + fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+
+	quarantineKey := fmt.Sprintf("jobs/%s/quarantine_raw", jobID)
+	expires := 15 * time.Minute
+	uploadURL, err := d.Storage.PresignPut(ctx, quarantineKey, req.ContentType, expires)
+	if err != nil {
+		return nil, fmt.Errorf("presign put failed: %w", err)
+	}
+
+	fileType := "audio"
+	if d.DetectFileType != nil {
+		fileType = d.DetectFileType(originalFilename)
+	}
+
+	now := time.Now()
+	if d.Now != nil {
+		now = d.Now()
+	}
+	nowStr := now.Format("2006-01-02 15:04:05")
+
+	initialJob := &model.Job{
+		OwnerID:     req.OwnerID,
+		Filename:    originalFilename,
+		FileType:    fileType,
+		FolderID:    folderID,
+		StatusCode:  model.JobStatusPendingCode,
+		Status:      model.JobStatusName(model.JobStatusPendingCode),
+		UploadedAt:  nowStr,
+		UploadedTS:  float64(now.Unix()),
+	}
+
+	if d.SaveJobTx != nil {
+		if err := d.SaveJobTx(nil, jobID, initialJob); err != nil {
+			return nil, fmt.Errorf("save initial job failed: %w", err)
+		}
+	} else {
+		if err := store.SaveJob(jobID, initialJob); err != nil {
+			return nil, fmt.Errorf("save initial job failed: %w", err)
+		}
+	}
+
+	return &UploadInitiateResponse{
+		JobID:      jobID,
+		UploadURL:  uploadURL,
+		StorageKey: quarantineKey,
+		ExpiresIn:  int(expires.Seconds()),
+	}, nil
+}
+
+// CompletePresigned verifies the quarantined direct upload and enqueues the initial av_scan task atomically.
+func (s *UploadService) CompletePresigned(ctx context.Context, req UploadCompleteRequest) (*model.Job, error) {
+	d := s.d
+	if strings.TrimSpace(req.OwnerID) == "" || strings.TrimSpace(req.JobID) == "" {
+		return nil, NewHTTPError(http.StatusBadRequest, "잘못된 요청입니다 (job_id 또는 owner_id 누락).")
+	}
+
+	if d.Storage == nil {
+		return nil, NewHTTPError(http.StatusServiceUnavailable, "스토리지 서비스가 구성되지 않았습니다.")
+	}
+
+	quarantineKey := fmt.Sprintf("jobs/%s/quarantine_raw", req.JobID)
+	info, err := d.Storage.Stat(ctx, quarantineKey)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return nil, NewHTTPError(http.StatusBadRequest, "업로드된 미디어 객체가 존재하지 않습니다.")
+		}
+		return nil, fmt.Errorf("stat quarantine object failed: %w", err)
+	}
+
+	maxUploadBytes := int64(d.MaxUploadSizeMB) * 1024 * 1024
+	if (maxUploadBytes > 0 && info.Size > maxUploadBytes) || info.Size <= 0 {
+		_ = d.Storage.Delete(ctx, quarantineKey)
+		return nil, NewHTTPError(http.StatusBadRequest, fmt.Sprintf("업로드 용량 오류 (%dMB 초과 또는 0바이트)", d.MaxUploadSizeMB))
+	}
+
+	// Ownership and existence verification (R-18 Tenant Isolation)
+	var (
+		existingJob *model.Job
+		findErr     error
+	)
+	if d.JobFinder != nil {
+		existingJob, findErr = d.JobFinder(req.JobID)
+	} else if d.GetJobByID != nil {
+		existingJob, findErr = d.GetJobByID(req.JobID)
+	} else {
+		existingJob, findErr = store.GetJobByID(req.JobID)
+	}
+	if findErr != nil {
+		return nil, fmt.Errorf("find existing job failed: %w", findErr)
+	}
+	if existingJob == nil || existingJob.OwnerID != req.OwnerID {
+		return nil, NewHTTPError(http.StatusForbidden, "해당 작업에 대한 권한이 없습니다.")
+	}
+
+	originalFilename := filepath.Base(filepath.Clean(req.Filename))
+	if originalFilename == "." || originalFilename == "/" || originalFilename == "" {
+		if existingJob.Filename != "" {
+			originalFilename = existingJob.Filename
+		} else {
+			originalFilename = req.JobID
+		}
+	}
+
+	fileType := existingJob.FileType
+	if fileType == "" {
+		fileType = "audio"
+		if d.DetectFileType != nil {
+			fileType = d.DetectFileType(originalFilename)
+		}
+	}
+
+	lang := strings.ToLower(strings.TrimSpace(req.Language))
+	if lang == "" {
+		lang = "ko"
+	}
+
+	folderID := strings.TrimSpace(req.FolderID)
+	if folderID == "" && existingJob.FolderID != "" {
+		folderID = existingJob.FolderID
+	}
+	if folderID != "" && d.GetFolderByID != nil {
+		f, err := d.GetFolderByID(req.OwnerID, folderID)
+		if err != nil || f == nil || f.IsTrashed {
+			return nil, NewHTTPError(http.StatusBadRequest, "유효하지 않은 폴더입니다.")
+		}
+	}
+
+	now := time.Now()
+	if d.Now != nil {
+		now = d.Now()
+	}
+	nowStr := now.Format("2006-01-02 15:04:05")
+
+	job := &model.Job{
+		OwnerID:     existingJob.OwnerID,
+		Filename:    originalFilename,
+		FileType:    fileType,
+		FolderID:    folderID,
+		StatusCode:  model.JobStatusPendingCode,
+		Status:      model.JobStatusName(model.JobStatusPendingCode),
+		UploadedAt:  nowStr,
+		UploadedTS:  float64(now.Unix()),
+		Description: req.Description,
+		Tags:        req.Tags,
+	}
+
+	// Atomic transaction: SaveJobTx + EnqueueTask(av_scan) + InsertOutboxEvent
+	var tx model.Tx
+	if d.TxManager != nil {
+		tx, err = d.TxManager.BeginTx(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("begin transaction failed: %w", err)
+		}
+		defer func() {
+			if tx != nil {
+				_ = tx.Rollback()
+			}
+		}()
+	}
+
+	// 1. Save Job
+	if d.SaveJobTx != nil {
+		if err := d.SaveJobTx(tx, req.JobID, job); err != nil {
+			return nil, fmt.Errorf("save job failed: %w", err)
+		}
+	}
+
+	// 2. Enqueue Task for AV Scan
+	taskPayload, _ := json.Marshal(map[string]any{
+		"storage_key": quarantineKey,
+		"file_type":   fileType,
+		"language":    lang,
+	})
+	task := model.Task{
+		ID:            "task-" + fmt.Sprintf("%d", time.Now().UnixNano()),
+		JobID:         req.JobID,
+		OwnerID:       job.OwnerID,
+		Step:          model.StepAVScan,
+		ResourceClass: model.ResourceClassMedia,
+		Status:        "ready",
+		Priority:      0,
+		PayloadJSON:   string(taskPayload),
+		Attempt:       0,
+		MaxAttempts:   5,
+	}
+	if d.TaskQueue != nil {
+		if err := d.TaskQueue.Enqueue(ctx, tx, task); err != nil {
+			return nil, fmt.Errorf("enqueue av_scan task failed: %w", err)
+		}
+	}
+
+	// 3. Outbox Event
+	if d.InsertOutboxEvent != nil {
+		outboxPayload, _ := json.Marshal(map[string]any{
+			"job_id":      req.JobID,
+			"status_code": job.StatusCode,
+			"phase":       job.Status,
+		})
+		_, _ = d.InsertOutboxEvent(ctx, tx, model.DomainEvent{
+			OwnerID:     job.OwnerID,
+			JobID:       req.JobID,
+			EventType:   model.EventTypeJobStatus,
+			PayloadJSON: string(outboxPayload),
+			CreatedAt:   now,
+		})
+	}
+
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("commit upload complete failed: %w", err)
+		}
+		tx = nil
+	}
+
+	// Update runtime cache and notify
+	if d.AddJob != nil {
+		d.AddJob(req.JobID, job)
+	}
+	if folderID != "" && d.TouchFolderAndAncestors != nil {
+		_ = d.TouchFolderAndAncestors(req.OwnerID, folderID)
+	}
+
+	return job, nil
 }

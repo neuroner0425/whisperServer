@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"mime/multipart"
+	"net/http"
 	"net/textproto"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	model "whisperserver/src/internal/domain"
+	"whisperserver/src/internal/integrations/storage"
 )
 
 func TestUploadService_Create_AudioHappyPath(t *testing.T) {
@@ -363,5 +365,168 @@ func TestUploadService_Create_DurableTaskQueue(t *testing.T) {
 	enq := q.enqueued[0]
 	if enq.JobID != jobID || enq.Step != model.StepAVScan || enq.ResourceClass != model.ResourceClassMedia {
 		t.Fatalf("unexpected task: %+v", enq)
+	}
+}
+
+func TestUploadService_InitiateAndCompletePresigned(t *testing.T) {
+	tmp := t.TempDir()
+	store, err := storage.NewLocalStorage(tmp, storage.WithSecretKey("test-secret-key"))
+	if err != nil {
+		t.Fatalf("NewLocalStorage failed: %v", err)
+	}
+
+	q := &mockTaskQueue{}
+	var savedJob *model.Job
+	var savedJobID string
+	var outboxEvents []model.DomainEvent
+
+	s := NewUploadService(UploadServiceDeps{
+		MaxUploadSizeMB: 50,
+		DetectFileType:  func(string) string { return "audio" },
+		AllowedFile:     func(name string) bool { return strings.HasSuffix(name, ".mp3") || strings.HasSuffix(name, ".m4a") },
+		SortedExts:      func() []string { return []string{".mp3", ".m4a"} },
+		Storage:         store,
+		TaskQueue:       q,
+		SaveJobTx: func(tx model.Tx, id string, job *model.Job) error {
+			savedJobID = id
+			savedJob = job
+			return nil
+		},
+		JobFinder: func(id string) (*model.Job, error) {
+			if id == savedJobID && savedJob != nil {
+				return savedJob, nil
+			}
+			return nil, nil
+		},
+		InsertOutboxEvent: func(ctx context.Context, tx model.Tx, evt model.DomainEvent) (int64, error) {
+			outboxEvents = append(outboxEvents, evt)
+			return int64(len(outboxEvents)), nil
+		},
+	})
+
+	ctx := context.Background()
+
+	// 1. Validation Failures on Initiate
+	_, err = s.InitiatePresigned(ctx, UploadInitiateRequest{
+		OwnerID:  "",
+		Filename: "audio.mp3",
+	})
+	if err == nil {
+		t.Fatal("expected error on empty ownerID")
+	}
+
+	_, err = s.InitiatePresigned(ctx, UploadInitiateRequest{
+		OwnerID:  "u1",
+		Filename: "malicious.exe",
+	})
+	if err == nil {
+		t.Fatal("expected error on disallowed extension")
+	}
+
+	_, err = s.InitiatePresigned(ctx, UploadInitiateRequest{
+		OwnerID:  "u1",
+		Filename: "audio.mp3",
+		Size:     100 * 1024 * 1024, // 100MB > 50MB
+	})
+	if err == nil {
+		t.Fatal("expected error on oversized file")
+	}
+
+	// 2. Successful Initiate
+	initRes, err := s.InitiatePresigned(ctx, UploadInitiateRequest{
+		OwnerID:     "u1",
+		Filename:    "test.mp3",
+		Size:        5 * 1024 * 1024,
+		ContentType: "audio/mpeg",
+		Language:    "ko",
+	})
+	if err != nil {
+		t.Fatalf("InitiatePresigned failed: %v", err)
+	}
+	if initRes.JobID == "" || initRes.UploadURL == "" || initRes.StorageKey == "" {
+		t.Fatalf("invalid initiate response: %+v", initRes)
+	}
+
+	// 3. Complete before uploading to storage should fail
+	_, err = s.CompletePresigned(ctx, UploadCompleteRequest{
+		OwnerID:  "u1",
+		JobID:    initRes.JobID,
+		Filename: "test.mp3",
+	})
+	if err == nil {
+		t.Fatal("expected error when quarantine object does not exist")
+	}
+
+	// 4. Simulate direct client PUT upload to quarantine_raw
+	quarantineData := []byte("fake-mp3-quarantine-binary-data")
+	_, err = store.Put(ctx, initRes.StorageKey, quarantineData, "audio/mpeg")
+	if err != nil {
+		t.Fatalf("direct put failed: %v", err)
+	}
+
+	// 5. Successful Complete
+	job, err := s.CompletePresigned(ctx, UploadCompleteRequest{
+		OwnerID:     "u1",
+		JobID:       initRes.JobID,
+		Filename:    "test.mp3",
+		Language:    "ko",
+		Tags:        []string{"회의", "오디오"},
+		Description: "Presigned direct upload test",
+	})
+	if err != nil {
+		t.Fatalf("CompletePresigned failed: %v", err)
+	}
+	if job.StatusCode != model.JobStatusPendingCode {
+		t.Fatalf("expected pending status code %d, got %d", model.JobStatusPendingCode, job.StatusCode)
+	}
+	if savedJobID != initRes.JobID || savedJob == nil {
+		t.Fatalf("job not saved via SaveJobTx: id=%s", savedJobID)
+	}
+
+	// 6. Verify Task enqueued for av_scan
+	if len(q.enqueued) != 1 {
+		t.Fatalf("expected 1 task enqueued, got %d", len(q.enqueued))
+	}
+	task := q.enqueued[0]
+	if task.JobID != initRes.JobID || task.Step != model.StepAVScan || task.ResourceClass != model.ResourceClassMedia {
+		t.Fatalf("unexpected task enqueued: %+v", task)
+	}
+
+	// 7. Verify Outbox event published
+	if len(outboxEvents) != 1 {
+		t.Fatalf("expected 1 outbox event, got %d", len(outboxEvents))
+	}
+	if outboxEvents[0].JobID != initRes.JobID || outboxEvents[0].EventType != model.EventTypeJobStatus {
+		t.Fatalf("unexpected outbox event: %+v", outboxEvents[0])
+	}
+
+	// 8. Adversarial Test: Cross-tenant user attempting CompletePresigned for another user's job must fail with 403 Forbidden
+	_, crossTenantErr := s.CompletePresigned(ctx, UploadCompleteRequest{
+		OwnerID:  "attacker-bob",
+		JobID:    initRes.JobID,
+		Filename: "hijacked.mp3",
+	})
+	if crossTenantErr == nil {
+		t.Fatal("expected CompletePresigned to fail with 403 Forbidden for cross-tenant attacker, got nil")
+	}
+	he, ok := crossTenantErr.(*HTTPError)
+	if !ok || he.Status != http.StatusForbidden {
+		t.Fatalf("expected HTTP 403 Forbidden, got: %v", crossTenantErr)
+	}
+
+	// 9. Adversarial Test: CompletePresigned on non-existent job (with quarantined object) must fail with 403 Forbidden
+	nonExistKey := "jobs/non-existent-job-id/quarantine_raw"
+	_, _ = store.Put(ctx, nonExistKey, []byte("data"), "audio/mp3")
+	_, nonExistentErr := s.CompletePresigned(ctx, UploadCompleteRequest{
+		OwnerID:  "u1",
+		JobID:    "non-existent-job-id",
+		Filename: "test.mp3",
+	})
+	if nonExistentErr == nil {
+		t.Fatal("expected CompletePresigned to fail with 403 Forbidden for non-existent job, got nil")
+	}
+	heNonExist, ok := nonExistentErr.(*HTTPError)
+	if !ok || heNonExist.Status != http.StatusForbidden {
+		t.Fatalf("expected HTTP 403 Forbidden, got: %v", nonExistentErr)
 	}
 }

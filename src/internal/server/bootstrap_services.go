@@ -175,6 +175,10 @@ func newAppServices() appServices {
 		Now:                 time.Now,
 		NewJobID:            uuid.NewString,
 		TaskQueue:           taskQueue,
+		Storage:             store.GetBlobStorage(),
+		TxManager:           txMgr,
+		SaveJobTx:           store.SaveJobTx,
+		InsertOutboxEvent:   store.InsertOutboxEvent,
 		Spawn:               func(fn func()) { go fn() },
 	})
 	geminiRt := intgemini.New(intgemini.Config{
@@ -217,11 +221,14 @@ func newAppServices() appServices {
 	)
 	dispatcher.RegisterStepHandler(domain.StepAVScan, &worker.AVScanStepHandler{
 		Scanner: malwareScanner,
+		Storage: store.GetBlobStorage(),
 		Logf:    procLogf,
 		Errf:    procErrf,
 	})
 	dispatcher.RegisterStepHandler(domain.StepNormalize, &worker.NormalizeStepHandler{
 		BlobSvc:          blobSvc,
+		Storage:          store.GetBlobStorage(),
+		TmpFolder:        tmpFolder,
 		ConvertToAac:     intutil.ConvertToAac,
 		ConvertToWav:     intutil.ConvertToWav,
 		GetMediaDuration: intutil.GetMediaDuration,
@@ -230,6 +237,7 @@ func newAppServices() appServices {
 	})
 	dispatcher.RegisterStepHandler(domain.StepTranscribe, &worker.TranscribeStepHandler{
 		BlobSvc:       blobSvc,
+		Storage:       store.GetBlobStorage(),
 		WhisperRunner: whisperRt,
 		GetJob:        func(id string) *domain.Job { return runtime.GetJob(id) },
 		Logf:          procLogf,

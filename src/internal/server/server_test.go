@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"whisperserver/src/internal/domain"
+	"whisperserver/src/internal/integrations/storage"
 	store "whisperserver/src/internal/repo/sqlite"
 	intruntime "whisperserver/src/internal/runtime"
 	"whisperserver/src/internal/service"
@@ -53,6 +54,14 @@ func TestBootstrap_LifecycleAndDurableWiringE2E(t *testing.T) {
 	if err := store.Init(tempDir); err != nil {
 		t.Fatalf("store.Init failed: %v", err)
 	}
+
+	rawDB := store.GetRawDBForTest()
+	if _, err := rawDB.Exec("INSERT OR IGNORE INTO users (id, login_id, email, password_hash) VALUES ('owner-test-e2e', 'testuser', 'owner@example.com', 'hash')"); err != nil {
+		t.Fatalf("insert user failed: %v", err)
+	}
+
+	memStorage := storage.NewMemoryStorage()
+	store.SetBlobStorage(memStorage, "memory")
 
 	appRuntime = intruntime.New(intruntime.Config{
 		TmpFolder: tmpFolder,
@@ -128,4 +137,67 @@ func TestBootstrap_LifecycleAndDurableWiringE2E(t *testing.T) {
 
 	svc.dispatcher.Stop()
 	svc.outboxRelay.Stop()
+
+	// 5. Phase 2: Presigned Direct Upload & Media URL E2E verification
+	initRes, err := svc.uploadSvc.InitiatePresigned(context.Background(), service.UploadInitiateRequest{
+		OwnerID:     "owner-test-e2e",
+		Filename:    "presigned_lecture.mp3",
+		Size:        1024 * 512,
+		ContentType: "audio/mpeg",
+		Language:    "ko",
+	})
+	if err != nil {
+		t.Fatalf("InitiatePresigned failed: %v", err)
+	}
+	if initRes.JobID == "" || initRes.UploadURL == "" || initRes.StorageKey == "" {
+		t.Fatalf("unexpected InitiatePresigned result: %+v", initRes)
+	}
+
+	// Direct PUT upload to storage
+	audioData := []byte("audio-mp3-binary-data-for-presigned-test")
+	_, err = store.GetBlobStorage().Put(context.Background(), initRes.StorageKey, audioData, "audio/mpeg")
+	if err != nil {
+		t.Fatalf("direct storage.Put failed: %v", err)
+	}
+
+	// Complete presigned upload
+	completedJob, err := svc.uploadSvc.CompletePresigned(context.Background(), service.UploadCompleteRequest{
+		OwnerID:     "owner-test-e2e",
+		JobID:       initRes.JobID,
+		Filename:    "presigned_lecture.mp3",
+		Language:    "ko",
+		Tags:        []string{"강의", "E2E"},
+		Description: "Presigned E2E Test",
+	})
+	if err != nil {
+		t.Fatalf("CompletePresigned failed: %v", err)
+	}
+	if completedJob.StatusCode != domain.JobStatusPendingCode {
+		t.Fatalf("expected pending status code %d, got %d", domain.JobStatusPendingCode, completedJob.StatusCode)
+	}
+
+	// Verify task enqueued for presigned job
+	var presignedTaskCount int
+	row = db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM tasks WHERE job_id = ? AND step = 'av_scan'", initRes.JobID)
+	if err := row.Scan(&presignedTaskCount); err != nil {
+		t.Fatalf("query tasks for presigned job failed: %v", err)
+	}
+	if presignedTaskCount != 1 {
+		t.Fatalf("expected 1 av_scan task for presigned job, got %d", presignedTaskCount)
+	}
+
+	// Verify PresignGet media URL generation
+	mediaURL, err := store.GetBlobStorage().PresignGet(context.Background(), initRes.StorageKey, "download_lecture.mp3", 10*time.Minute)
+	if err != nil {
+		t.Fatalf("PresignGet failed: %v", err)
+	}
+	if mediaURL == "" {
+		t.Fatal("expected non-empty presigned mediaURL")
+	}
+}
+
+// TestBootstrap_PresignedUploadAndMediaURL_E2E resolves GAP-01 by explicitly providing
+// the designated E2E test target name for presigned upload and media URL lifecycle.
+func TestBootstrap_PresignedUploadAndMediaURL_E2E(t *testing.T) {
+	TestBootstrap_LifecycleAndDurableWiringE2E(t)
 }
