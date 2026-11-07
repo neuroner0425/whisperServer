@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -283,4 +284,49 @@ func isS3NotFound(err error) bool {
 	}
 	resp := minio.ToErrorResponse(err)
 	return resp.Code == "NoSuchKey" || resp.Code == "NotFound" || strings.Contains(strings.ToLower(err.Error()), "not found")
+}
+
+// PresignPut generates a presigned URL for direct client PUT upload.
+func (s *S3Storage) PresignPut(ctx context.Context, key, contentType string, expires time.Duration) (string, error) {
+	if s == nil || s.client == nil {
+		return "", errors.New("s3_storage: storage is not initialized")
+	}
+	if strings.TrimSpace(key) == "" {
+		return "", errors.New("s3_storage: key must not be empty")
+	}
+	if expires <= 0 {
+		return "", errors.New("s3_storage: expires must be positive")
+	}
+
+	u, err := s.client.PresignedPutObject(ctx, s.bucket, key, expires)
+	if err != nil {
+		return "", fmt.Errorf("s3_storage: presign put %q failed: %w", key, err)
+	}
+	return u.String(), nil
+}
+
+// PresignGet generates a presigned URL for direct client GET download.
+// If downloadFilename is non-empty, response-content-disposition is set.
+func (s *S3Storage) PresignGet(ctx context.Context, key, downloadFilename string, expires time.Duration) (string, error) {
+	if s == nil || s.client == nil {
+		return "", errors.New("s3_storage: storage is not initialized")
+	}
+	if strings.TrimSpace(key) == "" {
+		return "", errors.New("s3_storage: key must not be empty")
+	}
+	if expires <= 0 {
+		return "", errors.New("s3_storage: expires must be positive")
+	}
+
+	var reqParams url.Values
+	if downloadFilename != "" {
+		reqParams = make(url.Values)
+		reqParams.Set("response-content-disposition", fmt.Sprintf("attachment; filename=%q", downloadFilename))
+	}
+
+	u, err := s.client.PresignedGetObject(ctx, s.bucket, key, expires, reqParams)
+	if err != nil {
+		return "", fmt.Errorf("s3_storage: presign get %q failed: %w", key, err)
+	}
+	return u.String(), nil
 }

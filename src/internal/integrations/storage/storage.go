@@ -39,8 +39,16 @@ func NopReadSeekCloser(r io.ReadSeeker) ReadSeekCloser {
 	return nopReadSeekCloser{ReadSeeker: r}
 }
 
+// Presigner provides capabilities to generate temporary presigned URLs for direct upload and download.
+type Presigner interface {
+	PresignPut(ctx context.Context, key, contentType string, expires time.Duration) (string, error)
+	PresignGet(ctx context.Context, key, downloadFilename string, expires time.Duration) (string, error)
+}
+
 // Storage is the unified contract for blob and object persistence.
 type Storage interface {
+	Presigner
+
 	// Put stores binary data under the given key.
 	Put(ctx context.Context, key string, data []byte, contentType string) (ObjectInfo, error)
 

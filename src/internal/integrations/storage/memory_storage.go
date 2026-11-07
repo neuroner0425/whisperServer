@@ -3,7 +3,10 @@ package storage
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"io"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -154,4 +157,23 @@ func (s *MemoryStorage) Stat(ctx context.Context, key string) (ObjectInfo, error
 		ContentType:  obj.contentType,
 		LastModified: obj.updatedAt,
 	}, nil
+}
+
+// PresignPut returns a mock presigned upload URL for testing.
+func (s *MemoryStorage) PresignPut(ctx context.Context, key, contentType string, expires time.Duration) (string, error) {
+	if strings.TrimSpace(key) == "" {
+		return "", errors.New("memory_storage: key must not be empty")
+	}
+	return "memory://put/" + key, nil
+}
+
+// PresignGet returns a mock presigned download URL for testing.
+func (s *MemoryStorage) PresignGet(ctx context.Context, key, downloadFilename string, expires time.Duration) (string, error) {
+	if strings.TrimSpace(key) == "" {
+		return "", errors.New("memory_storage: key must not be empty")
+	}
+	if downloadFilename != "" {
+		return fmt.Sprintf("memory://get/%s?filename=%s", key, url.QueryEscape(downloadFilename)), nil
+	}
+	return "memory://get/" + key, nil
 }
